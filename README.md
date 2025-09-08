@@ -27,8 +27,8 @@ Major components
 - LOD0: leaves representing raw tokens/chunks or multimodal leaf latents.
 - Higher LODs (LOD1…LOD5): summaries of contiguous child spans (mipmap/clipmap style).
 - Parent invariants: parent = learned aggregation of children (attention pool + MLP); parents must be present when any child is present. Optionally store children as residuals relative to parents.
-- Integrity and provenance: content‑addressed nodes (Merkle‑like), signed provenance, timestamps, modality tags, trust scores. Forgetting a leaf triggers re‑summarization cascades.
-- Storage/indexing: simple KV store (e.g., SQLite/LMDB) initially; optional PQ compression and HNSW indices for anchor finding at scale.
+- Incremental LOD tree updates (async).  Learned storage compaction (compression and forgetting).
+- Storage/indexing: simple file storage with fixed sized tokens/latents provides fast batched access to lifetime context. focus/de-focus process eliminates the vector-database style queries found in RAG.
 
 2) Working Context (mixed‑LOD)
 - Fixed budget (e.g., 128k latents), always maintains full coverage at some LOD (e.g., LOD5) while selectively paging in finer LODs where useful.
