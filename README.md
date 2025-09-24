@@ -5,16 +5,19 @@ Virtualized, hierarchical lifetime memory for transformers. Inspired by id Softw
 Status: early research prototype and design doc. Contributions welcome.
 
 Overview
-- Inspiration (MegaTexture): id Tech’s virtual texturing streams just the visible, necessary mip tiles into GPU memory, guaranteeing coarse coverage of the whole world and paging in detail on demand. Mega Context applies the same idea to transformer context.
-- Core idea: store a lifetime of tokens as a hierarchical LOD tree of latents (LOD0 ≈ tokens; higher LODs are summaries). At inference, maintain a mixed‑LOD working context with strict coverage guarantees (parents present if children present). A learned Lens chooses where to “focus” (expand to lower LOD) and where to “defocus” (collapse to higher LOD) under a fixed budget (e.g., 128k latents).
-- Why this matters: sub‑linear access to “infinite” context, smaller models that devote parameters to reasoning/planning instead of memorization, continual learning without catastrophic forgetting, privacy‑preserving personal vaults, and source‑traceable outputs.
-
+- Inspiration (MegaTexture): id Tech’s virtual texturing streams just the visible, necessary mip tiles into GPU memory, guaranteeing coarse coverage of the whole world and paging in detail on demand. Mega Context applies the same idea to transformer [fifetime] context.
+- Core idea: store (on disk) a lifetime of tokens as a hierarchical LOD tree of latents (LOD0 ≈ tokens; higher LODs are summaries). At inference, maintain a mixed‑LOD working context in GPU memory with strict coverage guarantees (parents present if children present). A learned Lens model asynchronously chooses where to “focus” (expand to lower LOD) and where to “defocus” (collapse to higher LOD) under a fixed budget (e.g., 128k working latents).
+- Why this matters: 
+  + sub‑linear access to “infinite” context
+  + smaller models that devote parameters to reasoning/planning instead of memorization
+  + continual learning without catastrophic forgetting
+  + source‑knowledge traceable outputs.
+    
 Key benefits
-- Nearly infinite virtualized context: lifetime memory grows without growing per‑step compute linearly.
+- Nearly infinite virtualized context: lifetime memory grows (on disk) without growing per‑step compute linearly.  LOD tree updated incrementally.
 - Smaller, smarter models: shift parameter budget from storing facts to reasoning, abstraction, planning.
-- Better latency/computational control: value‑of‑information driven zoom‑in where detail pays off.
-- Personalization and privacy: on‑device lifetime latent vaults with provenance and forgetfulness.
-- Interpretability and governance: answers cite the memory nodes used; content‑addressing enables audits.
+- Better latency/computational control: value‑of‑information driven zoom‑in where detail pays off.  Can zoom-out on detail to fit working context budget without permanent forgetfulness.
+- Interpretability: traceability to the lifetime memory used, rather than knowledge/hallucinations being mysteriously encoded in weights.
 
 Architecture at a glance
 - Lifetime Context (persistent): a content‑addressed LOD tree built bottom‑up from tokens/events; parents summarize children; optional residual/delta coding; provenance and versioning.
