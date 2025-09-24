@@ -1,6 +1,6 @@
 # Mega Context
 
-Virtualized, hierarchical lifetime memory for transformers. Inspired by id Software’s (MegaTexture)[https://www.youtube.com/watch?v=BiQCz2NjPR8], Mega Context treats “knowledge” like a clipmapped/mipmapped texture you can zoom in/out of under a fixed working‑set budget. Instead of stuffing facts into weights, we externalize them into a lifetime latent vault and let a lean reasoning core focus compute where it matters.
+Virtualized, hierarchical lifetime memory for transformers. Inspired by id Software’s [MegaTexture](https://www.youtube.com/watch?v=BiQCz2NjPR8), Mega Context treats “knowledge” like a clipmapped/mipmapped texture you can zoom in/out of under a fixed working‑set budget. Instead of stuffing facts into weights, we externalize them into a lifetime latent vault and let a lean reasoning core focus compute where it matters.
 
 Status: early research prototype and design doc. Contributions welcome.
 
