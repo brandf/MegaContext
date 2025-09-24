@@ -22,7 +22,7 @@ Key benefits
 Architecture at a glance
 - Lifetime Context (persistent): a content‑addressed LOD tree built bottom‑up from tokens/events; parents summarize children; optional residual/delta coding; provenance and versioning.
 - Working Context (ephemeral): a fixed‑size set of mixed‑LOD latents that cover the entire lifetime; updated asynchronously every decode step by the Lens and Streaming Latent Manager.
-- Reasoning Core: a transformer with heads for next‑token, latent‑level planning/prediction, and the Lens policy; reads from the working context via lightweight adapters (e.g., memory‑as‑prefix or Perceiver‑style cross‑attention).
+- Autoregressive Core: a standard transformer operating on the working context with heads for next‑token prediction and the Lens policy for updating the working context LODs.
 
 Major components
 
