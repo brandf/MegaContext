@@ -24,6 +24,8 @@ Architecture at a glance
 - Working Context (ephemeral): a fixed‑size set of mixed‑LOD latents that cover the entire lifetime; updated asynchronously every decode step by the Lens and Streaming Latent Manager.
 - Autoregressive Core: a standard transformer operating on the working context with heads for next‑token prediction and the Lens policy for updating the working context LODs.
 
+![Architecture](megacontext.png)
+
 Major components
 
 1) Lifetime Context (LOD tree)
