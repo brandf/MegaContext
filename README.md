@@ -28,6 +28,7 @@ In graphics, **MegaTexture** streams the visible portions of a vast texture map 
 The core intuition that's motivating this work is that long context is only useful if the model can focus in the relevant parts and ignore distractors (efficiently).  
 "Relevant parts" is inherently non-causal (something that wasn't previously relevant can become relevant), so this implies dynamic focusing/defocusing.
 Exciting new future LLM scenarios will be unlocked at 100M+ context lengths, and at this scale both memory and compute requirements must be sub-linear to be practical for widespread consumer applications.
+
 ---
 
 ## Grand vision: why this matters
