@@ -35,9 +35,9 @@ MegaContext treats context management as a **first-class architectural component
 
 ### 🌐 Core knowledge as dynamic system prompt
 Shipping LLMs with a **core lifetime context** transforms in-context learning:  
-the model boots with a massive “system prompt” of structured world knowledge that updates hourly from external data—without retraining weights.  
-A cloud-hosted MegaContext model could refresh its understanding of the world continually, combining retrieval and reasoning in a unified pipeline.
-
+the model boots with a massive “system prompt” of structured world knowledge that updates externally and without retraining weights.  
+- A cloud-hosted MegaContext model could refresh its understanding of the world continually, combining retrieval and reasoning in a unified pipeline.
+- An agentic coding system could provide an entire codebase as a system prompt (lifetime context), eliminating the expensive / error prone processes of reading parts of the projects code.
 ---
 
 ## POC scope & constraints
