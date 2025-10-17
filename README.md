@@ -22,8 +22,8 @@ MegaContext removes this limit by separating:
 
 ### Analogy: MegaTexture → MegaContext
 This is not required to understand MegaContext, but for those that are interested in learning about the inspiration [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
-In graphics, **MegaTexture** streams the visible portions of a vast texture map into GPU memory at appropriate resolution.  
-**MegaContext** does the same for text: only the high-resolution “tiles” (recent or relevant spans) are loaded into the model’s working memory, while distant regions remain summarized at coarse levels on disk.
+- In graphics, **MegaTexture** streams the visible portions of a vast texture map into GPU memory at appropriate resolution.  
+- **MegaContext** does the same for text: only the high-resolution “tiles” (recent or relevant spans) are loaded into the model’s working memory, while distant regions remain summarized at coarse levels on disk.
 
 ### Intuitions / Motivation
 The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors (efficiently).  
