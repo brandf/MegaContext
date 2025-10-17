@@ -1,7 +1,12 @@
 # MegaContext — Learned Context Compression & Focus for Frozen LLMs
 
-*A system architecture for virtualized LLM memory.  MegaContext compresses a model’s lifetime context into a hierarchical summary tree and dynamically “focuses” relevant regions into a fixed-size working context at inference time.  This document is both a conceptual overview and a technical design spec for an initial proof-of-concept (POC).*
+*A system architecture for virtualized LLM memory. This document is both a conceptual overview and a technical design spec for an initial proof-of-concept (POC).*
 
+---
+TL;DR — MegaContext
+MegaContext is a proposed system architecture for virtualized LLM context - think “MegaTexture for text.”, if you're familiar with this graphics concept.
+It separates a model’s context into a lifetime context (a hierarchical summary tree stored on disk) and a working context (a fixed-size mix of tokens and summaries on GPU).  A standard (even pre-trained) LLM then operates on the working context.
+A lightweight learned Lens model (and streaming Allocator) continuously/incrementally refocus the full lifetime context onto the working context, giving the model effectively infinite memory at constant compute.
 ---
 
 ## Why MegaContext?
@@ -16,6 +21,10 @@ MegaContext removes this limit by separating:
 In graphics, **MegaTexture** streams the visible portions of a vast texture map into GPU memory at appropriate resolution.  
 **MegaContext** does the same for text: only the high-resolution “tiles” (recent or relevant spans) are loaded into the model’s working memory, while distant regions remain summarized at coarse levels on disk.
 
+### Intuitions / Motivation
+The core intuition that's motivating this work is that long context is only useful if the model can focus in the relevant parts and ignore distractors (efficiently).  
+"Relevant parts" is inherently non-causal (something that wasn't previously relevant can become relevant), so this implies dynamic focusing/defocusing.
+Exciting new future LLM scenarios will be unlocked at 100M+ context lengths, and at this scale both memory and compute requirements must be sub-linear to be practical for widespread consumer applications.
 ---
 
 ## Grand vision: why this matters
