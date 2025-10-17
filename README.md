@@ -140,7 +140,8 @@ The **Allocator** receives the focus scores `{u_i}` and updates the *level-of-de
 ### Why dynamic LOD matters
 Traditional compression methods summarize once and lose detail forever.  
 MegaContext continually re-evaluates importance: if a previously collapsed region becomes relevant again, it can be expanded back into its children summaries or raw tokens.  
-This enables the model’s effective memory to **evolve over time** as new information arrives.
+Note that this expansion is NOT a lossy decoding of the summary latent - the lifetime context preserves the full token-level details on disk (or in RAM for the POC), so the LLM has full access to the whole lifetime context, just not all at once.
+This enables the model’s effective memory to **evolve over time** as new information arrives.  Similar to how you're now thinking about your first kiss 😘
 
 ### Greedy two-phase policy (POC)
 1. **Collapse phase:** if over budget, greedily collapse low-focus sibling spans until within limit.  
