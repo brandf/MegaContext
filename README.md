@@ -57,10 +57,10 @@ A cloud-hosted MegaContext model could refresh its understanding of the world co
 ## System overview
 
 ```
-Streaming text  ──►  Lifetime Summary Tree  ──►  Allocator ──► Working Context  ──►  Frozen LLM ──► Next Token Prediction
-                               ▲                    ▲                │   │  ▲                             │
-                               │                    ┕━━━━━━━Lens━━━━━┚   │  ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┚
-                               ┕━━━━━━━━━━━━━━━━━━━━━━━Summarizer━━━━━━━━┚                      
+Streaming text  ──►  Lifetime Summary Tree  ──►  Allocator ──► Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
+                               ▲                    ▲                │   │  ▲                                  │
+                               │                    ┕━━━━━━━Lens━━━━━┛   │  ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+                               ┕━━━━━━━━━━━━━━━━━━━━━━━Summarizer━━━━━━━━┛
                           
 ```
 
@@ -72,8 +72,8 @@ Streaming text  ──►  Lifetime Summary Tree  ──►  Allocator ──►
 | Setup | Lifetime tokens | Active tokens | KV-cache | Disk I/O / step | Notes |
 |-------|-----------------|----------------|-----------|-----------------|-------|
 | **Vanilla LLM** | 32 k | 32 k | ~2 GB | n/a | context-limited |
-| **MegaContext (2-lvl)** | ~33 M | 8 k | ~0.5 GB | few MB | constant compute per step |
-| **Future** | billions | 8 k | same 0.5 GB | 10–50 MB/s | fits consumer SSD bandwidth |
+| **MegaContext (POC)** | ~33 M | 8 k | ~0.5 GB | few MB | constant compute per step |
+| **MegaContext (Future)** | billions | 32 k | ~2 GB | 10–50 MB/s | fully trained base model |
 
 Per-step compute ≈ base decode cost; summarization and Lens overhead < 1 %.
 
