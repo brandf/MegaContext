@@ -96,8 +96,8 @@ At any step, its total token cost ≤ `W_max` (e.g., 8 k).
 ## The Lens — how focus is decided
 
 ### Why “Lens”?
-Imagine the working context as the image projected through a **dynamic-shaped lens** that focuses and defocuses regions of the lifetime context.  
-The Lens determines *where* to zoom in (expand summaries into details) and *where* to blur (collapse details into summaries) — keeping total compute constant.
+Imagine the working context as the image projected through a **dynamic-shaped lens** that focuses and defocuses regions within the full lifetime context.  
+The Lens determines *where* to focus (expand summaries into details) and *where* to defocus (collapse details into summaries) — keeping total compute/memory constant as the lifetime context grows.
 
 ### What it operates on
 - The Lens reads the **working context** (not the lifetime tree).  
