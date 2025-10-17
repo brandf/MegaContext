@@ -21,7 +21,7 @@ MegaContext removes this limit by separating:
 - **Working context** — a small, fixed-size slice of that history (e.g., 8k–32k tokens) mixed from raw tokens and learned summaries, fed to the frozen LLM for each decoding step.
 
 ### Analogy: MegaTexture → MegaContext
-This is not required to understand MegaContext, but for those that are interested in learning about the inspiration (this video)[https://www.youtube.com/watch?v=BiQCz2NjPR8] provides a good overview of the problems Mega Texture solves.
+This is not required to understand MegaContext, but for those that are interested in learning about the inspiration [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
 In graphics, **MegaTexture** streams the visible portions of a vast texture map into GPU memory at appropriate resolution.  
 **MegaContext** does the same for text: only the high-resolution “tiles” (recent or relevant spans) are loaded into the model’s working memory, while distant regions remain summarized at coarse levels on disk.
 
