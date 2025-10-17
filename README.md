@@ -59,8 +59,8 @@ A cloud-hosted MegaContext model could refresh its understanding of the world co
 ```
 Streaming text  ──►  Lifetime Summary Tree  ──►  Allocator ──► Working Context  ──►  Frozen LLM ──► Next Token Prediction
                                ▲                    ▲                │   │  ▲                             │
-                               │                    │-------Lens-----│   │  │-----------------------------│
-                               │-------------------------Summarizer------│                      
+                               │                    ┕━━━━━━━Lens━━━━━┚   │  ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┚
+                               ┕━━━━━━━━━━━━━━━━━━━━━━━Summarizer━━━━━━━━┚                      
                           
 ```
 
