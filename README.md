@@ -54,6 +54,19 @@ A cloud-hosted MegaContext model could refresh its understanding of the world co
 
 ---
 
+## Components
+
+### 1️⃣ Lifetime summary tree
+Built incrementally as text streams in:
+- Every 32 tokens → 1 summary (Level 1).  
+- Every 32 Level-1 summaries → 1 Level-2 summary.  
+- Summaries are stored with metadata (token range, RoPE center, parent/child IDs) and can be serialized to disk.
+
+### 2️⃣ Working context
+A fixed-size mixture of raw tokens and summaries forming a contiguous window over the lifetime tree.  
+At any step, its total token cost ≤ `W_max` (e.g., 8 k).
+
+---
 ## System overview
 
 ```
@@ -104,20 +117,6 @@ Per-step compute ≈ base decode cost; summarization and Lens overhead < 1 %.
 - A **full 32-ary tree** only adds ~**3.2%** storage over leaves when stored at the **same precision** (factor 32/31), so multilevel LOD itself is cheap; **precision and pruning dominate** total footprint.  
 - With **8-bit quantization** and **reasonable pruning** of raw leaves (e.g., keep only salient 0.5–1%), plus straightforward **entropy coding**, **a decade of continuous 500 Hz, 4k-dim features** compresses to **single-digit TBs**—practical for local SSD arrays.  
 - This makes a **lifelong, high-bandwidth memory** feasible: raw details can be recovered where preserved; elsewhere, multilevel summaries maintain global context with the **working context** handling on-demand re-expansion.
-
----
-
-## Components
-
-### 1️⃣ Lifetime summary tree
-Built incrementally as text streams in:
-- Every 32 tokens → 1 summary (Level 1).  
-- Every 32 Level-1 summaries → 1 Level-2 summary.  
-- Summaries are stored with metadata (token range, RoPE center, parent/child IDs) and can be serialized to disk.
-
-### 2️⃣ Working context
-A fixed-size mixture of raw tokens and summaries forming a contiguous window over the lifetime tree.  
-At any step, its total token cost ≤ `W_max` (e.g., 8 k).
 
 ---
 
