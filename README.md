@@ -424,6 +424,119 @@ It runs once per block, predicts balanced signed focus scores for every feature,
 
 ---
 
+## Joint Training (Alternating / “EM-style”): GistNet + LensNet + Base-LoRA
+
+**Goal:** Let all three modules co-adapt without full end-to-end backprop through the discrete Allocator or long unrolls.  
+**Method:** Short alternating phases where some modules are frozen while others learn from on-policy signals produced by the frozen parts. Repeat for a few cycles.
+
+### What “EM-style” means here
+We alternate optimization across modules:
+- **E-like step:** hold policy parts fixed to produce supervision/targets (e.g., counterfactual utilities).
+- **M-like step:** update another module to better fit those targets.
+It’s not exact EM; it’s an **alternating optimization schedule** that stabilizes joint training.
+
+### Modules
+- **GistNet** `Gist` (32→1, two levels; substitutability objective)
+- **LensNet** `LensNet` (dual cross-attn 8k→6→8k; signed focus scores)
+- **Base-LoRA** `LoRA` (tiny adapters on the base LLM to improve gist compatibility)
+- **Allocator** is always **discrete greedy** (no relaxation needed)
+
+### Phase B1 — Update GistNet (fix LensNet + LoRA)
+**Fix:** `LensNet`, `LoRA`, `Allocator`  
+**Update:** `Gist`
+
+**Procedure (on-policy):**
+1. Build/refresh lifetime trees with current `Gist`.
+2. For each training block (size K=32): run `LensNet` + `Allocator` to pick expands/collapses; form the working context used by the base LLM.
+3. Optimize **GistNet** on spans touched in this block using:
+   - **Substitutability loss**: KL(full || replaced) or ΔNLL@H (H=32–128) for the gist that *was actually* inserted.
+   - **Stability loss** (optional): L2 between current gist and previous checkpoint to avoid drift.
+   - **Boundary aux** (optional): light reconstruction on edge tokens.
+
+**Intuition:** With the current focusing policy fixed, make gists better drop-in replacements for *exactly the places the policy cares about*.
+
+### Phase B2 — Update LensNet (fix GistNet + LoRA)
+**Fix:** `Gist`, `LoRA`  
+**Update:** `LensNet`
+
+**Procedure:**
+1. Using the fixed `Gist`, generate **counterfactual labels** on on-policy snapshots:
+   - For candidate expands/collapses in the current working context, compute ΔNLL/ΔKL (batched).
+   - Convert to **signed utility per token** (expand positive; collapse negative).
+2. Train `LensNet` with:
+   - **Signed regression + ranking** (within snapshot)
+   - **Zero-sum budget** regularizer (token-cost weighted)
+   - **Legality** penalties; keep runtime masking
+   - **Update-every-K** cadence (Lens runs once per block)
+
+**Intuition:** Given the current gists, learn a better focusing policy.
+
+
+### Phase B3 — Update Base-LoRA (fix GistNet + LensNet)
+**Fix:** `Gist`, `LensNet`  
+**Update:** `LoRA` (small ranks; keep it tiny)
+
+**Where to place LoRA (recommended):**
+- Input embedding projection
+- QKV/O of the **first 2 attention blocks** *or* the **last 2** (pick one set; not both)
+
+**Losses:**
+- **Task NLL@H** with the *discrete* working context produced by `LensNet+Allocator`
+- **Substitutability keep-alive** (weak): prevents gist semantics drifting away from what the base understands
+- (Optional) **KL to teacher** if you have a larger teacher-with-MegaContext
+
+**Intuition:** Slightly adapt the base to “like” gist tokens and the current WC geometry (positional anchoring, variance, etc.).
+
+
+### Schedule & Hyperparameters
+
+- **Cycle length:** B1 → B2 → B3 = **one cycle**. Repeat **3–5 cycles**.
+- **Step counts per phase (per cycle):**  
+  - B1 (GistNet): 2–4k steps  
+  - B2 (LensNet): 2–4k steps  
+  - B3 (LoRA): 1–2k steps  
+- **Batching:** mixed long-context tasks; block size K=32; horizon H=64.
+- **Optimizers:** AdamW (bf16), cosine LR with warmup per phase.
+- **Checkpoints:** save after each phase; early-stop on validation **Loss@H vs. token-budget**.
+
+
+### Data flow per cycle (pseudo)
+
+1. **B1:**  
+   - Freeze `LensNet`, `LoRA`.  
+   - Decode blocks with current WC (from LensNet+Allocator).  
+   - Update `Gist` using on-policy substitutability losses on the replaced spans.
+
+2. **B2:**  
+   - Freeze `Gist`, `LoRA`.  
+   - From the same blocks, compute counterfactual utilities (expand/collapse candidates).  
+   - Update `LensNet` with signed utilities + budget/legality losses.
+
+3. **B3:**  
+   - Freeze `Gist`, `LensNet`.  
+   - Run normal blocks (LensNet+Allocator active) and update `LoRA` on Task NLL@H (+ weak substitutability keep-alive).
+
+
+### Stability & efficiency tips
+
+- **Warm starts:** Do a short **sequential pretrain** (GistNet then LensNet) before the first B1; it reduces early oscillations.
+- **Small LoRA ranks:** r=4–16, low LR; the goal is interface alignment, not knowledge injection.
+- **Hysteresis in Allocator:** min residency steps to prevent expand/collapse thrash during B2/B3.
+- **On-policy labeling:** Always regenerate ΔNLL labels *after* the last B1 so LensNet trains on current gists.
+- **Curriculum:** start with narrative/doc tasks; add lists/tables/code once stable.
+- **Telemetry:** track (a) Loss@H vs budget, (b) swap rate, (c) residency time, (d) non-causal C1/C2 tests.
+
+
+### When to stop
+- **Validation Loss@H vs budget** improves then plateaus across cycles.
+- **Swap rate** stabilizes; no ping-pong.
+- **Ablations:** freezing any one of {GistNet, LensNet, LoRA} now causes a measurable drop.
+
+**Outcome:** All three modules co-learn: **GistNet** encodes what the policy needs, **LensNet** chooses expansions that actually help, and **LoRA** nudges the base LLM to be friendlier to mixed-LOD inputs—without the cost/fragility of full end-to-end training.
+
+
+---
+
 ## Comparison: MegaContext vs. RAG
 
 | Aspect | RAG | MegaContext |
