@@ -318,21 +318,24 @@ This enables the model’s effective memory to **evolve over time** as new infor
 
 2. **Stage 1 — Gists read the context (8k → 6)**  
    Each gist slot attends across all working-context features to build a condensed, query-conditioned representation:
-   \[
-   \tilde G = \text{Softmax}\!\big((G W_Q)(X W_K)^\top / \sqrt d\big)(X W_V)
-   \]
+
+```
+tilde_G = Softmax(((G W_Q)(X W_K)^T) / sqrt(d)) * (X W_V)
+```
 
 3. **Stage 2 — Context reads refined gists (6 → 8k)**  
    The 8 k context features query the six updated gists to broadcast relevance back:
-   \[
-   \tilde X = \text{Softmax}\!\big((X W'_Q)(\tilde G W'_K)^\top / \sqrt d\big)(\tilde G W'_V)
-   \]
+
+```
+tilde_X = Softmax(((X W'_Q)(tilde_G W'_K)^T) / sqrt(d)) * (tilde_G W'_V)
+```
 
 4. **Stage 3 — Per-feature scoring head**  
-   Concatenate each updated context vector `\tilde X_i` with its metadata `φ_i` and predict a scalar score:
-   \[
-   u_i = \text{MLP}(\text{LN}([\tilde X_i, φ_i])) \rightarrow \mathbb{R}
-   \]
+   Concatenate each updated context vector `tilde_X_i` with its metadata `φ_i` and predict a scalar score:
+
+```
+u_i = MLP(LN([tilde_X_i, φ_i])) -> R
+```
 
 5. **Stacks / refinement**  
    1–3 stacked dual-attn blocks may be used for iterative refinement; parameters `(W_Q,K,V)` are the only learned weights.
@@ -363,42 +366,36 @@ Each feature receives a **signed target utility** `y_i` derived from counterfact
 
 LensNet learns to regress and rank these utilities.
 
-\[
-\mathcal{L}_{\text{reg}} = \frac{1}{|M|}\sum_{i\in M}(u_i - y_i)^2,
-\qquad
-\mathcal{L}_{\text{rank}} = \text{softplus}(-(u_i-u_j))\text{ for ordered pairs.}
-\]
+```
+L_reg  = (1 / |M|) * sum_{i in M} (u_i - y_i)^2
+L_rank = softplus(-(u_i - u_j))  # for ordered pairs
+```
 
 #### 2️⃣ Zero-sum budget regularizer
 To maintain constant working-context size:
-\[
-P=\sum_i c_i^{+}\,\text{ReLU}(u_i),\quad
-N=\sum_i c_i^{-}\,\text{ReLU}(-u_i)
-\]
-\[
-\mathcal{L}_{\text{budget}}=\big((P-N)/(ε+P+N)\big)^2
-\]
+
+```
+P = sum_i c_i_plus * ReLU(u_i)
+N = sum_i c_i_minus * ReLU(-u_i)
+L_budget = ((P - N) / (eps + P + N))^2
+```
 (`c_i^+` / `c_i^-` = token cost / refund.)  
 This encourages net-zero expand/defocus mass per block.
 
 #### 3️⃣ Legality penalties
 Prevent impossible actions:
-\[
-\mathcal{L}_{\text{illegal}}=
-\alpha\!\!\sum_{\text{L0}}\!\!\text{ReLU}(u_i)
-+\beta\!\!\sum_{\text{L2}}\!\!\text{ReLU}(-u_i)
-\]
-(\(\alpha,\beta≈0.3\)).  
+
+```
+L_illegal = alpha * sum_{L0} ReLU(u_i) + beta * sum_{L2} ReLU(-u_i)
+```
+(alpha, beta ≈ 0.3).  
 At inference, invalid directions are hard-masked to 0.
 
 #### 4️⃣ Total loss
-\[
-\mathcal{L}=
-\mathcal{L}_{\text{reg}}
-+0.5\,\mathcal{L}_{\text{rank}}
-+0.1\,\mathcal{L}_{\text{budget}}
-+\mathcal{L}_{\text{illegal}}
-\]
+
+```
+L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
+```
 
 ### Inference procedure
 
