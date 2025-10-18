@@ -8,7 +8,7 @@ MegaContext is a proposed system architecture for virtualized LLM context - thin
 
 It separates a model’s context into a lifetime context (a hierarchical gist tree stored on disk) and a working context (a fixed-size mix of tokens and gists on GPU).  A standard (even pre-trained) LLM then operates on the working context.
 
-A lightweight learned Lens model (and streaming Allocator) continuously/incrementally refocus the full lifetime context onto the working context, giving the model effectively infinite memory at constant compute.
+A lightweight learned LensNet (and streaming Allocator) continuously/incrementally refocus the full lifetime context onto the working context, giving the model effectively infinite memory at constant compute.
 
 ---
 
@@ -97,7 +97,7 @@ Streaming text  ──► 1️⃣ Lifetime Gist Tree  ──►  Allocator ─�
 | **MegaContext (POC)** | ~1 M | 8 k | ~0.5 GB | few MB | constant compute per step |
 | **MegaContext (Future)** | 1 B+ | 32 k | ~2 GB | 10–50 MB/s | fully trained base model |
 
-Per-step compute ≈ base decode cost; gist extraction and Lens overhead < 1 %.
+Per-step compute ≈ base decode cost; gist extraction and LensNet overhead < 1 %.
 
 ### Long-term storage example: lifetime memory for a 24/7 robot (10 years)
 
@@ -268,19 +268,19 @@ Stacked hierarchically, GistNet forms the **Lifetime Gist Tree** that supports s
 
 ---
 
-## The Lens — how focus is decided
+## LensNet — how focus is decided
 
 ### Why “Lens”?
-The Lens acts like an optical lens that dynamically **focuses** and **defocuses** regions within the lifetime context while keeping total compute constant.  
+LensNet acts like an optical lens that dynamically **focuses** and **defocuses** regions within the lifetime context while keeping total compute constant.  
 It predicts where to spend detail (expand gists into raw tokens) and where to blur (collapse raw tokens into gists), ensuring that the **fixed-size working context** maintains maximal relevance.
 
 ### What it operates on
-- The Lens reads the **working context** (not the lifetime tree).  
+- LensNet reads the **working context** (not the lifetime tree).  
   It analyzes the embeddings currently fed into the base LLM — the only state that resides on GPU.
 - It outputs one **focus score** per feature (token span or gist).
 
 ### Why non-causal is essential
-The Lens must understand *future queries* to know which past facts matter.
+LensNet must understand *future queries* to know which past facts matter.
 
 **Example**
 ```
@@ -290,10 +290,10 @@ C2: "My shirt is red. My pants are green. What color hat would match my shirt?"
 
 
 Because the base LLM is causal, the hidden states for “shirt” and “pants” are identical in C1 and C2; they never see the question.  
-A non-causal Lens can look at the full working context (including the query) and boost focus on the “shirt” fact.
+A non-causal LensNet can look at the full working context (including the query) and boost focus on the “shirt” fact.
 
 ### Conceptual overview
-- The Lens runs independently of the frozen base LLM.  
+- LensNet runs independently of the frozen base LLM.  
 - It operates directly on the **working context embeddings** (`~8k features`), not on live LLM hidden states.  
 - It conditions on a small **gist set** (`L2 + last 5 L1` gists, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.  
 - The model outputs one **signed focus score** `u_i` per feature:
@@ -314,7 +314,7 @@ This enables the model’s effective memory to **evolve over time** as new infor
    - `X ∈ R^{N×d}` — embeddings of all features in the working context (≈ 8 000 tokens or gists).  
    - `G ∈ R^{K×d}` — six gist embeddings from the tail of the context (L2 + 5 L1).  
    - `φ_i` — per-feature metadata (level, width, distance to cursor, system/user flags, etc.).  
-   - All embeddings are first **down-projected** to a compact Lens width `d_lens ≈ 512`.
+   - All embeddings are first **down-projected** to a compact LensNet width `d_lens ≈ 512`.
 
 2. **Stage 1 — Gists read the context (8k → 6)**  
    Each gist slot attends across all working-context features to build a condensed, query-conditioned representation:
@@ -342,7 +342,7 @@ With N = 8 000, K = 6, d = 512 ⇒ ~25 M mult-adds — trivial compared to the b
 
 ### Update cadence (block-wise refocus)
 
-The Lens runs **once every K tokens** (POC: K = 32).  
+LensNet runs **once every K tokens** (POC: K = 32).  
 During each block update:
 
 1. Gather the latest gists `G`.  
@@ -361,7 +361,7 @@ Each feature receives a **signed target utility** `y_i` derived from counterfact
 - Collapsible spans ⇒ negative `y_i < 0`  
 - Others ⇒ 0 / masked.
 
-The Lens learns to regress and rank these utilities.
+LensNet learns to regress and rank these utilities.
 
 \[
 \mathcal{L}_{\text{reg}} = \frac{1}{|M|}\sum_{i\in M}(u_i - y_i)^2,
@@ -422,7 +422,7 @@ At inference, invalid directions are hard-masked to 0.
 
 
 **In short:**  
-The Lens is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).  
+LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).  
 It runs once per block, predicts balanced signed focus scores for every feature, and guides the Allocator to keep the working context sharp, legal, and budget-neutral.
 
 ---
@@ -432,7 +432,7 @@ It runs once per block, predicts balanced signed focus scores for every feature,
 | Aspect | RAG | MegaContext |
 |---------|-----|-------------|
 | **Storage** | External documents, often text chunks in a vector DB | Hierarchical learned gists (vectors) directly aligned to the model’s lifetime |
-| **Retrieval trigger** | Query-time semantic search | Continuous, learned focus from the Lens |
+| **Retrieval trigger** | Query-time semantic search | Continuous, learned focus from LensNet |
 | **Integration** | Concatenate retrieved text to prompt | Replace/expand in working context with proper positional encoding |
 | **Training** | Separate retriever / generator | Single substitutability & focus training |
 | **Memory type** | Stateless look-up | Persistent evolving memory with reversible summarization |
@@ -444,11 +444,11 @@ MegaContext is *structurally* similar to RAG in that both pull relevant data int
 ## Training data & streaming behavior
 
 - **GistNet training:** any long-form corpus; each 32-token window provides (full vs gist) pairs.  
-- **Lens training:** logged working-context snapshots from real LLM runs.  Counterfactual losses (`expand`/`collapse`) computed offline.  
+- **LensNet training:** logged working-context snapshots from real LLM runs.  Counterfactual losses (`expand`/`collapse`) computed offline.  
 - **Streaming:** as new tokens arrive, the system:  
   1. Buffers 32 tokens → creates new L1 gist.  
   2. When 32 L1s exist → create L2 gist.  
-  3. Lens+Allocator decide which regions to expand/collapse before the next decode step.
+  3. LensNet+Allocator decide which regions to expand/collapse before the next decode step.
 
 Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata JSON.
 
@@ -457,7 +457,7 @@ Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata
 ## Evaluation plan
 
 - **Perplexity vs. token budget** (loss @ Horizon).  
-- **Causal vs. non-causal Lens** on C1/C2-style tests.  
+- **Causal vs. non-causal LensNet** on C1/C2-style tests.  
 - **Boundary artifacts** (information split across spans).  
 - **Stress test** at 1024× compression.  
 - **Memory & compute traces** verifying constant per-step cost.
@@ -482,7 +482,7 @@ Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata
 
 1. **32→1 GistNet** — implement & train substitutability.  
 2. **Lifetime Tree Builder** — streaming, 2-level hierarchy in RAM.  
-3. **Lens v1 (non-causal)** — implement query-conditioned scorer, train on offline labels.  
+3. **LensNet v1 (non-causal)** — implement query-conditioned scorer, train on offline labels.  
 4. **Allocator** — greedy expand/collapse, hysteresis.  
 5. **E2E POC** — run step-loop (score → allocate → update → decode).  
 6. **Evaluate** — loss vs budget, C1/C2 relevance, stress tests.
@@ -502,7 +502,7 @@ Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata
 ## License & contributions
 
 MIT License (suggested).  
-PRs welcome — please include reproducible tests for GistNet, Lens, allocator, and end-to-end demos.
+PRs welcome — please include reproducible tests for GistNet, LensNet, allocator, and end-to-end demos.
 
 ---
 
