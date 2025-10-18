@@ -12,18 +12,25 @@ A lightweight learned LensNet (and streaming Allocator) continuously/incremental
 
 ---
 
-## What is MegaContext?
+## How MegaContext Works
 
 Large language models are constrained by a fixed context window.  
 MegaContext removes this limit by separating:
 
-- **Lifetime context** — the complete interaction or document history (potentially millions or billions of tokens) stored as a *hierarchical gist tree* on disk or in RAM.  
-- **Working context** — a small, fixed-size slice of that history (e.g., 8k–32k tokens) mixed from raw tokens and learned gists, fed to the frozen LLM for each decoding step.
+- **Lifetime context** — the complete interaction or document history (potentially millions or billions of tokens) stored as a *hierarchical gist tree* on disk (RAM for the POC).  
+- **Working context** — a fixed 8k–32k token budget on GPU, mixing raw tokens with gists drawn from the lifetime tree. The frozen base LLM sees only this window.
+
+### Core components
+
+- **Lifetime gist tree** — built incrementally as text streams in (every 32 tokens → L1 gist; every 32 L1 gists → L2 gist; etc.).  
+- **Working context** — contiguous window over the tree; total token cost is capped by `W_max`.  
+- **GistNet** — a lightweight network that compresses local spans (e.g., 32→1) into *gists* that act as substitutable stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full lifetime history.  
+- **LensNet + allocator** — LensNet scores each working-context feature for expansion or collapse; a deterministic allocator applies those scores, streaming finer- or coarser-grained gists/tokens in and out while respecting the budget.
 
 ### Analogy: MegaTexture → MegaContext
 This is not required to understand MegaContext, but for those that are interested in learning about the inspiration [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
-- In graphics, **MegaTexture** streams the visible portions of a vast texture map into GPU memory at appropriate resolution.  
-- **MegaContext** does the same for text: only the high-resolution “tiles” (recent or relevant spans) are loaded into the model’s working memory, while distant regions stay represented by coarse gists.
+- In graphics, **MegaTexture** streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.  
+- **MegaContext** mirrors that idea for language: instead of mipmap tiles, it maintains embeddings at multiple levels of detail (token L0, gist L1, gist L2, …), yielding effectively unbounded context for a frozen LLM.
 
 ### Intuitions / Motivation
 The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors (efficiently).  
@@ -55,20 +62,6 @@ the model boots with a massive “system prompt” of structured world knowledge
 
 ---
 
-## Components
-
-### 1️⃣ Lifetime gist tree
-Built incrementally as text streams in:
-- Every 32 tokens → 1 gist (Level 1).  
-- Every 32 Level-1 gists → 1 Level-2 gist.  
-- etc.
-
-### 2️⃣ Working context
-A fixed-size mixture of raw tokens and gists forming a contiguous window over the lifetime tree.  
-- At any step, its total token cost ≤ `W_max` (e.g., 8 k).
-- The base LLM operates only on this context
-
----
 ## System overview
 
 ```
