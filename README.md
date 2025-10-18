@@ -160,6 +160,112 @@ GistNet alternates **self-attention** and **cross-attention** to gradually compr
 - Introduce a single learned slot query `S₀`.  
 - Perform cross-attention where the slot reads from the tokens:  
 
+```
+S1 = CrossAttn(query=S0, key=E1, value=E1)
+S1 = S1 + MLP(LN(S1)) # residual + feedforward
+```
+
+- `S1` is the first gist embedding for this 32-token span.
+
+#### Stage 3 — Expansion (1 → 32)
+- Expand information back into the 32-token space for refinement:  
+
+```
+E2 = CrossAttn(query=E1, key=S1, value=S1)
+E2 = E1 + MLP(LN(E2))
+```
+
+- Optionally run one self-attention block over `E2` to diffuse the gist info across tokens.
+
+#### Stage 4 — Final compression (32 → 1)
+- Run a second cross-attention with a fresh slot query derived from `S1`:  
+
+```
+S2 = S1 + ε
+s_star = CrossAttn(query=S2, key=E2, value=E2)
+s_star = LN(MLP(s_star))
+```
+- The result `s_star` is the final summary vector for the span and becomes a node in the lifetime summary tree.
+
+#### Stage 5 — Hierarchical stacking
+- Two 32→1 layers are stacked hierarchically (32² = 1024 tokens per top-level gist).  
+- The lower layer runs directly on token embeddings; the upper operates on lower-layer outputs.
+
+
+### Architectural properties
+| Property | Description |
+|-----------|--------------|
+| **Causal scope** | Operates strictly within 32-token windows; no long-range attention. |
+| **Parameter sharing** | Shared weights across all spans; upper and lower layers may share or specialize. |
+| **Complexity** | O(32²·d) per span — negligible compared to the base LLM. |
+| **Dimensionality** | Outputs match the base model’s embedding size `d`. |
+| **Positioning** | Gist inserted at the central token index for RoPE alignment. |
+| **Precision** | bf16 or fp16; supports later quantization for storage. |
+
+
+### Training objectives
+
+#### 1. Substitutability (primary)
+Train the model so that replacing a span with its gist minimally changes the base LLM’s predictions.
+
+For each training example:
+
+```
+Loss_subst = KL( P_base(x_{t+1:T} | E)
+|| P_base(x_{t+1:T} | E_replaced) )
+```
+or equivalently minimize the ΔNLL between the full and gist-replaced context over a short horizon (H = 32–128 tokens).
+
+#### 2. Reconstruction (optional)
+Encourage the gist to preserve enough information to approximate its original tokens:
+
+```
+Loss_recon = || E_reconstructed - E ||^2
+```
+
+#### 3. Contrastive span separation (optional)
+Discourage neighboring spans from collapsing to identical gists:
+
+```
+Loss_contrast = max(0, margin - cosine_similarity(s_i*, s_j*))
+```
+for adjacent spans (margin ≈ 0.2).
+
+Total loss:
+```
+Loss = Loss_subst + 0.1 * Loss_recon + 0.05 * Loss_contrast
+```
+
+### Implementation details (POC)
+| Item | Setting |
+|------|----------|
+| Window size | 32 tokens |
+| Slots | 1 (single learnable query) |
+| Layers per 32→1 block | 2 self + 2 cross |
+| Refinement stack | 32→1→32→1 |
+| Embedding dim | same as base LLM (e.g., 4096) |
+| Internal hidden width | 512 |
+| Attention heads | 8 |
+| RoPE | applied to token positions only (slots omit it) |
+| Activation | GELU |
+| Norm | Pre-LayerNorm |
+| Parameters | ~0.5M per layer |
+| Output | single `s*` vector per span |
+| Runtime | <1 ms per 32-token span on GPU |
+
+### Training pipeline (POC)
+1. **Dataset:** long-form text (4k–16k tokens), chunked into 32-token spans.  
+2. **Teacher:** frozen base LLM used for ΔNLL@H computation.  
+3. **Objective:** minimize ΔNLL@H between original and gist-replaced contexts.  
+4. **Curriculum:** start with contiguous text, then include structured data (lists, code, tables).  
+5. **Optimizer:** AdamW, lr = 1e-4, cosine decay, bf16 precision.  
+6. **Output:** store 32→1 and 1024→1 gists in the lifetime summary tree for later use by LensNet and Allocator.
+
+### Summary
+GistNet is a **local autoencoder for token spans** that learns to produce substitutable embeddings aligned with the base model’s token space.  
+It uses **self- and cross-attention refinement (32→1→32→1)** to compress meaning while remaining directly compatible with the base LLM’s embedding layer.  
+Stacked hierarchically, GistNet forms the **Lifetime Summary Tree** that supports scalable, virtualized context in MegaContext.
+
 ---
 
 ## The Lens — how focus is decided
