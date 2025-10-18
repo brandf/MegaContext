@@ -6,24 +6,24 @@
 ## TL;DR — MegaContext
 MegaContext is a proposed system architecture for virtualized LLM context - think “MegaTexture for text.”, if you're familiar with this graphics concept.
 
-It separates a model’s context into a lifetime context (a hierarchical summary tree stored on disk) and a working context (a fixed-size mix of tokens and summaries on GPU).  A standard (even pre-trained) LLM then operates on the working context.
+It separates a model’s context into a lifetime context (a hierarchical gist tree stored on disk) and a working context (a fixed-size mix of tokens and gists on GPU).  A standard (even pre-trained) LLM then operates on the working context.
 
 A lightweight learned Lens model (and streaming Allocator) continuously/incrementally refocus the full lifetime context onto the working context, giving the model effectively infinite memory at constant compute.
 
 ---
 
-## Why MegaContext?
+## What is MegaContext?
 
 Large language models are constrained by a fixed context window.  
 MegaContext removes this limit by separating:
 
-- **Lifetime context** — the complete interaction or document history (potentially millions or billions of tokens) stored as a *hierarchical summary tree* on disk or in RAM.  
-- **Working context** — a small, fixed-size slice of that history (e.g., 8k–32k tokens) mixed from raw tokens and learned summaries, fed to the frozen LLM for each decoding step.
+- **Lifetime context** — the complete interaction or document history (potentially millions or billions of tokens) stored as a *hierarchical gist tree* on disk or in RAM.  
+- **Working context** — a small, fixed-size slice of that history (e.g., 8k–32k tokens) mixed from raw tokens and learned gists, fed to the frozen LLM for each decoding step.
 
 ### Analogy: MegaTexture → MegaContext
 This is not required to understand MegaContext, but for those that are interested in learning about the inspiration [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
 - In graphics, **MegaTexture** streams the visible portions of a vast texture map into GPU memory at appropriate resolution.  
-- **MegaContext** does the same for text: only the high-resolution “tiles” (recent or relevant spans) are loaded into the model’s working memory, while distant regions remain summarized at coarse levels.
+- **MegaContext** does the same for text: only the high-resolution “tiles” (recent or relevant spans) are loaded into the model’s working memory, while distant regions stay represented by coarse gists.
 
 ### Intuitions / Motivation
 The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors (efficiently).  
@@ -72,7 +72,7 @@ A fixed-size mixture of raw tokens and gists forming a contiguous window over th
 ## System overview
 
 ```
-Streaming text  ──► 1️⃣ Lifetime Summary Tree  ──►  Allocator ──► 2️⃣ Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
+Streaming text  ──► 1️⃣ Lifetime Gist Tree  ──►  Allocator ──► 2️⃣ Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
                                ▲                    ▲                │   │  ▲                                  │
                                │                    ┕━━━━━LensNet━━━━┛   │  ┕━━━━━━━━━━Auto Regression━━━━━━━━━┛
                                ┕━━━━━━━━━━━━━━━GistNet━━━━━━━━━━━━━━━━━━━┛
@@ -97,7 +97,7 @@ Streaming text  ──► 1️⃣ Lifetime Summary Tree  ──►  Allocator �
 | **MegaContext (POC)** | ~1 M | 8 k | ~0.5 GB | few MB | constant compute per step |
 | **MegaContext (Future)** | 1 B+ | 32 k | ~2 GB | 10–50 MB/s | fully trained base model |
 
-Per-step compute ≈ base decode cost; summarization and Lens overhead < 1 %.
+Per-step compute ≈ base decode cost; gist extraction and Lens overhead < 1 %.
 
 ### Long-term storage example: lifetime memory for a 24/7 robot (10 years)
 
@@ -125,14 +125,14 @@ Per-step compute ≈ base decode cost; summarization and Lens overhead < 1 %.
 
 - A **full 32-ary tree** only adds ~**3.2%** storage over leaves when stored at the **same precision** (factor 32/31), so multilevel LOD itself is cheap; **precision and pruning dominate** total footprint.  
 - With **8-bit quantization** and **reasonable pruning** of raw leaves (e.g., keep only salient 0.5–1%), plus straightforward **entropy coding**, **a decade of continuous 500 Hz, 4k-dim features** compresses to **single-digit TBs**—practical for local SSD arrays.  
-- This makes a **lifelong, high-bandwidth memory** feasible: raw details can be recovered where preserved; elsewhere, multilevel summaries maintain global context with the **working context** handling on-demand re-expansion.
+- This makes a **lifelong, high-bandwidth memory** feasible: raw details can be recovered where preserved; elsewhere, multilevel gists maintain global context with the **working context** handling on-demand re-expansion.
 
 ---
 
-## GistNet — local summarization (32→1, two-layer tree)
+## GistNet — local gist extraction (32→1, two-layer tree)
 
 ### Purpose
-GistNet replaces short, fixed-length token sequences with compact **summary embeddings** ("gists") that can stand in for their original tokens inside the base LLM’s context.  
+GistNet replaces short, fixed-length token sequences with compact **gist embeddings** ("gists") that can stand in for their original tokens inside the base LLM’s context.  
 Each gist preserves the meaning of its 32-token span while freeing token budget for new information.  
 Stacking two 32→1 layers provides **1024× compression** in the proof of concept (POC).
 
@@ -142,8 +142,8 @@ Stacking two 32→1 layers provides **1024× compression** in the proof of conce
 | Symbol | Shape | Meaning |
 |---------|--------|---------|
 | `E ∈ R[32, d]` | 32 raw token embeddings (no contextualization) |
-| `S₀ ∈ R[K, d]` | learnable slot query (`K=1` for 32→1) |
-| `s* ∈ R[d]` | single summary vector aligned with base LLM embedding dim |
+| `G₀ ∈ R[K, d]` | learnable slot query (`K=1` for 32→1) |
+| `g* ∈ R[d]` | single gist vector aligned with base LLM embedding dim |
 
 ---
 
@@ -157,35 +157,35 @@ GistNet alternates **self-attention** and **cross-attention** to gradually compr
 - Output is `E1`, a locally contextualized version of the raw embeddings.
 
 #### Stage 2 — Compression (32 → 1)
-- Introduce a single learned slot query `S₀`.  
+- Introduce a single learned slot query `G₀`.  
 - Perform cross-attention where the slot reads from the tokens:  
 
 ```
-S1 = CrossAttn(query=S0, key=E1, value=E1)
-S1 = S1 + MLP(LN(S1)) # residual + feedforward
+G1 = CrossAttn(query=G0, key=E1, value=E1)
+G1 = G1 + MLP(LN(G1)) # residual + feedforward
 ```
 
-- `S1` is the first gist embedding for this 32-token span.
+- `G1` is the first gist embedding for this 32-token span.
 
 #### Stage 3 — Expansion (1 → 32)
 - Expand information back into the 32-token space for refinement:  
 
 ```
-E2 = CrossAttn(query=E1, key=S1, value=S1)
+E2 = CrossAttn(query=E1, key=G1, value=G1)
 E2 = E1 + MLP(LN(E2))
 ```
 
 - Optionally run one self-attention block over `E2` to diffuse the gist info across tokens.
 
 #### Stage 4 — Final compression (32 → 1)
-- Run a second cross-attention with a fresh slot query derived from `S1`:  
+- Run a second cross-attention with a fresh slot query derived from `G1`:  
 
 ```
-S2 = S1 + ε
-s_star = CrossAttn(query=S2, key=E2, value=E2)
-s_star = LN(MLP(s_star))
+G2 = G1 + ε
+g_star = CrossAttn(query=G2, key=E2, value=E2)
+g_star = LN(MLP(g_star))
 ```
-- The result `s_star` is the final summary vector for the span and becomes a node in the lifetime summary tree.
+- The result `g_star` is the final gist vector for the span and becomes a node in the lifetime gist tree.
 
 #### Stage 5 — Hierarchical stacking
 - Two 32→1 layers are stacked hierarchically (32² = 1024 tokens per top-level gist).  
@@ -227,7 +227,7 @@ Loss_recon = || E_reconstructed - E ||^2
 Discourage neighboring spans from collapsing to identical gists:
 
 ```
-Loss_contrast = max(0, margin - cosine_similarity(s_i*, s_j*))
+Loss_contrast = max(0, margin - cosine_similarity(g_i*, g_j*))
 ```
 for adjacent spans (margin ≈ 0.2).
 
@@ -250,7 +250,7 @@ Loss = Loss_subst + 0.1 * Loss_recon + 0.05 * Loss_contrast
 | Activation | GELU |
 | Norm | Pre-LayerNorm |
 | Parameters | ~0.5M per layer |
-| Output | single `s*` vector per span |
+| Output | single `g*` vector per span |
 | Runtime | <1 ms per 32-token span on GPU |
 
 ### Training pipeline (POC)
@@ -259,12 +259,12 @@ Loss = Loss_subst + 0.1 * Loss_recon + 0.05 * Loss_contrast
 3. **Objective:** minimize ΔNLL@H between original and gist-replaced contexts.  
 4. **Curriculum:** start with contiguous text, then include structured data (lists, code, tables).  
 5. **Optimizer:** AdamW, lr = 1e-4, cosine decay, bf16 precision.  
-6. **Output:** store 32→1 and 1024→1 gists in the lifetime summary tree for later use by LensNet and Allocator.
+6. **Output:** store 32→1 and 1024→1 gists in the lifetime gist tree for later use by LensNet and Allocator.
 
-### Summary
+### Recap
 GistNet is a **local autoencoder for token spans** that learns to produce substitutable embeddings aligned with the base model’s token space.  
 It uses **self- and cross-attention refinement (32→1→32→1)** to compress meaning while remaining directly compatible with the base LLM’s embedding layer.  
-Stacked hierarchically, GistNet forms the **Lifetime Summary Tree** that supports scalable, virtualized context in MegaContext.
+Stacked hierarchically, GistNet forms the **Lifetime Gist Tree** that supports scalable, virtualized context in MegaContext.
 
 ---
 
@@ -272,12 +272,12 @@ Stacked hierarchically, GistNet forms the **Lifetime Summary Tree** that support
 
 ### Why “Lens”?
 The Lens acts like an optical lens that dynamically **focuses** and **defocuses** regions within the lifetime context while keeping total compute constant.  
-It predicts where to spend detail (expand summaries into raw tokens) and where to blur (collapse raw tokens into summaries), ensuring that the **fixed-size working context** maintains maximal relevance.
+It predicts where to spend detail (expand gists into raw tokens) and where to blur (collapse raw tokens into gists), ensuring that the **fixed-size working context** maintains maximal relevance.
 
 ### What it operates on
 - The Lens reads the **working context** (not the lifetime tree).  
   It analyzes the embeddings currently fed into the base LLM — the only state that resides on GPU.
-- It outputs one **focus score** per feature (token span or summary).
+- It outputs one **focus score** per feature (token span or gist).
 
 ### Why non-causal is essential
 The Lens must understand *future queries* to know which past facts matter.
@@ -295,7 +295,7 @@ A non-causal Lens can look at the full working context (including the query) and
 ### Conceptual overview
 - The Lens runs independently of the frozen base LLM.  
 - It operates directly on the **working context embeddings** (`~8k features`), not on live LLM hidden states.  
-- It conditions on a small **summary set** (`L2 + last 5 L1` summaries, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.  
+- It conditions on a small **gist set** (`L2 + last 5 L1` gists, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.  
 - The model outputs one **signed focus score** `u_i` per feature:
   - `u_i > 0`: expand / focus (increase detail, go one level down)
   - `u_i < 0`: collapse / defocus (reduce detail, go one level up)
@@ -304,28 +304,28 @@ At runtime, the **Allocator** interprets these scores to expand and collapse spa
 
 ### Why dynamic LOD matters
 Traditional compression methods summarize once and lose detail forever.  
-MegaContext continually re-evaluates importance: if a previously collapsed region becomes relevant again, it can be expanded back into its children summaries or raw tokens.  
-Note that this expansion is NOT a lossy decoding of the summary latent - the lifetime context preserves the full token-level details on disk (or in RAM for the POC), so the LLM has full access to the whole lifetime context, just not all at once.
+MegaContext continually re-evaluates importance: if a previously collapsed region becomes relevant again, it can be expanded back into its children gists or raw tokens.  
+Note that this expansion is NOT a lossy decoding of the gist latent - the lifetime context preserves the full token-level details on disk (or in RAM for the POC), so the LLM has full access to the whole lifetime context, just not all at once.
 This enables the model’s effective memory to **evolve over time** as new information arrives.  Similar to how you're now thinking about your first kiss 😘
 
 ### Architecture (POC: dual cross-attention LensNet)
 
 1. **Inputs**
-   - `X ∈ R^{N×d}` — embeddings of all features in the working context (≈ 8 000 tokens or summaries).  
-   - `S ∈ R^{K×d}` — six summary embeddings from the tail of the context (L2 + 5 L1).  
+   - `X ∈ R^{N×d}` — embeddings of all features in the working context (≈ 8 000 tokens or gists).  
+   - `G ∈ R^{K×d}` — six gist embeddings from the tail of the context (L2 + 5 L1).  
    - `φ_i` — per-feature metadata (level, width, distance to cursor, system/user flags, etc.).  
    - All embeddings are first **down-projected** to a compact Lens width `d_lens ≈ 512`.
 
-2. **Stage 1 — Summaries read the context (8k → 6)**  
-   Each summary slot attends across all working-context features to build a condensed, query-conditioned representation:
+2. **Stage 1 — Gists read the context (8k → 6)**  
+   Each gist slot attends across all working-context features to build a condensed, query-conditioned representation:
    \[
-   \tilde S = \text{Softmax}\!\big((S W_Q)(X W_K)^\top / \sqrt d\big)(X W_V)
+   \tilde G = \text{Softmax}\!\big((G W_Q)(X W_K)^\top / \sqrt d\big)(X W_V)
    \]
 
-3. **Stage 2 — Context reads refined summaries (6 → 8k)**  
-   The 8 k context features query the six updated summaries to broadcast relevance back:
+3. **Stage 2 — Context reads refined gists (6 → 8k)**  
+   The 8 k context features query the six updated gists to broadcast relevance back:
    \[
-   \tilde X = \text{Softmax}\!\big((X W'_Q)(\tilde S W'_K)^\top / \sqrt d\big)(\tilde S W'_V)
+   \tilde X = \text{Softmax}\!\big((X W'_Q)(\tilde G W'_K)^\top / \sqrt d\big)(\tilde G W'_V)
    \]
 
 4. **Stage 3 — Per-feature scoring head**  
@@ -345,7 +345,7 @@ With N = 8 000, K = 6, d = 512 ⇒ ~25 M mult-adds — trivial compared to the b
 The Lens runs **once every K tokens** (POC: K = 32).  
 During each block update:
 
-1. Gather the latest summaries S.  
+1. Gather the latest gists `G`.  
 2. Run LensNet to produce signed scores `u_i`.  
 3. The Allocator executes expansions/collapses subject to the working-context budget.  
 4. The updated context is frozen for the next K tokens.
@@ -411,7 +411,7 @@ At inference, invalid directions are hard-masked to 0.
 | Item | Value / Notes |
 |------|----------------|
 | Input embeddings | 8 k features (mixed L0/L1/L2) |
-| Conditioning summaries | 6 (L2 + 5 L1) |
+| Conditioning gists | 6 (L2 + 5 L1) |
 | Down-projection width | 512 |
 | Attention heads | 8 |
 | Stacks | 1–3 |
@@ -431,7 +431,7 @@ It runs once per block, predicts balanced signed focus scores for every feature,
 
 | Aspect | RAG | MegaContext |
 |---------|-----|-------------|
-| **Storage** | External documents, often text chunks in a vector DB | Hierarchical learned summaries (vectors) directly aligned to the model’s lifetime |
+| **Storage** | External documents, often text chunks in a vector DB | Hierarchical learned gists (vectors) directly aligned to the model’s lifetime |
 | **Retrieval trigger** | Query-time semantic search | Continuous, learned focus from the Lens |
 | **Integration** | Concatenate retrieved text to prompt | Replace/expand in working context with proper positional encoding |
 | **Training** | Separate retriever / generator | Single substitutability & focus training |
@@ -443,14 +443,14 @@ MegaContext is *structurally* similar to RAG in that both pull relevant data int
 
 ## Training data & streaming behavior
 
-- **Summarizer training:** any long-form corpus; each 32-token window provides (full vs summary) pairs.  
+- **GistNet training:** any long-form corpus; each 32-token window provides (full vs gist) pairs.  
 - **Lens training:** logged working-context snapshots from real LLM runs.  Counterfactual losses (`expand`/`collapse`) computed offline.  
 - **Streaming:** as new tokens arrive, the system:  
-  1. Buffers 32 tokens → creates new L1 summary.  
-  2. When 32 L1s exist → create L2 summary.  
+  1. Buffers 32 tokens → creates new L1 gist.  
+  2. When 32 L1s exist → create L2 gist.  
   3. Lens+Allocator decide which regions to expand/collapse before the next decode step.
 
-Summaries can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata JSON.
+Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata JSON.
 
 ---
 
@@ -470,7 +470,7 @@ Summaries can be serialized as fp16 or quantized vectors (e.g., 8-bit) with meta
 |----------|------------|------------|
 | MegaTexture (id Software, 2007) | Virtualized textures | Direct analogy |
 | Perceiver / Perceiver IO (DeepMind 2021-22) | Latent cross-attention | Architectural similarity |
-| Slot Attention (Locatello 2020) | Object-like latent slots | Summarizer inspiration |
+| Slot Attention (Locatello 2020) | Object-like latent slots | GistNet inspiration |
 | Compressive Transformer (Rae 2019) | Long-term compressed memory | Temporal analog |
 | Gist tokens / LLMLingua 2 (2023-24) | Prompt compression | Substitutability idea |
 | RAG / Retrieval-Augmented Generation | Search-based retrieval | Conceptual cousin |
@@ -480,7 +480,7 @@ Summaries can be serialized as fp16 or quantized vectors (e.g., 8-bit) with meta
 
 ## Implementation roadmap
 
-1. **32→1 Summarizer** — implement & train substitutability.  
+1. **32→1 GistNet** — implement & train substitutability.  
 2. **Lifetime Tree Builder** — streaming, 2-level hierarchy in RAM.  
 3. **Lens v1 (non-causal)** — implement query-conditioned scorer, train on offline labels.  
 4. **Allocator** — greedy expand/collapse, hysteresis.  
@@ -493,7 +493,7 @@ Summaries can be serialized as fp16 or quantized vectors (e.g., 8-bit) with meta
 
 - Async disk streaming of the lifetime tree.  
 - RL-trained allocator optimizing accuracy × latency.  
-- Multi-token summaries for structured data.  
+- Multi-token gists for structured data.  
 - Joint training of LLM + MegaContext from scratch.  
 - Shared or federated lifetime memories between agents.
 
@@ -502,7 +502,7 @@ Summaries can be serialized as fp16 or quantized vectors (e.g., 8-bit) with meta
 ## License & contributions
 
 MIT License (suggested).  
-PRs welcome — please include reproducible tests for summarizer, Lens, allocator, and end-to-end demos.
+PRs welcome — please include reproducible tests for GistNet, Lens, allocator, and end-to-end demos.
 
 ---
 
