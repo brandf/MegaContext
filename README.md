@@ -94,8 +94,8 @@ Streaming text  ──► 1️⃣ Lifetime Summary Tree  ──►  Allocator �
 | Setup | Lifetime tokens | Active tokens | KV-cache | Disk I/O / step | Notes |
 |-------|-----------------|----------------|-----------|-----------------|-------|
 | **Vanilla LLM** | 32 k | 32 k | ~2 GB | n/a | context-limited |
-| **MegaContext (POC)** | ~33 M | 8 k | ~0.5 GB | few MB | constant compute per step |
-| **MegaContext (Future)** | billions | 32 k | ~2 GB | 10–50 MB/s | fully trained base model |
+| **MegaContext (POC)** | ~1 M | 8 k | ~0.5 GB | few MB | constant compute per step |
+| **MegaContext (Future)** | 1 B+ | 32 k | ~2 GB | 10–50 MB/s | fully trained base model |
 
 Per-step compute ≈ base decode cost; summarization and Lens overhead < 1 %.
 
