@@ -265,15 +265,11 @@ At inference, invalid directions are hard-masked to 0.
 +\mathcal{L}_{\text{illegal}}
 \]
 
----
-
 ### Inference procedure
 
 1. **Mask** illegal sides (L0 can’t expand; L2 can’t collapse).  
 2. **Optional rebalance**: rescale positive/negative masses to match before sending to the Allocator.  
 3. **Allocator** greedily applies expand/collapse actions within the token budget, honoring hysteresis rules.
-
----
 
 ### Summary of POC parameters
 
@@ -289,66 +285,10 @@ At inference, invalid directions are hard-masked to 0.
 | Runtime | < 3 ms per update @ 8 k tokens |
 | Params | ≈ 100 k – 200 k total |
 
----
 
 **In short:**  
 The Lens is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).  
 It runs once per block, predicts balanced signed focus scores for every feature, and guides the Allocator to keep the working context sharp, legal, and budget-neutral.
-
-## The Lens — how focus is decided
-
-### Why “Lens”?
-Imagine the working context as the image projected through a **dynamic-shaped lens** that focuses and defocuses regions within the full lifetime context.  
-The Lens determines *where* to focus (expand summaries into details) and *where* to defocus (collapse details into summaries) — keeping total compute/memory constant as the lifetime context grows.
-
-### What it operates on
-- The Lens reads the **working context** (not the lifetime tree).  
-  It analyzes the embeddings currently fed into the base LLM — the only state that resides on GPU.
-- It outputs one **focus score** per feature (token span or summary).
-
-### Why non-causal is essential
-The Lens must understand *future queries* to know which past facts matter.
-
-**Example**
-```
-C1: "My shirt is red. My pants are green."
-C2: "My shirt is red. My pants are green. What color hat would match my shirt?"
-```
-
-
-Because the base LLM is causal, the hidden states for “shirt” and “pants” are identical in C1 and C2; they never see the question.  
-A non-causal Lens can look at the full working context (including the query) and boost focus on the “shirt” fact.
-
-### POC implementation
-Non-causality is achieved by **conditioning on the query vector** `q` (hidden state at the generation cursor):
-
-`u_i = MLP(LN([h_i, q, h_i⊙q, |h_i−q|, φ_i]))`
-
-where `h_i` = pooled hidden of span _i_, and `φ_i` = metadata (level, width, distance, etc.).
-
-The Lens is tiny (< 100 k params) and runs in microseconds.
-
----
-
-## The Allocator — how focus is applied
-
-The **Allocator** receives the focus scores `{u_i}` and updates the *level-of-detail (LOD)* of the working context.
-
-### Purpose
-- Maintain the token budget (`W_max`).
-- Translate Lens intent into discrete **expand/collapse** actions.
-- Keep the representation adaptive: *summarization is not a one-way door*.
-
-### Why dynamic LOD matters
-Traditional compression methods summarize once and lose detail forever.  
-MegaContext continually re-evaluates importance: if a previously collapsed region becomes relevant again, it can be expanded back into its children summaries or raw tokens.  
-Note that this expansion is NOT a lossy decoding of the summary latent - the lifetime context preserves the full token-level details on disk (or in RAM for the POC), so the LLM has full access to the whole lifetime context, just not all at once.
-This enables the model’s effective memory to **evolve over time** as new information arrives.  Similar to how you're now thinking about your first kiss 😘
-
-### Greedy two-phase policy (POC)
-1. **Collapse phase:** if over budget, greedily collapse low-focus sibling spans until within limit.  
-2. **Expand phase:** if under budget, greedily expand high-focus summaries that fit remaining space.  
-Hysteresis or min-residency rules can prevent thrashing.
 
 ---
 
