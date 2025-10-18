@@ -133,6 +133,167 @@ Per-step compute ≈ base decode cost; summarization and Lens overhead < 1 %.
 - This makes a **lifelong, high-bandwidth memory** feasible: raw details can be recovered where preserved; elsewhere, multilevel summaries maintain global context with the **working context** handling on-demand re-expansion.
 
 ---
+## The Lens — how focus is decided
+
+### Why “Lens”?
+The Lens acts like an optical lens that dynamically **focuses** and **defocuses** regions within the lifetime context while keeping total compute constant.  
+It predicts where to spend detail (expand summaries into raw tokens) and where to blur (collapse raw tokens into summaries), ensuring that the **fixed-size working context** maintains maximal relevance.
+
+### What it operates on
+- The Lens reads the **working context** (not the lifetime tree).  
+  It analyzes the embeddings currently fed into the base LLM — the only state that resides on GPU.
+- It outputs one **focus score** per feature (token span or summary).
+
+### Why non-causal is essential
+The Lens must understand *future queries* to know which past facts matter.
+
+**Example**
+```
+C1: "My shirt is red. My pants are green."
+C2: "My shirt is red. My pants are green. What color hat would match my shirt?"
+```
+
+
+Because the base LLM is causal, the hidden states for “shirt” and “pants” are identical in C1 and C2; they never see the question.  
+A non-causal Lens can look at the full working context (including the query) and boost focus on the “shirt” fact.
+
+### Conceptual overview
+- The Lens runs independently of the frozen base LLM.  
+- It operates directly on the **working context embeddings** (`~8k features`), not on live LLM hidden states.  
+- It conditions on a small **summary set** (`L2 + last 5 L1` summaries, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.  
+- The model outputs one **signed focus score** `u_i` per feature:
+  - `u_i > 0`: expand / focus (increase detail, go one level down)
+  - `u_i < 0`: collapse / defocus (reduce detail, go one level up)
+
+At runtime, the **Allocator** interprets these scores to expand and collapse spans while keeping the working context within its token budget.
+
+### Why dynamic LOD matters
+Traditional compression methods summarize once and lose detail forever.  
+MegaContext continually re-evaluates importance: if a previously collapsed region becomes relevant again, it can be expanded back into its children summaries or raw tokens.  
+Note that this expansion is NOT a lossy decoding of the summary latent - the lifetime context preserves the full token-level details on disk (or in RAM for the POC), so the LLM has full access to the whole lifetime context, just not all at once.
+This enables the model’s effective memory to **evolve over time** as new information arrives.  Similar to how you're now thinking about your first kiss 😘
+
+### Architecture (POC: dual cross-attention LensNet)
+
+1. **Inputs**
+   - `X ∈ R^{N×d}` — embeddings of all features in the working context (≈ 8 000 tokens or summaries).  
+   - `S ∈ R^{K×d}` — six summary embeddings from the tail of the context (L2 + 5 L1).  
+   - `φ_i` — per-feature metadata (level, width, distance to cursor, system/user flags, etc.).  
+   - All embeddings are first **down-projected** to a compact Lens width `d_lens ≈ 512`.
+
+2. **Stage 1 — Summaries read the context (8k → 6)**  
+   Each summary slot attends across all working-context features to build a condensed, query-conditioned representation:
+   \[
+   \tilde S = \text{Softmax}\!\big((S W_Q)(X W_K)^\top / \sqrt d\big)(X W_V)
+   \]
+
+3. **Stage 2 — Context reads refined summaries (6 → 8k)**  
+   The 8 k context features query the six updated summaries to broadcast relevance back:
+   \[
+   \tilde X = \text{Softmax}\!\big((X W'_Q)(\tilde S W'_K)^\top / \sqrt d\big)(\tilde S W'_V)
+   \]
+
+4. **Stage 3 — Per-feature scoring head**  
+   Concatenate each updated context vector `\tilde X_i` with its metadata `φ_i` and predict a scalar score:
+   \[
+   u_i = \text{MLP}(\text{LN}([\tilde X_i, φ_i])) \rightarrow \mathbb{R}
+   \]
+
+5. **Stacks / refinement**  
+   1–3 stacked dual-attn blocks may be used for iterative refinement; parameters `(W_Q,K,V)` are the only learned weights.
+
+**Complexity:** O(N × K × d) per pass.  
+With N = 8 000, K = 6, d = 512 ⇒ ~25 M mult-adds — trivial compared to the base model.
+
+### Update cadence (block-wise refocus)
+
+The Lens runs **once every K tokens** (POC: K = 32).  
+During each block update:
+
+1. Gather the latest summaries S.  
+2. Run LensNet to produce signed scores `u_i`.  
+3. The Allocator executes expansions/collapses subject to the working-context budget.  
+4. The updated context is frozen for the next K tokens.
+
+This matches the intended inference cadence (no per-token recompute).
+
+### Training objectives
+
+#### 1️⃣ Signed focus supervision
+Each feature receives a **signed target utility** `y_i` derived from counterfactual NLL deltas:
+
+- Expandable items (L1/L2 children) ⇒ positive `y_i > 0`  
+- Collapsible spans ⇒ negative `y_i < 0`  
+- Others ⇒ 0 / masked.
+
+The Lens learns to regress and rank these utilities.
+
+\[
+\mathcal{L}_{\text{reg}} = \frac{1}{|M|}\sum_{i\in M}(u_i - y_i)^2,
+\qquad
+\mathcal{L}_{\text{rank}} = \text{softplus}(-(u_i-u_j))\text{ for ordered pairs.}
+\]
+
+#### 2️⃣ Zero-sum budget regularizer
+To maintain constant working-context size:
+\[
+P=\sum_i c_i^{+}\,\text{ReLU}(u_i),\quad
+N=\sum_i c_i^{-}\,\text{ReLU}(-u_i)
+\]
+\[
+\mathcal{L}_{\text{budget}}=\big((P-N)/(ε+P+N)\big)^2
+\]
+(`c_i^+` / `c_i^-` = token cost / refund.)  
+This encourages net-zero expand/defocus mass per block.
+
+#### 3️⃣ Legality penalties
+Prevent impossible actions:
+\[
+\mathcal{L}_{\text{illegal}}=
+\alpha\!\!\sum_{\text{L0}}\!\!\text{ReLU}(u_i)
++\beta\!\!\sum_{\text{L2}}\!\!\text{ReLU}(-u_i)
+\]
+(\(\alpha,\beta≈0.3\)).  
+At inference, invalid directions are hard-masked to 0.
+
+#### 4️⃣ Total loss
+\[
+\mathcal{L}=
+\mathcal{L}_{\text{reg}}
++0.5\,\mathcal{L}_{\text{rank}}
++0.1\,\mathcal{L}_{\text{budget}}
++\mathcal{L}_{\text{illegal}}
+\]
+
+---
+
+### Inference procedure
+
+1. **Mask** illegal sides (L0 can’t expand; L2 can’t collapse).  
+2. **Optional rebalance**: rescale positive/negative masses to match before sending to the Allocator.  
+3. **Allocator** greedily applies expand/collapse actions within the token budget, honoring hysteresis rules.
+
+---
+
+### Summary of POC parameters
+
+| Item | Value / Notes |
+|------|----------------|
+| Input embeddings | 8 k features (mixed L0/L1/L2) |
+| Conditioning summaries | 6 (L2 + 5 L1) |
+| Down-projection width | 512 |
+| Attention heads | 8 |
+| Stacks | 1–3 |
+| Update cadence | every 32 tokens |
+| Output | signed focus score `u_i` per feature |
+| Runtime | < 3 ms per update @ 8 k tokens |
+| Params | ≈ 100 k – 200 k total |
+
+---
+
+**In short:**  
+The Lens is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).  
+It runs once per block, predicts balanced signed focus scores for every feature, and guides the Allocator to keep the working context sharp, legal, and budget-neutral.
 
 ## The Lens — how focus is decided
 
