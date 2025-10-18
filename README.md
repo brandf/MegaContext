@@ -52,46 +52,41 @@ Shipping LLMs with a **core lifetime context** transforms in-context learning:
 the model boots with a massive “system prompt” of structured world knowledge that updates externally and without retraining weights.  
 - A cloud-hosted MegaContext model could refresh its understanding of the world continually, combining retrieval and reasoning in a unified pipeline.
 - An agentic coding system could provide an entire codebase as a system prompt (lifetime context), eliminating the expensive / error prone processes of reading parts of the projects code.
----
-
-## POC scope & constraints
-
-- **Frozen base LLM** (no fine-tuning).  
-- **Two-level summary tree:**  
-  - Level 1: 32 tokens → 1 summary  
-  - Level 2: 32 summaries → 1 summary  
-  ⇒ overall **1024× compression**.  
-- **Local-only summarization.** Each node sees only its own 32-token window (plus small boundary context).  
-- **Synchronous updates.** Lifetime tree lives in RAM/GPU; updates happen between autoregressive steps.  
-- **Non-causal Lens** (explained below) with a **deterministic Allocator** controlling focus.  
-- **Ordered, position-anchored substitution.** Summaries occupy the central RoPE index of their span.
 
 ---
 
 ## Components
 
-### 1️⃣ Lifetime summary tree
+### 1️⃣ Lifetime gist tree
 Built incrementally as text streams in:
-- Every 32 tokens → 1 summary (Level 1).  
-- Every 32 Level-1 summaries → 1 Level-2 summary.  
-- Summaries are stored with metadata (token range, RoPE center, parent/child IDs) and can be serialized to disk.
+- Every 32 tokens → 1 gist (Level 1).  
+- Every 32 Level-1 gists → 1 Level-2 gist.  
+- etc.
 
 ### 2️⃣ Working context
-A fixed-size mixture of raw tokens and summaries forming a contiguous window over the lifetime tree.  
-At any step, its total token cost ≤ `W_max` (e.g., 8 k).
+A fixed-size mixture of raw tokens and gists forming a contiguous window over the lifetime tree.  
+- At any step, its total token cost ≤ `W_max` (e.g., 8 k).
+- The base LLM operates only on this context
 
 ---
 ## System overview
 
 ```
-Streaming text  ──►  Lifetime Summary Tree  ──►  Allocator ──► Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
+Streaming text  ──► 1️⃣ Lifetime Summary Tree  ──►  Allocator ──► 2️⃣ Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
                                ▲                    ▲                │   │  ▲                                  │
-                               │                    ┕━━━━━━━Lens━━━━━┛   │  ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-                               ┕━━━━━━━━━━━━━━━━━━━━━━━Summarizer━━━━━━━━┛
+                               │                    ┕━━━━━LensNet━━━━┛   │  ┕━━━━━━━━━━Auto Regression━━━━━━━━━┛
+                               ┕━━━━━━━━━━━━━━━GistNet━━━━━━━━━━━━━━━━━━━┛
                           
 ```
 
+---
 
+## POC scope & constraints
+
+- **Frozen base LLM** no fine-tuning initially, with LoRA finetuning as a follow up  
+- **Two-level Lifetime gist tree:** The POC will be limited to moderate sized contexts so only 2 laters should be sufficient   
+- **Synchronous updates.** Lifetime tree lives in RAM/GPU for POC (rather than disk); updates happen between autoregressive steps.
+  
 ---
 
 ## Performance sketch
@@ -133,6 +128,40 @@ Per-step compute ≈ base decode cost; summarization and Lens overhead < 1 %.
 - This makes a **lifelong, high-bandwidth memory** feasible: raw details can be recovered where preserved; elsewhere, multilevel summaries maintain global context with the **working context** handling on-demand re-expansion.
 
 ---
+
+## GistNet — local summarization (32→1, two-layer tree)
+
+### Purpose
+GistNet replaces short, fixed-length token sequences with compact **summary embeddings** ("gists") that can stand in for their original tokens inside the base LLM’s context.  
+Each gist preserves the meaning of its 32-token span while freeing token budget for new information.  
+Stacking two 32→1 layers provides **1024× compression** in the proof of concept (POC).
+
+---
+
+### Inputs & outputs
+| Symbol | Shape | Meaning |
+|---------|--------|---------|
+| `E ∈ R[32, d]` | 32 raw token embeddings (no contextualization) |
+| `S₀ ∈ R[K, d]` | learnable slot query (`K=1` for 32→1) |
+| `s* ∈ R[d]` | single summary vector aligned with base LLM embedding dim |
+
+---
+
+### POC architecture (32→32→1→32→32→1)
+
+GistNet alternates **self-attention** and **cross-attention** to gradually compress and refine each 32-token span.
+
+#### Stage 1 — Local token self-attention (32 → 32)
+- Apply 1–2 standard self-attention + MLP blocks within the 32-token window.  
+- Add RoPE or sinusoidal positional encodings for local ordering.  
+- Output is `E1`, a locally contextualized version of the raw embeddings.
+
+#### Stage 2 — Compression (32 → 1)
+- Introduce a single learned slot query `S₀`.  
+- Perform cross-attention where the slot reads from the tokens:  
+
+---
+
 ## The Lens — how focus is decided
 
 ### Why “Lens”?
@@ -289,24 +318,6 @@ At inference, invalid directions are hard-masked to 0.
 **In short:**  
 The Lens is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).  
 It runs once per block, predicts balanced signed focus scores for every feature, and guides the Allocator to keep the working context sharp, legal, and budget-neutral.
-
----
-
-## The 32→1 local summarizer (two-layer tree)
-
-**Input:** 32 raw token embeddings `E ∈ R^{32×d}`  
-**Output:** single vector `s* ∈ R^d` matching the base LLM’s embedding dimension.  
-**Position:** central token index of the span (RoPE aligned).
-
-Tiny architecture:
-
-1. (Optional) local 1D conv or 2-layer local attention for micro-context.  
-2. Single learnable query `s₀`.  
-3. 2–3 rounds of `CrossAttn(Q=s, K=E, V=E)` + MLP residual.  
-4. Output `s*` + LayerNorm.
-
-**Training objective:** *substitutability* — minimize the KL/NLL gap between base LLM predictions on full vs. summarized span.  
-Stacking two layers of 32→1 achieves 1024× compression for the POC.
 
 ---
 
