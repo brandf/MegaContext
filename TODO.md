@@ -1,0 +1,4 @@
+- [ ] Phase 1: Restructure README flow so lifecycle overview follows TL;DR and tighten Grand vision handoff.
+- [ ] Phase 2: Add core definitions, notation, and invariants; align terminology for tokens, gists, and working context.
+- [ ] Phase 3: Document focus-control loop (Allocator rename TBD), including block-aligned scoring, greedy diff loop, and hysteresis expectations.
+- [ ] Phase 4: Expand implementation/training guidance (module interfaces, pseudocode, evaluation checklist) and clarify module-level ambiguities.

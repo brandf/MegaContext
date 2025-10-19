@@ -10,6 +10,8 @@ It separates a model’s context into a lifetime context (a hierarchical gist tr
 
 A lightweight learned LensNet (and streaming Allocator) continuously/incrementally refocus the full lifetime context onto the working context, giving the model effectively infinite memory at constant compute.
 
+The next section walks through how the runtime loop stays within a fixed working context while tracking the entire lifetime history. A later **Grand vision** section explains why the mechanism matters before the remaining sections dive into the proof-of-concept (POC) specification.
+
 ---
 
 ## How MegaContext Works
@@ -18,7 +20,7 @@ Large language models are constrained by a fixed context window.
 MegaContext removes this limit by separating:
 
 - **Lifetime context** — the complete interaction or document history (potentially millions or billions of tokens) stored as a *hierarchical gist tree* on disk (RAM for the POC).  
-- **Working context** — a fixed 8k–32k token budget on GPU, mixing raw tokens with gists drawn from the lifetime tree. The frozen base LLM sees only this window.
+- **Working context** — a fixed 8k–32k token budget on GPU, mixing raw tokens with gists drawn from the lifetime tree. The frozen base LLM sees only this window, which stays contiguous in “time” even as individual spans switch between token-level and gist-level representations.
 
 ### Core components
 
@@ -36,6 +38,23 @@ This is not required to understand MegaContext, but for those that are intereste
 The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors (efficiently).  
 - "Relevant parts" is inherently non-causal (something that wasn't previously relevant can become relevant), so this implies dynamic focusing/defocusing.  One-way compression/summarization schemes are fundamentally flawed.
 - Exciting new future LLM scenarios will be unlocked at 100M+ context lengths, and at this scale both memory and compute requirements must be sub-linear to be practical for widespread consumer applications.
+
+---
+
+### Runtime lifecycle at a glance
+
+```
+Streaming text  ──► 1️⃣ Lifetime Gist Tree  ──►  Allocator ──►  Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
+                               ▲                    ▲          
+                               └───────── LensNet ──┘
+```
+
+1. **Ingest & summarize.** Buffer incoming tokens in 32-token blocks, roll them into new or updated gist nodes, and persist the lifetime tree (disk later, RAM for the POC).
+2. **Assemble the working context.** Lay out a contiguous-in-time sequence of tokens and gists whose combined token-equivalent cost stays within `W_max`. Every position represents exactly one interval of the lifetime history at some level of detail.
+3. **Refocus.** LensNet reads the current working context (plus tail gists), emits signed focus scores, and the (currently greedy) allocator applies expansions/collapses without breaking contiguity or budget.
+4. **Decode.** The frozen base LLM consumes the refreshed working context to predict the next token(s), feeding newly generated tokens back into step 1.
+
+The next sections unpack each stage: lifetime storage, compression (GistNet), focus control (LensNet + allocator), and the training schedule that keeps them aligned.
 
 ---
 
@@ -62,17 +81,6 @@ the model boots with a massive “system prompt” of structured world knowledge
 
 ---
 
-## System overview
-
-```
-Streaming text  ──► 1️⃣ Lifetime Gist Tree  ──►  Allocator ──► 2️⃣ Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
-                               ▲                    ▲                │   │  ▲                                  │
-                               │                    ┕━━━━━LensNet━━━━┛   │  ┕━━━━━━━━━━Auto Regression━━━━━━━━━┛
-                               ┕━━━━━━━━━━━━━━━GistNet━━━━━━━━━━━━━━━━━━━┛
-                          
-```
-
----
 
 ## POC scope & constraints
 
