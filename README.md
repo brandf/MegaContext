@@ -103,7 +103,7 @@ The runtime is divided into focused modules so each invariant from [Key terms & 
 | Module | Suggested path | Responsibilities | Key inputs/outputs |
 |--------|----------------|------------------|--------------------|
 | GistNet | `src/gistnet/` | Train & serve 32→1 gists, populate lifetime tree nodes | Input: token embeddings; Output: gist vectors + metrics |
-| Lifetime tree | `src/memory/tree.py` | Maintain contiguous-in-time hierarchy (L0/L1/L2) in RAM | Input: gists/tokens; Output: node handles, metadata |
+| Lifetime tree | `src/memory/tree.py` | Maintain contiguous-in-time hierarchy (L0/L1/L2) in RAM (future stream to disk) | Input: gists/tokens; Output: node handles, metadata |
 | Focus allocator | `src/focus/allocator.py` | Apply LensNet scores to expand/collapse blocks | Input: working-context entries, scores; Output: refreshed WC |
 | LensNet | `src/focus/lensnet.py` | Score each WC entry for detail adjustments | Input: WC entries + tail gists; Output: focus scores |
 | Runtime loop | `src/runtime/engine.py` | Orchestrate ingest → refocus → decode | Input: streaming tokens; Output: next-token logits, telemetry |
@@ -130,7 +130,8 @@ class WorkingEntry:
     node_id: int
     level: Literal["L0", "L1", "L2"]
     cost: int  # token-equivalent cost
-    metadata: dict[str, float]  # e.g., distance_to_cursor, role_id
+    span_width: int  # number of L0 tokens covered
+    distance_to_cursor: int  # blocks from decode cursor
 
 @dataclass
 class FocusScore:
@@ -158,11 +159,13 @@ def decode_stream(stream):
         working.patch(nodes)                           # ensure contiguous coverage
 
         g_t = tail_gists.fetch(lifetime, working)      # L2 + recent L1
+        packed = working.pack()
         focus_scores = lens.score(
-            entries=working.entries(),
-            tail_view=working.tail_view(),
+            context=packed["embeddings"],
+            levels=packed["levels"],
+            span_width=packed["span_width"],
+            distance_to_cursor=packed["distance_to_cursor"],
             tail_gists=g_t,
-            metadata=working.metadata(),
         )
         working = allocator.apply(working, focus_scores, lifetime)
         logits = lm.forward(**working.to_tensors())
@@ -178,11 +181,11 @@ The loop above relies on a small, explicit surface so implementation teams know 
 |--------|---------|---------------|
 | `working.entries()` | `list[WorkingEntry]` | Block-aligned entries sorted by time (`start_token`). |
 | `working.tail_view(k=256)` | `list[WorkingEntry]` | Last `k` entries for instrumentation; defaults to the LensNet update window. |
-| `working.metadata()` | `torch.FloatTensor[W, F]` | Per-entry features (`level`, `span_width`, `distance_to_cursor`, `role_id`, `age_steps`, `is_system`, …) standardized for LensNet. |
+| `working.pack()` | `dict[str, torch.Tensor]` | Keys: `embeddings` (`[W, d]`), `levels` (`[W]`), `span_width` (`[W]`), `distance_to_cursor` (`[W]`). |
 | `working.to_tensors()` | `dict[str, torch.Tensor]` | Keys: `inputs_embeds` (`[W, d]` mixed token/gist embeddings), `attention_mask` (`[W]`), optional `position_ids` (`[W]`). The base LLM wrapper forwards them as `lm.forward(inputs_embeds=..., attention_mask=..., position_ids=...)`. |
 | `TailGistCache.fetch(lifetime, working)` | `torch.FloatTensor[K, d]` | Returns the L2 root plus the latest `window` L1 gists (default 5) aligned to LensNet conditioning. |
 
-The LensNet scorer mirrors this with the signature `lens.score(entries, tail_view, tail_gists, metadata)` and returns a list of `FocusScore` objects, keeping all runtime contracts type-checked.
+The LensNet scorer mirrors this with the signature `lens.score(context, levels, tail_gists, span_width, distance_to_cursor)` and returns a tensor of signed utilities (`torch.FloatTensor[W]`). Adjust as needed if additional scalar features prove useful later.
 
 ### Framework & environment assumptions
 
@@ -377,7 +380,7 @@ g_final = LN(MLP(g_final))
 ### Architectural properties
 | Property | Description |
 |-----------|--------------|
-| **Causal scope** | Operates strictly within 32-token windows; no long-range attention. |
+| **Limited scope** | Operates strictly within 32-token windows; no long-range attention. |
 | **Parameter sharing** | Shared weights across all spans; upper and lower layers may share or specialize. |
 | **Complexity** | O(32²·d) per span — negligible compared to the base LLM. |
 | **Dimensionality** | Outputs match the base model’s embedding size `d`. |
@@ -398,14 +401,7 @@ Loss_subst = KL( P_base(x_{t+1:T} | E)
 ```
 or equivalently minimize the ΔNLL between the full and gist-replaced context over a short horizon (H = 32–128 tokens).
 
-#### 2. Reconstruction (optional)
-Encourage the gist to preserve enough information to approximate its original tokens:
-
-```
-Loss_recon = || E_reconstructed - E ||^2
-```
-
-#### 3. Contrastive span separation (optional)
+#### 2. Contrastive span separation (optional)
 Discourage neighboring spans from collapsing to identical gists:
 
 ```
@@ -415,7 +411,7 @@ for adjacent spans (margin ≈ 0.2).
 
 Total loss:
 ```
-Loss = Loss_subst + 0.1 * Loss_recon + 0.05 * Loss_contrast
+Loss = Loss_subst + 0.05 * Loss_contrast
 ```
 
 ### Implementation details (POC)
@@ -446,8 +442,8 @@ Runtime figures assume a single NVIDIA L4 running bf16 inference with `HuggingFa
 6. **Output:** store 32→1 and 1024→1 gists in the lifetime gist tree for later use by LensNet and the focus allocator.
 
 ### Recap
-GistNet is a **local autoencoder for token spans** that learns to produce substitutable embeddings aligned with the base model’s token space.  
-It uses **self- and cross-attention refinement (32→1→32→1)** to compress meaning while remaining directly compatible with the base LLM’s embedding layer.  
+GistNet is a **local encoder for token spans** whose only goal is to emit substitutable gist vectors aligned with the base model’s embedding space.  
+It uses **self- and cross-attention refinement (32→1→32→1)** to squeeze each 32-token block into a single vector without ever decoding back to tokens.  
 Stacked hierarchically, GistNet forms the **Lifetime Gist Tree** that supports scalable, virtualized context in MegaContext and supplies the tail gists that condition LensNet at its scheduled refreshes.
 
 ---
@@ -490,7 +486,7 @@ A non-causal LensNet can look at the full working context (including the query) 
 At runtime, the **focus allocator** interprets these scores to expand and collapse spans while keeping the working context within its token budget.
 
 ### Why dynamic LOD matters
-Traditional compression methods summarize once and lose detail forever.  
+Traditional context compression methods summarize once and lose detail forever.  
 MegaContext continually re-evaluates importance: if a previously collapsed region becomes relevant again, it can be expanded back into its children gists or raw tokens.  
 Note that this expansion is NOT a lossy decoding of the gist latent - the lifetime context preserves the full token-level details on disk (or in RAM for the POC), so the LLM has full access to the whole lifetime context, just not all at once.
 This enables the model’s effective memory to **evolve over time** as new information arrives.  Similar to how you're now thinking about your first kiss 😘
@@ -498,37 +494,49 @@ This enables the model’s effective memory to **evolve over time** as new infor
 ### Architecture (POC: dual cross-attention LensNet)
 
 1. **Inputs**
-   - `X ∈ R^{N×d}` — embeddings of all entries in the working context (≈ 8 000 tokens or gists).  
-   - `G ∈ R^{K×d}` — six gist embeddings from the tail of the context (L2 + 5 L1).  
-   - `φ_i` — per-entry metadata (`level`, `span_width`, `distance_to_cursor`, `role_id`, `age_steps`, `is_system`).  
-   - All embeddings are first **down-projected** to a compact LensNet width `d_lens ≈ 512`.
+   - `context`: `torch.FloatTensor[N, d]` — embeddings of all entries in the working context (≈8 000 tokens/gists).  
+   - `tail_gists`: `torch.FloatTensor[K, d]` — L2 root plus the latest `K-1` L1 gists (default `K=6`).  
+   - `levels`: `torch.LongTensor[N]` — 0/1/2 markers for legality masking.  
+   - `span_width`: `torch.LongTensor[N]` — number of L0 tokens represented by each entry.  
+   - `distance_to_cursor`: `torch.LongTensor[N]` — block distance from the decode cursor (optional feature; treat as integer tensor).  
+   - All embeddings are down-projected to a LensNet width `d_lens ≈ 512`.
 
-2. **Stage 1 — Gists read the context (8k → 6)**  
-   Each gist slot attends across all working-context entries to build a condensed, query-conditioned representation:
+2. **Stage 1 — Tail gists read the context**  
+   Using standard attention primitives:
 
+```python
+q_g = tail_gists @ W_qg          # [K, d_lens]
+k_x = context @ W_kx             # [N, d_lens]
+v_x = context @ W_vx             # [N, d_lens]
+attn_g = torch.softmax(q_g @ k_x.T / math.sqrt(d_lens), dim=-1)
+gist_context = attn_g @ v_x      # [K, d_lens]
 ```
-tilde_G = Softmax(((G W_Q)(X W_K)^T) / sqrt(d)) * (X W_V)
+
+3. **Stage 2 — Context queries updated gists**  
+
+```python
+q_x = context @ W_qx             # [N, d_lens]
+k_g = gist_context @ W_kg        # [K, d_lens]
+v_g = gist_context @ W_vg        # [K, d_lens]
+attn_x = torch.softmax(q_x @ k_g.T / math.sqrt(d_lens), dim=-1)
+context_update = attn_x @ v_g    # [N, d_lens]
 ```
 
-3. **Stage 2 — Context reads refined gists (6 → 8k)**  
-   The ≈8k context entries query the six updated gists to broadcast relevance back:
+4. **Stage 3 — Scoring head**  
+   Concatenate simple scalar features (levels, span width, distance) after normalizing them to `[0, 1]` and emit signed utilities:
 
-```
-tilde_X = Softmax(((X W'_Q)(tilde_G W'_K)^T) / sqrt(d)) * (tilde_G W'_V)
-```
-
-4. **Stage 3 — Per-entry scoring head**  
-   Concatenate each updated context vector `tilde_X_i` with its metadata `φ_i` and predict a scalar score:
-
-```
-u_i = MLP(LN([tilde_X_i, φ_i])) -> R
+```python
+features = torch.stack(
+    [levels.float(), span_width.float(), distance_to_cursor.float()], dim=-1
+)
+inputs = torch.cat([context_update, features @ W_feat], dim=-1)
+scores = head(inputs).squeeze(-1)  # torch.FloatTensor[N]
 ```
 
 5. **Stacks / refinement**  
-   1–3 stacked dual-attn blocks may be used for iterative refinement; parameters `(W_Q,K,V)` are the only learned weights.
+   Stacking 1–3 such dual-attention blocks improves stability; parameters `(W_qg, W_kx, …)` are shared or re-initialized per block depending on capacity.
 
-**Complexity:** O(N × K × d) per pass.  
-With N = 8 000, K = 6, d = 512 ⇒ ~25 M mult-adds — trivial compared to the base model.
+**Complexity:** `O(N × K × d_lens)` per pass. With `N ≈ 8k`, `K = 6`, `d_lens = 512`, the update costs ~25 M multiply-adds—negligible relative to the base model decode.
 
 ### Update cadence (block-wise refocus)
 
@@ -696,7 +704,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 3. Optimize **GistNet** on spans touched in this block using:
    - **Substitutability loss**: KL(full || replaced) or ΔNLL@H (H=32–128) for the gist that *was actually* inserted.
    - **Stability loss** (optional): L2 between current gist and previous checkpoint to avoid drift.
-   - **Boundary aux** (optional): light reconstruction on edge tokens.
+   - **Boundary aux** (optional): upweight ΔNLL terms on edge tokens so the encoder preserves boundary semantics.
 
 **Intuition:** With the current focusing policy fixed, make gists better drop-in replacements for *exactly the places the policy cares about*.
 
@@ -813,7 +821,7 @@ MegaContext is *structurally* similar to RAG in that both pull relevant data int
 1. **Snapshot selection:** capture the working context every `K` tokens along with candidate expand/collapse actions that respect legality masks.
 2. **Batch recompute:** for each candidate, rebuild the context with the alternative LOD and run the frozen base model over a short horizon (`H = 64` for narrative traces, up to 96–128 for code-heavy or cross-turn reasoning workloads). Reuse tokenizer outputs; caching KV states across candidates is optional but speeds things up.
 3. **Utility extraction:** compute `ΔNLL = NLL_alt - NLL_base`. Positive values favor expansion (detail helps); negative values favor collapse. Normalize by span width so utilities are comparable across levels.
-4. **Score targets:** store utilities alongside the metadata fields that LensNet consumes (`level`, `width`, `distance_to_cursor`, `role_id`, `age_steps`). These form the supervision targets for LensNet regression/ranking losses.
+4. **Score targets:** store utilities alongside the scalar features LensNet expects (`level`, `span_width`, `distance_to_cursor`). These tensors feed the regression/ranking losses and keep legality masks aligned with training.
 
 This batched approach keeps labeling tractable on a single A100 or L4 instance even for 3 B models.
 
