@@ -16,26 +16,26 @@ The next section walks through how the runtime loop stays within a fixed working
 
 ## How MegaContext Works
 
-Large language models are constrained by a fixed context window.  
+Large language models are constrained by a fixed context window.
 MegaContext removes this limit by separating:
 
-- **Lifetime context** — the complete interaction or document history (potentially millions or billions of tokens) stored as a *hierarchical gist tree* on disk (RAM for the POC).  
+- **Lifetime context** — the complete interaction or document history (potentially millions or billions of tokens) stored as a *hierarchical gist tree* on disk (RAM for the POC).
 - **Working context** — a fixed 8k–32k token budget on GPU, mixing raw tokens with gists drawn from the lifetime tree. The frozen base LLM sees only this window, which stays contiguous in “time” even as individual spans switch between token-level and gist-level representations.
 
 ### Core components
 
-- **Lifetime gist tree** — built incrementally as text streams in (every 32 tokens → L1 gist; every 32 L1 gists → L2 gist; etc.).  
-- **Working context** — contiguous window over the tree; total token cost is capped by `W_max`.  
-- **GistNet** — a lightweight network that compresses local spans (e.g., 32→1) into **gists** that act as substitutable stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full lifetime history.  
+- **Lifetime gist tree** — built incrementally as text streams in (every 32 tokens → L1 gist; every 32 L1 gists → L2 gist; etc.).
+- **Working context** — contiguous window over the tree; total token cost is capped by `W_max`.
+- **GistNet** — a lightweight network that compresses local spans (e.g., 32→1) into **gists** that act as substitutable stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full lifetime history.
 - **LensNet + focus allocator** — LensNet scores each working-context entry (token embedding or gist) for expansion or collapse; a block-aligned focus allocator applies those scores, streaming finer- or coarser-grained entries in and out while respecting contiguity and the budget.
 
 ### Analogy: MegaTexture → MegaContext
 This is not required to understand MegaContext, but for those that are interested in learning about the inspiration [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
-- In graphics, **MegaTexture** streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.  
+- In graphics, **MegaTexture** streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.
 - **MegaContext** mirrors that idea for language: instead of mipmap tiles, it maintains embeddings at multiple levels of detail (token L0, gist L1, gist L2, …), yielding effectively unbounded context for a frozen LLM.
 
 ### Intuitions / Motivation
-The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors (efficiently).  
+The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors (efficiently).
 - "Relevant parts" is inherently non-causal (something that wasn't previously relevant can become relevant), so this implies dynamic focusing/defocusing.  One-way compression/summarization schemes are fundamentally flawed.
 - Exciting new future LLM scenarios will be unlocked at 100M+ context lengths, and at this scale both memory and compute requirements must be sub-linear to be practical for widespread consumer applications.
 
@@ -45,7 +45,7 @@ The core intuition that's motivating this work is that long context is only usef
 
 ```
 Streaming text  ──► Lifetime Gist Tree  ──►  Focus Allocator  ──►  Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
-                               ▲                    ▲          
+                               ▲                    ▲
                                └───────── LensNet ──┘
 ```
 
@@ -88,10 +88,10 @@ These definitions appear throughout the rest of the document; refer back here wh
 
 ### Document roadmap
 
-1. **POC architecture & interfaces** — maps the runtime modules and data structures you will build.  
-2. **POC scope & performance sketch** — nails down the proof-of-concept boundaries before diving into components.  
-3. **Module deep dives (GistNet, LensNet, allocator)** — explains how each subsystem works and how they cooperate.  
-4. **Training & operations** — covers alternating optimization, labeling, and instrumentation.  
+1. **POC architecture & interfaces** — maps the runtime modules and data structures you will build.
+2. **POC scope & performance sketch** — nails down the proof-of-concept boundaries before diving into components.
+3. **Module deep dives (GistNet, LensNet, allocator)** — explains how each subsystem works and how they cooperate.
+4. **Training & operations** — covers alternating optimization, labeling, and instrumentation.
 5. **Roadmap & vision** — situates the prototype within longer-term ambitions in [Grand vision](#grand-vision-why-this-matters) and future directions.
 
 ---
@@ -266,10 +266,10 @@ The remaining sections reference these interfaces when describing training and e
 
 With the module map in place, the POC narrows to the following guardrails to ensure we can verify behavior end to end without boiling the ocean:
 
-- **Frozen base LLM** no fine-tuning initially, with LoRA finetuning as a follow up  
-- **Two-level Lifetime gist tree:** The POC will be limited to moderate sized contexts so only 2 layers should be sufficient   
+- **Frozen base LLM** no fine-tuning initially, with LoRA finetuning as a follow up
+- **Two-level Lifetime gist tree:** The POC will be limited to moderate sized contexts so only 2 layers should be sufficient
 - **Synchronous updates.** Lifetime tree lives in RAM/GPU for POC (rather than disk); updates happen between autoregressive steps.
-  
+
 ---
 
 ## Performance sketch
@@ -286,11 +286,11 @@ Per-step compute ≈ base decode cost; gist extraction and LensNet overhead < 1 
 
 **Assumptions**
 
-- **Sampling:** 500 feature vectors / sec  
-- **Feature size:** 4,096-dim; stored as fp16 (2 bytes) unless noted  
-- **Duration:** 10 years ≈ 3.1536×10⁸ seconds ⇒ **N = 500 × 3.1536×10⁸ ≈ 1.5768×10¹¹** leaf vectors  
-- **Tree arity:** 32→1 at each level (no overlap)  
-- **Tree depth:** log₃₂(N) ≈ **8 levels** (root near level 8)  
+- **Sampling:** 500 feature vectors / sec
+- **Feature size:** 4,096-dim; stored as fp16 (2 bytes) unless noted
+- **Duration:** 10 years ≈ 3.1536×10⁸ seconds ⇒ **N = 500 × 3.1536×10⁸ ≈ 1.5768×10¹¹** leaf vectors
+- **Tree arity:** 32→1 at each level (no overlap)
+- **Tree depth:** log₃₂(N) ≈ **8 levels** (root near level 8)
 - **Node payload:** one vector per node (same width as leaves, different precision per scenario)
 
 #### Storage breakdown
@@ -306,8 +306,8 @@ Per-step compute ≈ base decode cost; gist extraction and LensNet overhead < 1 
 
 **Key takeaways**
 
-- A **full 32-ary tree** only adds ~**3.2%** storage over leaves when stored at the **same precision** (factor 32/31), so multilevel LOD itself is cheap; **precision and pruning dominate** total footprint.  
-- With **8-bit quantization** and **reasonable pruning** of raw leaves (e.g., keep only salient 0.5–1%), plus straightforward **entropy coding**, **a decade of continuous 500 Hz, 4k-dim features** compresses to **single-digit TBs**—practical for local SSD arrays.  
+- A **full 32-ary tree** only adds ~**3.2%** storage over leaves when stored at the **same precision** (factor 32/31), so multilevel LOD itself is cheap; **precision and pruning dominate** total footprint.
+- With **8-bit quantization** and **reasonable pruning** of raw leaves (e.g., keep only salient 0.5–1%), plus straightforward **entropy coding**, **a decade of continuous 500 Hz, 4k-dim features** compresses to **single-digit TBs**—practical for local SSD arrays.
 - This makes a **lifelong, high-bandwidth memory** feasible: raw details can be recovered where preserved; elsewhere, multilevel gists maintain global context with the **working context** handling on-demand re-expansion.
 
 ---
@@ -315,8 +315,8 @@ Per-step compute ≈ base decode cost; gist extraction and LensNet overhead < 1 
 ## GistNet — local gist extraction (32→1, two-layer tree)
 
 ### Purpose
-GistNet replaces short, fixed-length token sequences with compact **gist embeddings** ("gists") that can stand in for their original tokens inside the base LLM’s context.  
-Each gist preserves the meaning of its 32-token span while freeing token budget for new information.  
+GistNet replaces short, fixed-length token sequences with compact **gist embeddings** ("gists") that can stand in for their original tokens inside the base LLM’s context.
+Each gist preserves the meaning of its 32-token span while freeing token budget for new information.
 Stacking two 32→1 layers provides **1024× compression** in the proof of concept (POC).
 
 ---
@@ -335,13 +335,13 @@ Stacking two 32→1 layers provides **1024× compression** in the proof of conce
 GistNet alternates **self-attention** and **cross-attention** to gradually compress and refine each 32-token span.
 
 #### Stage 1 — Local token self-attention (32 → 32)
-- Apply 1–2 standard self-attention + MLP blocks within the 32-token window.  
-- Add RoPE or sinusoidal positional encodings for local ordering.  
+- Apply 1–2 standard self-attention + MLP blocks within the 32-token window.
+- Add RoPE or sinusoidal positional encodings for local ordering.
 - Output is `E1`, a locally contextualized version of the raw embeddings.
 
 #### Stage 2 — Compression (32 → 1)
-- Introduce the first learned slot query `Q₁` (shared across spans).  
-- Perform cross-attention where the slot reads from the tokens:  
+- Introduce the first learned slot query `Q₁` (shared across spans).
+- Perform cross-attention where the slot reads from the tokens:
 
 ```
 G1 = CrossAttn(query=Q1, key=E1, value=E1)
@@ -351,7 +351,7 @@ G1 = G1 + MLP(LN(G1)) # residual + feedforward
 - `G1` is the first gist embedding for this 32-token span.
 
 #### Stage 3 — Expansion (1 → 32)
-- Expand information back into the 32-token space for refinement:  
+- Expand information back into the 32-token space for refinement:
 
 ```
 E2 = CrossAttn(query=E1, key=G1, value=G1)
@@ -361,7 +361,7 @@ E2 = E1 + MLP(LN(E2))
 - Optionally run one self-attention block over `E2` to diffuse the gist info across tokens.
 
 #### Stage 4 — Final compression (32 → 1)
-- Run a second cross-attention with the independent learned slot query `Q₂`:  
+- Run a second cross-attention with the independent learned slot query `Q₂`:
 
 ```
 g_final = CrossAttn(query=Q2, key=E2, value=E2)
@@ -370,7 +370,7 @@ g_final = LN(MLP(g_final))
 - The result `g_final` is the final gist vector for the span and becomes a node in the lifetime gist tree.
 
 #### Stage 5 — Hierarchical stacking
-- Two 32→1 layers are stacked hierarchically (32² = 1024 tokens per top-level gist).  
+- Two 32→1 layers are stacked hierarchically (32² = 1024 tokens per top-level gist).
 - The lower layer runs directly on token embeddings; the upper operates on lower-layer outputs.
 - This per-block stacking preserves the [contiguity invariant](#key-terms--invariants) noted earlier—each gist still maps to an exact, non-overlapping span in the lifetime history.
 
@@ -434,16 +434,16 @@ Loss = Loss_subst + 0.05 * Loss_contrast
 Runtime figures assume a single NVIDIA L4 running bf16 inference with `HuggingFaceTB/SmolLM3-3B`; expect faster throughput on A100-class hardware.
 
 ### Training pipeline (POC)
-1. **Dataset:** long-form text (4k–16k tokens), chunked into 32-token spans.  
-2. **Teacher:** frozen base LLM used for ΔNLL@H computation.  
-3. **Objective:** minimize ΔNLL@H between original and gist-replaced contexts.  
-4. **Curriculum:** start with contiguous text, then include structured data (lists, code, tables).  
-5. **Optimizer:** AdamW, lr = 1e-4, cosine decay, bf16 precision.  
+1. **Dataset:** long-form text (4k–16k tokens), chunked into 32-token spans.
+2. **Teacher:** frozen base LLM used for ΔNLL@H computation.
+3. **Objective:** minimize ΔNLL@H between original and gist-replaced contexts.
+4. **Curriculum:** start with contiguous text, then include structured data (lists, code, tables).
+5. **Optimizer:** AdamW, lr = 1e-4, cosine decay, bf16 precision.
 6. **Output:** store 32→1 and 1024→1 gists in the lifetime gist tree for later use by LensNet and the focus allocator.
 
 ### Recap
-GistNet is a **local encoder for token spans** whose only goal is to emit substitutable gist vectors aligned with the base model’s embedding space.  
-It uses **self- and cross-attention refinement (32→1→32→1)** to squeeze each 32-token block into a single vector without ever decoding back to tokens.  
+GistNet is a **local encoder for token spans** whose only goal is to emit substitutable gist vectors aligned with the base model’s embedding space.
+It uses **self- and cross-attention refinement (32→1→32→1)** to squeeze each 32-token block into a single vector without ever decoding back to tokens.
 Stacked hierarchically, GistNet forms the **Lifetime Gist Tree** that supports scalable, virtualized context in MegaContext and supplies the tail gists that condition LensNet at its scheduled refreshes.
 
 ---
@@ -451,11 +451,11 @@ Stacked hierarchically, GistNet forms the **Lifetime Gist Tree** that supports s
 ## LensNet — how focus is decided
 
 ### Why “Lens”?
-LensNet acts like an optical lens that dynamically **focuses** and **defocuses** regions within the lifetime context while keeping total compute constant.  
+LensNet acts like an optical lens that dynamically **focuses** and **defocuses** regions within the lifetime context while keeping total compute constant.
 It predicts where to spend detail (expand gists into raw tokens) and where to blur (collapse raw tokens into gists), ensuring that the **fixed-size working context** maintains maximal relevance.
 
 ### What it operates on
-- LensNet reads the **working context** (not the lifetime tree).  
+- LensNet reads the **working context** (not the lifetime tree).
   It analyzes the embeddings currently fed into the base LLM — the only state that resides on GPU.
 - It outputs one **focus score** per entry (token embedding or gist).
 - The [contiguity invariant](#key-terms--invariants) from the glossary ensures each score maps to a single, non-overlapping lifetime span, so expand/collapse actions remain block-aligned.
@@ -470,13 +470,13 @@ C2: "My shirt is red. My pants are green. What color hat would match my shirt?"
 ```
 
 
-Because the base LLM is causal, the hidden states for “shirt” and “pants” are identical in C1 and C2; they never see the question.  
+Because the base LLM is causal, the hidden states for “shirt” and “pants” are identical in C1 and C2; they never see the question.
 A non-causal LensNet can look at the full working context (including the query) and boost focus on the “shirt” fact.
 
 ### Conceptual overview
-- LensNet runs independently of the frozen base LLM.  
-- It operates directly on the **working context embeddings** (≈ 8k entries), not on live LLM hidden states.  
-- It conditions on a small **gist set** (`L2 + last 5 L1` gists, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.  
+- LensNet runs independently of the frozen base LLM.
+- It operates directly on the **working context embeddings** (≈ 8k entries), not on live LLM hidden states.
+- It conditions on a small **gist set** (`L2 + last 5 L1` gists, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.
 - The model outputs one **signed focus score** `u_i` per entry:
 - `u_i > 0`: expand / focus (increase detail, go one level down)
 - `u_i < 0`: collapse / defocus (reduce detail, go one level up)
@@ -486,22 +486,22 @@ A non-causal LensNet can look at the full working context (including the query) 
 At runtime, the **focus allocator** interprets these scores to expand and collapse spans while keeping the working context within its token budget.
 
 ### Why dynamic LOD matters
-Traditional context compression methods summarize once and lose detail forever.  
-MegaContext continually re-evaluates importance: if a previously collapsed region becomes relevant again, it can be expanded back into its children gists or raw tokens.  
+Traditional context compression methods summarize once and lose detail forever.
+MegaContext continually re-evaluates importance: if a previously collapsed region becomes relevant again, it can be expanded back into its children gists or raw tokens.
 Note that this expansion is NOT a lossy decoding of the gist latent - the lifetime context preserves the full token-level details on disk (or in RAM for the POC), so the LLM has full access to the whole lifetime context, just not all at once.
 This enables the model’s effective memory to **evolve over time** as new information arrives.  Similar to how you're now thinking about your first kiss 😘
 
 ### Architecture (POC: dual cross-attention LensNet)
 
 1. **Inputs**
-   - `context`: `torch.FloatTensor[N, d]` — embeddings of all entries in the working context (≈8 000 tokens/gists).  
-   - `tail_gists`: `torch.FloatTensor[K, d]` — L2 root plus the latest `K-1` L1 gists (default `K=6`).  
-   - `levels`: `torch.LongTensor[N]` — 0/1/2 markers for legality masking.  
-   - `span_width`: `torch.LongTensor[N]` — number of L0 tokens represented by each entry.  
-   - `distance_to_cursor`: `torch.LongTensor[N]` — block distance from the decode cursor (optional feature; treat as integer tensor).  
+   - `context`: `torch.FloatTensor[N, d]` — embeddings of all entries in the working context (≈8 000 tokens/gists).
+   - `tail_gists`: `torch.FloatTensor[K, d]` — L2 root plus the latest `K-1` L1 gists (default `K=6`).
+   - `levels`: `torch.LongTensor[N]` — 0/1/2 markers for legality masking.
+   - `span_width`: `torch.LongTensor[N]` — number of L0 tokens represented by each entry.
+   - `distance_to_cursor`: `torch.LongTensor[N]` — block distance from the decode cursor (optional feature; treat as integer tensor).
    - All embeddings are down-projected to a LensNet width `d_lens ≈ 512`.
 
-2. **Stage 1 — Tail gists read the context**  
+2. **Stage 1 — Tail gists read the context**
    Using standard attention primitives:
 
 ```python
@@ -512,7 +512,7 @@ attn_g = torch.softmax(q_g @ k_x.T / math.sqrt(d_lens), dim=-1)
 gist_context = attn_g @ v_x      # [K, d_lens]
 ```
 
-3. **Stage 2 — Context queries updated gists**  
+3. **Stage 2 — Context queries updated gists**
 
 ```python
 q_x = context @ W_qx             # [N, d_lens]
@@ -522,7 +522,7 @@ attn_x = torch.softmax(q_x @ k_g.T / math.sqrt(d_lens), dim=-1)
 context_update = attn_x @ v_g    # [N, d_lens]
 ```
 
-4. **Stage 3 — Scoring head**  
+4. **Stage 3 — Scoring head**
    Concatenate simple scalar features (levels, span width, distance) after normalizing them to `[0, 1]` and emit signed utilities:
 
 ```python
@@ -533,19 +533,19 @@ inputs = torch.cat([context_update, features @ W_feat], dim=-1)
 scores = head(inputs).squeeze(-1)  # torch.FloatTensor[N]
 ```
 
-5. **Stacks / refinement**  
+5. **Stacks / refinement**
    Stacking 1–3 such dual-attention blocks improves stability; parameters `(W_qg, W_kx, …)` are shared or re-initialized per block depending on capacity.
 
 **Complexity:** `O(N × K × d_lens)` per pass. With `N ≈ 8k`, `K = 6`, `d_lens = 512`, the update costs ~25 M multiply-adds—negligible relative to the base model decode.
 
 ### Update cadence (block-wise refocus)
 
-LensNet runs **once every K tokens** (POC: K = 32).  
+LensNet runs **once every K tokens** (POC: K = 32).
 During each block update:
 
-1. Gather the latest gists `G`.  
-2. Run LensNet to produce signed scores `u_i`.  
-3. The focus allocator executes expansions/collapses subject to the working-context budget.  
+1. Gather the latest gists `G`.
+2. Run LensNet to produce signed scores `u_i`.
+3. The focus allocator executes expansions/collapses subject to the working-context budget.
 4. The updated context is frozen for the next K tokens.
 
 This matches the intended inference cadence (no per-token recompute).
@@ -555,8 +555,8 @@ This matches the intended inference cadence (no per-token recompute).
 #### 1️⃣ Signed focus supervision
 Each entry receives a **signed target utility** `y_i` derived from counterfactual NLL deltas:
 
-- Expandable items (L1/L2 children) ⇒ positive `y_i > 0`  
-- Collapsible spans ⇒ negative `y_i < 0`  
+- Expandable items (L1/L2 children) ⇒ positive `y_i > 0`
+- Collapsible spans ⇒ negative `y_i < 0`
 - Others ⇒ 0 / masked.
 
 LensNet learns to regress and rank these utilities.
@@ -574,7 +574,7 @@ P = sum_i c_i_plus * ReLU(u_i)
 N = sum_i c_i_minus * ReLU(-u_i)
 L_budget = ((P - N) / (eps + P + N))^2
 ```
-(`c_i^+` / `c_i^-` = token cost / refund.)  
+(`c_i^+` / `c_i^-` = token cost / refund.)
 This encourages net-zero expand/defocus mass per block.
 
 #### 3️⃣ Legality penalties
@@ -583,7 +583,7 @@ Prevent impossible actions:
 ```
 L_illegal = alpha * sum_{L0} ReLU(u_i) + beta * sum_{L2} ReLU(-u_i)
 ```
-(alpha, beta ≈ 0.3).  
+(alpha, beta ≈ 0.3).
 At inference, invalid directions are hard-masked to 0.
 
 #### 4️⃣ Total loss
@@ -594,8 +594,8 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 
 ### Inference procedure
 
-1. **Mask** illegal sides (L0 can’t expand; L2 can’t collapse).  
-2. **Optional rebalance**: rescale positive/negative masses to match before sending to the focus allocator.  
+1. **Mask** illegal sides (L0 can’t expand; L2 can’t collapse).
+2. **Optional rebalance**: rescale positive/negative masses to match before sending to the focus allocator.
 3. The focus allocator greedily applies expand/collapse actions within the token budget, honoring hysteresis rules.
 
 ### Summary of POC parameters
@@ -615,8 +615,8 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 Timings were measured on an NVIDIA L4 with `SmolLM3-3B`. Scaling to larger GPUs (A100/H100) reduces latency proportionally.
 
 
-**In short:**  
-LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).  
+**In short:**
+LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).
 It runs once per block, predicts balanced signed focus scores for every entry, and guides the focus allocator to keep the working context sharp, legal, and budget-neutral.
 
 ---
@@ -679,7 +679,7 @@ For now, the greedy, block-aligned allocator keeps the POC simple while leaving 
 
 ### Joint training (alternating / “EM-style”)
 
-**Goal:** Let all three modules co-adapt without full end-to-end backprop through the discrete focus allocator or long unrolls.  
+**Goal:** Let all three modules co-adapt without full end-to-end backprop through the discrete focus allocator or long unrolls.
 **Method:** Short alternating phases where some modules are frozen while others learn from on-policy signals produced by the frozen parts. Repeat for a few cycles.
 
 #### What “EM-style” means here
@@ -709,7 +709,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 **Intuition:** With the current focusing policy fixed, make gists better drop-in replacements for *exactly the places the policy cares about*.
 
 #### Phase B2 — Update LensNet (fix GistNet + LoRA)
-**Fix:** `Gist`, `LoRA`  
+**Fix:** `Gist`, `LoRA`
 **Update:** `LensNet`
 
 **Procedure:**
@@ -726,7 +726,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 
 
 #### Phase B3 — Update Base-LoRA (fix GistNet + LensNet)
-**Fix:** `Gist`, `LensNet`  
+**Fix:** `Gist`, `LensNet`
 **Update:** `LoRA` (small ranks; keep it tiny)
 
 **Where to place LoRA (recommended):**
@@ -744,10 +744,10 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 #### Schedule & hyperparameters
 
 - **Cycle length:** B1 → B2 → B3 = **one cycle**. Repeat **3–5 cycles**.
-- **Step counts per phase (per cycle):**  
-  - B1 (GistNet): 2–4k steps  
-  - B2 (LensNet): 2–4k steps  
-  - B3 (LoRA): 1–2k steps  
+- **Step counts per phase (per cycle):**
+  - B1 (GistNet): 2–4k steps
+  - B2 (LensNet): 2–4k steps
+  - B3 (LoRA): 1–2k steps
 - **Batching:** mixed long-context tasks; block size K=32; horizon H=64.
 - **Optimizers:** AdamW (bf16), cosine LR with warmup per phase.
 - **Tokens / GPU:** target ~8k effective tokens per microbatch; use gradient accumulation (e.g., 2 microbatches × 4 sequences) to fit within 24 GB GPUs.
@@ -757,18 +757,18 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 
 #### Data flow per cycle (pseudo)
 
-1. **B1:**  
-   - Freeze `LensNet`, `LoRA`.  
-   - Decode blocks with current WC (from LensNet + focus allocator).  
+1. **B1:**
+   - Freeze `LensNet`, `LoRA`.
+   - Decode blocks with current WC (from LensNet + focus allocator).
    - Update `Gist` using on-policy substitutability losses on the replaced spans.
 
-2. **B2:**  
-   - Freeze `Gist`, `LoRA`.  
-   - From the same blocks, compute counterfactual utilities (expand/collapse candidates).  
+2. **B2:**
+   - Freeze `Gist`, `LoRA`.
+   - From the same blocks, compute counterfactual utilities (expand/collapse candidates).
    - Update `LensNet` with signed utilities + budget/legality losses.
 
-3. **B3:**  
-   - Freeze `Gist`, `LensNet`.  
+3. **B3:**
+   - Freeze `Gist`, `LensNet`.
    - Run normal blocks (LensNet + focus allocator active) and update `LoRA` on Task NLL@H (+ weak substitutability keep-alive).
 
 
@@ -806,23 +806,43 @@ MegaContext is *structurally* similar to RAG in that both pull relevant data int
 
 ---
 
-### Conversation: “Isn’t this just RAG with tools?”
+### Roleplay Conversation: “Isn’t this just RAG?”
 
-**Alex (Devil’s Advocate):** We already have agents that retrieve docs, call APIs, and stitch context together. Why train GistNet/LensNet when heuristics plus vector search gives us long-term memory today?
+**Alex (RAG-first engineer):** Retrieval-augmented pipelines already work. We vector-search the corpus, stick the hits onto the prompt, and keep building products. Do we really need a whole MegaContext stack when RAG can just append more context?
 
-**Sam (MegaContext advocate):** RAG retrieves; MegaContext *represents*. The lifetime tree keeps a contiguous, multi-resolution memory so the base model always sees a coherent mix of tokens and gists. Learned focus (LensNet) uses ΔNLL signals to decide what detail actually matters.
+**Sam (MegaContext advocate):** Appending grows the prompt unbounded. MegaContext keeps a *fixed* working window and focuses/defocuses inline. LensNet learns when to zoom in or out, so memories migrate inside the context instead of piling up at the tail. That’s a different contract entirely.
 
-**Alex:** Agents already summarize conversation history and pull relevant snippets on demand. With nightly re-indexing and heuristics for cache hits, it works fine.
+**Jordan (systems architect, middle ground):** Append vs. inline focus has downstream effects. Appends can accumulate distractors, but they’re easy to reason about. Learned focus promises better signal-to-noise, yet we inherit the responsibility of training that policy. It’s a trade-off, not a free lunch.
 
-**Sam:** Until you scale to 100 M+ tokens. MegaContext ensures substitutability at every level, keeps latency bounded (working context stays 8–32 k), and provides traceability—you can pinpoint which gist drove a response. Retrieval snippets can’t guarantee positional alignment or stability.
+**Alex:** Fine, but RAG captures conversation history too—just serialize the transcript and stick summaries into a DB. The agent can query that like any other doc.
 
-**Alex:** Starting from scratch sounds heavy. With RAG, we ship features immediately.
+**Sam:** MegaContext doesn’t distinguish “conversation” from “memory.” Every turn is automatically captured, gisted, and treated identically to preloaded core knowledge. The lifetime tree is one substrate. With RAG, you orchestrate two separate stores—dialogue state and retrievable docs—and wire bespoke rules between them.
 
-**Sam:** MegaContext is about a platform shift. The lifetime tree becomes the knowledge substrate, enabling “cognitive core” models—small weights focused on reasoning while knowledge updates externally. It plays nicely with RAG: ingest retrieved results into the tree, and LensNet manages detail thereafter. Think of it as the memory layer that unifies tools, not a replacement.
+**Jordan:** That orchestration complexity is real, although it gives you knobs. Some teams like explicit pipelines (transcript summary → retrieval rules → appended context). MegaContext collapses it into learned behaviour; updates happen organically, but we give up hard-coded guardrails.
 
-**Alex:** So it complements existing agents?
+**Alex:** What about deciding which details matter? In RAG we can handcraft ranking functions, heuristics, or agent tooling. Training new networks sounds expensive.
 
-**Sam:** Exactly. Tools and RAG stay in the loop, but MegaContext virtualizes memory with learned compression/focus. You trade ad-hoc prompt assembly for a consistent, updatable architecture built to scale.
+**Sam:** In MegaContext the level-of-detail policy is trained end-to-end: LensNet learns which spans to expand or evict, using counterfactual ΔNLL labels. RAG’s relevance scoring is usually heuristic—BM25, embedding cosine, symbolic rules. Those work, but they aren’t adapting to the base model’s actual loss landscape.
+
+**Jordan:** Learned vs. heuristic control echoes the classic “model-free vs. rules” debate. Heuristics are transparent; the learned policy can drift yet potentially squeeze more accuracy. The right choice probably depends on available telemetry and risk tolerance.
+
+**Alex:** Summaries are another point. RAG stores text so the LLM just reads it—no special embedding logic needed.
+
+**Sam:** MegaContext upgrades the embedding space itself. GistNet emits latent vectors aligned with the base model’s embeddings, so the LLM consumes compressed semantics directly. Text summaries cost more tokens and lose nuance; gists carry richer detail per slot.
+
+**Jordan:** That’s appealing, but means you must maintain the gist encoder alongside the base model. Text chunks are portable; latent gists tie you to the MegaContext stack.
+
+**Alex:** Lastly, RAG can only append. But does defocusing really help? Feels like overkill.
+
+**Sam:** Defocus is the whole point. When the user pivots topics, the working context can shed irrelevant spans and pull in the right detail—like a neural chain-of-thought that re-centres on each query. RAG keeps old snippets; they become distractors or get repeatedly summarized.
+
+**Jordan:** That dynamic focus could be a differentiator, especially for multi-turn reasoning. Still, append-only retrieval is battle-tested and simpler to debug. Maybe the sweet spot is using RAG to surface fresh evidence *and* letting MegaContext decide how it lives in memory.
+
+**Alex:** So the pitch isn’t “MegaContext replaces RAG,” it’s “MegaContext manages memory once the data arrives,” right?
+
+**Sam:** Exactly. Use RAG or tools to find new facts, ingest them into the lifetime tree, and let learned focus maintain a compact working set. Two layers working together rather than competing.
+
+**Jordan:** Sounds like convergence then—a pragmatic pipeline might retrieve with RAG, gist with MegaContext, and rely on LensNet to mediate detail. Understanding the differences helps decide which pieces to lean on for a given product or constraint set.
 
 ---
 
@@ -918,11 +938,11 @@ Document a similar narrative under `docs/walkthroughs/` once the POC code path i
 
 ## Implementation roadmap
 
-1. **32→1 GistNet** — implement & train substitutability.  
-2. **Lifetime Tree Builder** — streaming, 2-level hierarchy in RAM.  
-3. **LensNet v1 (non-causal)** — implement query-conditioned scorer, train on offline labels.  
-4. **Focus allocator** — greedy expand/collapse, hysteresis.  
-5. **E2E POC** — run step-loop (score → allocate → update → decode).  
+1. **32→1 GistNet** — implement & train substitutability.
+2. **Lifetime Tree Builder** — streaming, 2-level hierarchy in RAM.
+3. **LensNet v1 (non-causal)** — implement query-conditioned scorer, train on offline labels.
+4. **Focus allocator** — greedy expand/collapse, hysteresis.
+5. **E2E POC** — run step-loop (score → allocate → update → decode).
 6. **Evaluate** — loss vs budget, C1/C2 relevance, stress tests.
 
 ---
@@ -1025,10 +1045,10 @@ Pruning is easiest if provenance, access counts, and tagging hooks exist from da
 
 ## Future directions
 
-- Async disk streaming of the lifetime tree.  
-- RL-trained focus allocator optimizing accuracy × latency.  
-- Multi-token gists for structured data.  
-- Joint training of LLM + MegaContext from scratch.  
+- Async disk streaming of the lifetime tree.
+- RL-trained focus allocator optimizing accuracy × latency.
+- Multi-token gists for structured data.
+- Joint training of LLM + MegaContext from scratch.
 - Shared or federated lifetime memories between agents.
 - Adaptive pruning of lifetime memory to keep knowledge fresh and storage bounded (see [Pruning lifetime context](#pruning-lifetime-context)).
 
@@ -1036,10 +1056,10 @@ Pruning is easiest if provenance, access counts, and tagging hooks exist from da
 
 ## License & contributions
 
-MIT License (suggested).  
+MIT License (suggested).
 PRs welcome — please include reproducible tests for GistNet, LensNet, the focus allocator, and end-to-end demos.
 
 ---
 
-*MegaContext virtualizes sequence memory just as MegaTexture virtualized textures — focusing detailed computation only where needed.  
+*MegaContext virtualizes sequence memory just as MegaTexture virtualized textures — focusing detailed computation only where needed.
 It opens a path to persistent, updatable, and truly lifelong language models.*
