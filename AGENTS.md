@@ -1,7 +1,8 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `README.md` holds the definitive architecture spec; update it alongside any code changes so the high-level contract stays current.
+- `README.md` holds the definitive architecture spec; read it before making changes, and update it whenever implementation work shifts the high-level contract so it always reflects the current system.
+- `POC_PLAN.md` captures the active phase/feature/task roadmap; always review it before starting work, record progress as tasks complete, and log newly discovered work items there so hand-offs stay seamless.
 - Keep visual assets such as `megacontext.png` (and future diagrams) in an `assets/` subtree; reference them from docs with relative paths.
 - When adding implementation work, organize runtime code under `src/` and supporting experiments under `research/`; mirror that structure in `tests/` so each module has a focused test target.
 
@@ -9,7 +10,7 @@
 - Prefer Python-native workflows: document setup via `uv` or `poetry` (e.g., `uv venv`, `uv pip install -r requirements.txt`, `uv run python -m <module>`).
 - Provide CLI entry points or `python -m` commands for routine tasks (`python -m tools.format`, `uv run ruff check`, `uv run black .`), and consolidate common tasks into scripts under `tools/`.
 - Use `pytest` for unit and integration coverage: standard command is `uv run pytest --maxfail=1 --disable-warnings`.
-- Prototype notebooks should rely on `uv` or `poetry` lockfiles—document any new dependencies in `pyproject.toml` and regenerate the lock before committing.
+- Prototype notebooks should rely on `uv` or `poetry` lockfiles; document any new dependencies in `pyproject.toml` and regenerate the lock before committing.
 
 ## Coding Style & Naming Conventions
 - Default to Python 3.11; enforce `ruff` + `black` via pre-commit to keep imports sorted and code wrapped at 88 columns.

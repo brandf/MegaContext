@@ -1,0 +1,9 @@
+dataset_name: sample_text
+tokenizer: gpt2
+block_size: 32
+splits:
+  train:
+    name: train
+    source: ../../data/raw/sample_text.txt
+    output_path: ../../data/sample_text/train.arrow
+    max_files: 1

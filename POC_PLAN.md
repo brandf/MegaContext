@@ -6,26 +6,26 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
 **Goal:** Stand up the frozen base-model runtime, data tooling, and observability so later modules plug into a stable loop.
 
 - **Feature 1.1: Environment bootstrap & repository skeleton**
-  - Task 1.1.1: Add `pyproject.toml` targeting Python 3.11 with dependencies (`torch`, `transformers`, `accelerate`, `datasets`, `wandb`, `uv`, `ruff`, `black`, `pytest`); lock with `uv lock`.
-  - Task 1.1.2: Provide `tools/bootstrap_env.py` (or shell script) that runs `uv venv`, installs requirements, and prints canonical commands.
-  - Task 1.1.3: Configure `ruff`/`black` plus pre-commit hooks in `.pre-commit-config.yaml`; wire `uv run pre-commit install`.
-  - Task 1.1.4: Scaffold module directories (`src/runtime`, `src/data`, `src/utils`) with parallel `tests/` stubs and placeholder smoke tests.
+  - [x] Task 1.1.1: Add `pyproject.toml` targeting Python 3.11 with dependencies (`torch`, `transformers`, `accelerate`, `datasets`, `wandb`, `uv`, `ruff`, `black`, `pytest`); lock with `uv lock`.
+  - [x] Task 1.1.2: Provide `tools/bootstrap_env.py` (or shell script) that runs `uv venv`, installs requirements, and prints canonical commands.
+  - [x] Task 1.1.3: Configure `ruff`/`black` plus pre-commit hooks in `.pre-commit-config.yaml`; wire `uv run pre-commit install`.
+  - [x] Task 1.1.4: Scaffold module directories (`src/runtime`, `src/data`, `src/utils`) with parallel `tests/` stubs and placeholder smoke tests.
 
 - **Feature 1.2: Dataset staging pipeline**
-  - Task 1.2.1: Implement `tools/prepare_dataset.py` to tokenize raw text into contiguous 32-token blocks, writing `.arrow` shards under `data/<dataset>/<split>.arrow` plus metadata (tokenizer, block size).
-  - Task 1.2.2: Define `configs/data/<dataset>.yaml`; validate via Pydantic or `pydantic-core` schemas.
-  - Task 1.2.3: Add dataset unit tests covering config parsing and a tiny synthetic corpus to prove deterministic chunking.
+  - [x] Task 1.2.1: Implement `tools/prepare_dataset.py` to tokenize raw text into contiguous 32-token blocks, writing `.arrow` shards under `data/<dataset>/<split>.arrow` plus metadata (tokenizer, block size).
+  - [x] Task 1.2.2: Define `configs/data/<dataset>.yaml`; validate via Pydantic or `pydantic-core` schemas.
+  - [x] Task 1.2.3: Add dataset unit tests covering config parsing and a tiny synthetic corpus to prove deterministic chunking.
 
 - **Feature 1.3: Base LLM wrapper & working context I/O**
-  - Task 1.3.1: Implement `src/runtime/base_model.py` with `BaseModel.from_pretrained()` loading `HuggingFaceTB/SmolLM3-3B` (bf16), exposing `forward(inputs_embeds, attention_mask, position_ids=None)`.
-  - Task 1.3.2: Create an initial `src/runtime/working_context.py` that returns pass-through tensors from tokens only; include dataclasses matching `WorkingEntry` from the README for later replacement.
-  - Task 1.3.3: Provide CLI `uv run python -m tools.decode_demo --config configs/runs/base_llm.yaml` that streams a short prompt and verifies logits generation.
-  - Task 1.3.4: Write integration tests mocking a small tokenizer to assert logits have correct batch/sequence shapes.
+  - [x] Task 1.3.1: Implement `src/runtime/base_model.py` with `BaseModel.from_pretrained()` loading `HuggingFaceTB/SmolLM3-3B` (bf16), exposing `forward(inputs_embeds, attention_mask, position_ids=None)`.
+  - [x] Task 1.3.2: Create an initial `src/runtime/working_context.py` that returns pass-through tensors from tokens only; include dataclasses matching `WorkingEntry` from the README for later replacement.
+  - [x] Task 1.3.3: Provide CLI `uv run python -m tools.decode_demo --config configs/runs/base_llm.yaml` that streams a short prompt and verifies logits generation.
+  - [x] Task 1.3.4: Write integration tests mocking a small tokenizer to assert logits have correct batch/sequence shapes.
 
 - **Feature 1.4: Observability & logging**
-  - Task 1.4.1: Wire basic Weights & Biases logging (guarded by env flag) for losses, throughput, and config snapshots.
-  - Task 1.4.2: Add structured logging to `artifacts/run_logs/` for latency, memory, and token throughput.
-  - Task 1.4.3: Document setup + run instructions in `README.md` and `docs/runs/base_runtime.md`.
+  - [x] Task 1.4.1: Wire basic Weights & Biases logging (guarded by env flag) for losses, throughput, and config snapshots.
+  - [x] Task 1.4.2: Add structured logging to `artifacts/run_logs/` for latency, memory, and token throughput.
+  - [x] Task 1.4.3: Document setup + run instructions in `README.md` and `docs/runs/base_runtime.md`.
 
 **Exit criteria:** One-command environment setup, dataset preparation for a sample corpus, base LLM decoding 32-token blocks via CLI, CI passes on lint/tests, and metrics visible in W&B.
 
@@ -223,4 +223,3 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 10.3.3: Provide deployment guidance for running MegaContext-enabled models in production or demos.
 
 **Exit criteria:** Second EM cycle converges with measurable benchmark gains, artifacts packaged for sharing, visualization assets refreshed, and documentation captures outcomes plus forward-looking research directions.
-

@@ -1,0 +1,1 @@
+MegaContext unlocks practically infinite context windows by distilling 32-token spans into lightweight gist embeddings. This placeholder corpus exists purely to demonstrate the dataset preparation tooling.
