@@ -84,11 +84,12 @@ These definitions appear throughout the rest of the document; refer back here wh
 
 | Module | Suggested path | Responsibilities | Key inputs/outputs |
 |--------|----------------|------------------|--------------------|
-| GistNet | `src/gist/gistnet.py` | Train & serve 32→1 gists, populate lifetime tree nodes | Input: token embeddings; Output: gist vectors + metrics |
+| GistNet | `src/gistnet/` | Train & serve 32→1 gists, populate lifetime tree nodes | Input: token embeddings; Output: gist vectors + metrics |
 | Lifetime tree | `src/memory/tree.py` | Maintain contiguous-in-time hierarchy (L0/L1/L2) in RAM | Input: gists/tokens; Output: node handles, metadata |
 | Focus allocator | `src/focus/allocator.py` | Apply LensNet scores to expand/collapse blocks | Input: working-context entries, scores; Output: refreshed WC |
 | LensNet | `src/focus/lensnet.py` | Score each WC entry for detail adjustments | Input: WC entries + tail gists; Output: focus scores |
 | Runtime loop | `src/runtime/engine.py` | Orchestrate ingest → refocus → decode | Input: streaming tokens; Output: next-token logits, telemetry |
+| CLI tools | `tools/` | Command-line helpers for dataset prep, logging, evaluation | Input: CLI args/config; Output: reports, artifacts |
 | Evaluation/tests | `tests/` mirrored per module | Validate substitutability, focus policy, end-to-end behavior | Input: synthetic + real traces |
 
 ### Suggested data structures (Python-style)
@@ -147,6 +148,7 @@ Qwen/Qwen3-1.7B`. Both run comfortably on a single 24–48 GB GPU.
 - **Logging:** use [Weights & Biases](https://wandb.ai) for metrics and counterfactual ΔNLL traces; keep raw gists in memory for the POC.
 - **Precision:** bf16 for model forward/backward; fp16 for gist snapshots if you need serialization.
 - **Configuration:** place experiment configs under `configs/` (YAML) documenting block size `K`, horizon `H`, ΔNLL sampling strategy, and thresholds (`τ_expand`, `τ_collapse`).
+- **Storage layout:** persist lifetime memory as `{L0,L1,L2}.ctx` flat binary files (e.g., int for tokens and fp16 for vectors). Fixed block sizes make byte offsets deterministic, so no external index is required.
 
 ### Sample run config (`configs/runs/poc_smollm3.yaml`)
 
@@ -177,6 +179,13 @@ logging:
   wandb_project: megacontext-poc
   log_interval: 50
 artifacts_dir: artifacts/
+cli_tools_dir: tools/
+storage:
+  lifetime_dir: artifacts/lifetime/
+  files:
+    L0: L0.ctx
+    L1: L1.ctx
+    L2: L2.ctx
 ```
 
 The remaining sections reference these interfaces when describing training and evaluation pipelines.
@@ -759,6 +768,7 @@ Refer to the detailed phase descriptions above and track the following during ea
 - **Configs:** mirror each run’s YAML under `configs/runs/` so experiments are reproducible.
 - **Testing harness:** add PyTest suites under `tests/` (e.g., `tests/test_gistnet.py`, `tests/test_focus_allocator.py`) and wire `make test` to execute `pytest --maxfail=1 --disable-warnings --cov=src`.
 - **Local tooling:** provide `make setup`, `make fmt`, and `make lint` targets that wrap environment bootstrap, `ruff`, and `black` so contributors can reproduce the workflow quickly.
+- **CLI scripts:** keep dataset/labeling helpers in `tools/` and expose them through `make` (e.g., `make ingest-data`, `make label-dnll`) so automated runs stay consistent.
 
 ### Limitations & failure modes (watchlist)
 
@@ -775,7 +785,7 @@ Refer to the detailed phase descriptions above and track the following during ea
 - **Boundary diagnostics:** ensure gist boundaries do not leak information across spans; use synthetic edge cases.
 - **Compression stress:** validate substitutability at 1024× compression with narrative and code samples.
 - **Resource trace:** log GPU memory, wall-clock latency per block, and reallocations to confirm constant compute.
-- **Benchmarks:** run LongBench or InfiniteBench subsets to compare against baseline summarization/RAG strategies.
+- **Benchmarks:** gate PRs on LongBench (NarrativeQA, Qasper) and InfiniteBench coding/story tasks; add HELM-LC suites once the pipeline stabilizes to compare against baseline summarization/RAG strategies.
 
 ### Example walkthrough (toy coding session)
 
