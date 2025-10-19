@@ -26,8 +26,8 @@ MegaContext removes this limit by separating:
 
 - **Lifetime gist tree** — built incrementally as text streams in (every 32 tokens → L1 gist; every 32 L1 gists → L2 gist; etc.).  
 - **Working context** — contiguous window over the tree; total token cost is capped by `W_max`.  
-- **GistNet** — a lightweight network that compresses local spans (e.g., 32→1) into *gists* that act as substitutable stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full lifetime history.  
-- **LensNet + allocator** — LensNet scores each working-context feature for expansion or collapse; a deterministic allocator applies those scores, streaming finer- or coarser-grained gists/tokens in and out while respecting the budget.
+- **GistNet** — a lightweight network that compresses local spans (e.g., 32→1) into **gists** that act as substitutable stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full lifetime history.  
+- **LensNet + allocator** — LensNet scores each working-context entry (token embedding or gist) for expansion or collapse; a deterministic allocator applies those scores, streaming finer- or coarser-grained entries in and out while respecting the budget.
 
 ### Analogy: MegaTexture → MegaContext
 This is not required to understand MegaContext, but for those that are interested in learning about the inspiration [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
@@ -55,6 +55,28 @@ Streaming text  ──► 1️⃣ Lifetime Gist Tree  ──►  Allocator ─�
 4. **Decode.** The frozen base LLM consumes the refreshed working context to predict the next token(s), feeding newly generated tokens back into step 1.
 
 The next sections unpack each stage: lifetime storage, compression (GistNet), focus control (LensNet + allocator), and the training schedule that keeps them aligned.
+
+---
+
+### Key terms & invariants
+
+| Term | Meaning |
+|------|---------|
+| `Lifetime context` | Full, append-only history stored as a hierarchical gist tree (disk later, RAM for the POC). |
+| `Working context` (`WC`) | Fixed-size GPU window (8k–32k token budget) that the base LLM sees; built from contiguous-in-time entries. |
+| Working-context entry | Either a block of raw tokens (`L0`) or a gist summarizing that block or its ancestors (`L1`, `L2`, …). Exactly one entry covers each moment in the lifetime history. |
+| `L0 / L1 / L2` | Level of detail (LOD): `L0`=tokens, `L1`=32→1 gist, `L2`=gist of gists. Higher `L` means coarser detail and lower token cost. |
+| `W_max` | Token-equivalent budget for the working context (sum of entry costs ≤ `W_max`). |
+| Block size `K` | Number of new tokens processed per update (POC: `K = 32`). |
+| Horizon `H` | Lookahead range used when computing ΔNLL or task losses (typically 32–128 tokens). |
+| ΔNLL@`H` | Change in negative log-likelihood over horizon `H` when replacing a region with its gist; used for supervision. |
+
+**Invariants**
+- Working context entries tile the lifetime history without gaps or overlaps; switching LOD swaps entries but preserves temporal continuity.
+- GistNet outputs **gists** that reuse the base embedding dimension and can replace their source token blocks directly in the working context.
+- LensNet and the allocator update entries between decode steps while keeping the budget and contiguity invariants intact.
+
+These definitions appear throughout the rest of the document; refer back here when new notation shows up later.
 
 ---
 
@@ -278,7 +300,7 @@ It predicts where to spend detail (expand gists into raw tokens) and where to bl
 ### What it operates on
 - LensNet reads the **working context** (not the lifetime tree).  
   It analyzes the embeddings currently fed into the base LLM — the only state that resides on GPU.
-- It outputs one **focus score** per feature (token span or gist).
+- It outputs one **focus score** per entry (token embedding or gist).
 
 ### Why non-causal is essential
 LensNet must understand *future queries* to know which past facts matter.
@@ -295,9 +317,9 @@ A non-causal LensNet can look at the full working context (including the query) 
 
 ### Conceptual overview
 - LensNet runs independently of the frozen base LLM.  
-- It operates directly on the **working context embeddings** (`~8k features`), not on live LLM hidden states.  
+- It operates directly on the **working context embeddings** (≈ 8k entries), not on live LLM hidden states.  
 - It conditions on a small **gist set** (`L2 + last 5 L1` gists, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.  
-- The model outputs one **signed focus score** `u_i` per feature:
+- The model outputs one **signed focus score** `u_i` per entry:
   - `u_i > 0`: expand / focus (increase detail, go one level down)
   - `u_i < 0`: collapse / defocus (reduce detail, go one level up)
 
@@ -312,26 +334,26 @@ This enables the model’s effective memory to **evolve over time** as new infor
 ### Architecture (POC: dual cross-attention LensNet)
 
 1. **Inputs**
-   - `X ∈ R^{N×d}` — embeddings of all features in the working context (≈ 8 000 tokens or gists).  
+   - `X ∈ R^{N×d}` — embeddings of all entries in the working context (≈ 8 000 tokens or gists).  
    - `G ∈ R^{K×d}` — six gist embeddings from the tail of the context (L2 + 5 L1).  
-   - `φ_i` — per-feature metadata (level, width, distance to cursor, system/user flags, etc.).  
+   - `φ_i` — per-entry metadata (level, width, distance to cursor, system/user flags, etc.).  
    - All embeddings are first **down-projected** to a compact LensNet width `d_lens ≈ 512`.
 
 2. **Stage 1 — Gists read the context (8k → 6)**  
-   Each gist slot attends across all working-context features to build a condensed, query-conditioned representation:
+   Each gist slot attends across all working-context entries to build a condensed, query-conditioned representation:
 
 ```
 tilde_G = Softmax(((G W_Q)(X W_K)^T) / sqrt(d)) * (X W_V)
 ```
 
 3. **Stage 2 — Context reads refined gists (6 → 8k)**  
-   The 8 k context features query the six updated gists to broadcast relevance back:
+   The ≈8k context entries query the six updated gists to broadcast relevance back:
 
 ```
 tilde_X = Softmax(((X W'_Q)(tilde_G W'_K)^T) / sqrt(d)) * (tilde_G W'_V)
 ```
 
-4. **Stage 3 — Per-feature scoring head**  
+4. **Stage 3 — Per-entry scoring head**  
    Concatenate each updated context vector `tilde_X_i` with its metadata `φ_i` and predict a scalar score:
 
 ```
@@ -359,7 +381,7 @@ This matches the intended inference cadence (no per-token recompute).
 ### Training objectives
 
 #### 1️⃣ Signed focus supervision
-Each feature receives a **signed target utility** `y_i` derived from counterfactual NLL deltas:
+Each entry receives a **signed target utility** `y_i` derived from counterfactual NLL deltas:
 
 - Expandable items (L1/L2 children) ⇒ positive `y_i > 0`  
 - Collapsible spans ⇒ negative `y_i < 0`  
@@ -408,20 +430,20 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 
 | Item | Value / Notes |
 |------|----------------|
-| Input embeddings | 8 k features (mixed L0/L1/L2) |
+| Input embeddings | ≈8 k entries (mixed L0/L1/L2) |
 | Conditioning gists | 6 (L2 + 5 L1) |
 | Down-projection width | 512 |
 | Attention heads | 8 |
 | Stacks | 1–3 |
 | Update cadence | every 32 tokens |
-| Output | signed focus score `u_i` per feature |
+| Output | signed focus score `u_i` per entry |
 | Runtime | < 3 ms per update @ 8 k tokens |
 | Params | ≈ 100 k – 200 k total |
 
 
 **In short:**  
 LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).  
-It runs once per block, predicts balanced signed focus scores for every feature, and guides the Allocator to keep the working context sharp, legal, and budget-neutral.
+It runs once per block, predicts balanced signed focus scores for every entry, and guides the Allocator to keep the working context sharp, legal, and budget-neutral.
 
 ---
 
