@@ -80,6 +80,78 @@ These definitions appear throughout the rest of the document; refer back here wh
 
 ---
 
+## POC architecture & interfaces
+
+| Module | Suggested path | Responsibilities | Key inputs/outputs |
+|--------|----------------|------------------|--------------------|
+| GistNet | `src/gist/gistnet.py` | Train & serve 32→1 gists, populate lifetime tree nodes | Input: token embeddings; Output: gist vectors + metrics |
+| Lifetime tree | `src/memory/tree.py` | Maintain contiguous-in-time hierarchy (L0/L1/L2) in RAM | Input: gists/tokens; Output: node handles, metadata |
+| Focus allocator | `src/focus/allocator.py` | Apply LensNet scores to expand/collapse blocks | Input: working-context entries, scores; Output: refreshed WC |
+| LensNet | `src/focus/lensnet.py` | Score each WC entry for detail adjustments | Input: WC entries + tail gists; Output: focus scores |
+| Runtime loop | `src/runtime/engine.py` | Orchestrate ingest → refocus → decode | Input: streaming tokens; Output: next-token logits, telemetry |
+| Evaluation/tests | `tests/` mirrored per module | Validate substitutability, focus policy, end-to-end behavior | Input: synthetic + real traces |
+
+### Suggested data structures (Python-style)
+
+```python
+@dataclass
+class GistNode:
+    span_id: int
+    level: Literal["L0", "L1", "L2"]
+    start_token: int
+    end_token: int
+    embedding: torch.Tensor  # [d]
+    parent_id: Optional[int]
+    child_ids: list[int]
+
+@dataclass
+class WorkingEntry:
+    node_id: int
+    level: Literal["L0", "L1", "L2"]
+    cost: int  # token-equivalent cost
+    metadata: dict[str, float]  # e.g., distance_to_cursor, role_id
+
+@dataclass
+class FocusScore:
+    node_id: int
+    level: Literal["L0", "L1", "L2"]
+    score: float  # signed utility
+    legality: Literal["expandable", "collapsible", "static"]
+```
+
+### Runtime loop pseudocode
+
+```python
+def decode_stream(stream):
+    lifetime = LifetimeTree()
+    working = WorkingContext()
+    lens = LensNet.load(...)
+    allocator = FocusAllocator(...)
+    lm = BaseModel.from_pretrained(...)
+
+    for block in stream.iter_blocks(K=32):
+        nodes = lifetime.ingest_block(block)           # updates L0/L1/L2 nodes
+        working.patch(nodes)                           # ensure contiguous coverage
+        focus_scores = lens.score(working.tail_view(), working.entries())
+        working = allocator.apply(working, focus_scores, lifetime)
+        logits = lm.forward(working.to_tensor())
+        yield logits.argmax()
+        lifetime.append_generated_token(logits.argmax())
+```
+
+### Framework & environment assumptions
+
+- **Base model:** start with `HuggingFaceTB/SmolLM3-3B` (bf16) or, if compute is tighter, `
+Qwen/Qwen3-1.7B`. Both run comfortably on a single 24–48 GB GPU.
+- **Runtime stack:** PyTorch ≥ 2.2 with FlashAttention 2, Hugging Face `transformers`, `accelerate`, and `datasets`.
+- **Logging:** use [Weights & Biases](https://wandb.ai) for metrics and counterfactual ΔNLL traces; keep raw gists in memory for the POC.
+- **Precision:** bf16 for model forward/backward; fp16 for gist snapshots if you need serialization.
+- **Configuration:** place experiment configs under `configs/` (YAML) documenting block size `K`, horizon `H`, ΔNLL sampling strategy, and thresholds (`τ_expand`, `τ_collapse`).
+
+The remaining sections reference these interfaces when describing training and evaluation pipelines.
+
+---
+
 ## Grand vision: why this matters
 
 The POC will prove the mechanism, but the broader implications are transformative:
@@ -276,6 +348,8 @@ Loss = Loss_subst + 0.1 * Loss_recon + 0.05 * Loss_contrast
 | Output | single `g*` vector per span |
 | Runtime | <1 ms per 32-token span on GPU |
 
+Runtime figures assume a single NVIDIA L4 running bf16 inference with `HuggingFaceTB/SmolLM3-3B`; expect faster throughput on A100-class hardware.
+
 ### Training pipeline (POC)
 1. **Dataset:** long-form text (4k–16k tokens), chunked into 32-token spans.  
 2. **Teacher:** frozen base LLM used for ΔNLL@H computation.  
@@ -336,7 +410,7 @@ This enables the model’s effective memory to **evolve over time** as new infor
 1. **Inputs**
    - `X ∈ R^{N×d}` — embeddings of all entries in the working context (≈ 8 000 tokens or gists).  
    - `G ∈ R^{K×d}` — six gist embeddings from the tail of the context (L2 + 5 L1).  
-   - `φ_i` — per-entry metadata (level, width, distance to cursor, system/user flags, etc.).  
+   - `φ_i` — per-entry metadata (`level`, `span_width`, `distance_to_cursor`, `role_id`, `age_steps`, `is_system`).  
    - All embeddings are first **down-projected** to a compact LensNet width `d_lens ≈ 512`.
 
 2. **Stage 1 — Gists read the context (8k → 6)**  
@@ -440,6 +514,8 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 | Runtime | < 3 ms per update @ 8 k tokens |
 | Params | ≈ 100 k – 200 k total |
 
+Timings were measured on an NVIDIA L4 with `SmolLM3-3B`. Scaling to larger GPUs (A100/H100) reduces latency proportionally.
+
 
 **In short:**  
 LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).  
@@ -458,12 +534,13 @@ LensNet alone only supplies signed focus scores. The allocator turns those score
 - **Block alignment:** GistNet currently compresses 32-token blocks. In the POC, every working-context entry must cover exactly one full block at a single LOD (either 32 raw tokens or their 32→1 gist). Higher-level gists (e.g., L2) cover 32 contiguous L1 blocks.
 - **Score granularity:** LensNet may emit per-entry scores, but the allocator aggregates them per block so that siblings share a single action score. A future LensNet variant can predict directly per block to avoid this aggregation.
 - **Action budget:** Apply at most `N_diff` expand/collapse operations per iteration (default 4). This keeps the system near equilibrium and prevents thrashing.
+- **Positional alignment:** When swapping L0/L1 entries, reuse the original absolute token indices for RoPE; gists occupy the central token index of their covered span so the base LLM receives consistent phase information.
 
 ### Greedy loop (POC)
 
 1. **Collect candidates.** Partition focus scores by block and compute one score per expandable or collapsible unit:
-   - Positive scores (`> τ_expand`) become expand candidates (e.g., replace an L1 gist with its 32 L0 tokens or expand an L2 gist into 32 L1 children).
-   - Negative scores (`< -τ_collapse`) become collapse candidates (e.g., replace 32 L0 tokens with their L1 gist).
+   - Positive scores (`> τ_expand`, default 0.2) become expand candidates (e.g., replace an L1 gist with its 32 L0 tokens or expand an L2 gist into 32 L1 children).
+   - Negative scores (`< -τ_collapse`, default 0.2) become collapse candidates (e.g., replace 32 L0 tokens with their L1 gist).
    - Ignore candidates that would violate block alignment (mixed LODs) or budget limits.
 2. **Rank.** Maintain two priority queues: descending for expands, ascending for collapses. Tie-break by recency or distance to the cursor.
 3. **Apply diff-limited updates.** Pop from the queues alternately (largest expand, largest collapse) until:
@@ -475,7 +552,7 @@ LensNet alone only supplies signed focus scores. The allocator turns those score
 
 ### Hysteresis & guardrails
 
-- **Action cooldown:** Track the last action applied per block and dampen (or mask out) the opposite action for `cooldown_steps` iterations. This prevents jitter where the allocator repeatedly expands and collapses the same span.
+- **Action cooldown:** Track the last action applied per block and dampen (or mask out) the opposite action for `cooldown_steps = 2` iterations. This prevents jitter where the allocator repeatedly expands and collapses the same span.
 - **Legality masks:** Blocks at minimum LOD (L0) cannot expand; blocks at maximum LOD (current root level) cannot collapse. These masks should be enforced both in LensNet’s output (runtime masking) and inside the allocator.
 - **Consistency checks:** After every iteration, verify that working-context entries still tile the timeline without overlap and that every node’s children share the same LOD.
 
@@ -489,24 +566,26 @@ For now, the greedy, block-aligned allocator keeps the POC simple while leaving 
 
 ---
 
-## Joint Training (Alternating / “EM-style”): GistNet + LensNet + Base-LoRA
+## Training & Operations
+
+### Joint training (alternating / “EM-style”)
 
 **Goal:** Let all three modules co-adapt without full end-to-end backprop through the discrete focus allocator or long unrolls.  
 **Method:** Short alternating phases where some modules are frozen while others learn from on-policy signals produced by the frozen parts. Repeat for a few cycles.
 
-### What “EM-style” means here
+#### What “EM-style” means here
 We alternate optimization across modules:
 - **E-like step:** hold policy parts fixed to produce supervision/targets (e.g., counterfactual utilities).
 - **M-like step:** update another module to better fit those targets.
 It’s not exact EM; it’s an **alternating optimization schedule** that stabilizes joint training.
 
-### Modules
+#### Modules
 - **GistNet** `Gist` (32→1, two levels; substitutability objective)
 - **LensNet** `LensNet` (dual cross-attn 8k→6→8k; signed focus scores)
 - **Base-LoRA** `LoRA` (tiny adapters on the base LLM to improve gist compatibility)
 - **Focus allocator** is always **discrete greedy** (no relaxation needed)
 
-### Phase B1 — Update GistNet (fix LensNet + LoRA)
+#### Phase B1 — Update GistNet (fix LensNet + LoRA)
 **Fix:** `LensNet`, `LoRA`
 **Update:** `Gist`
 
@@ -520,7 +599,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 
 **Intuition:** With the current focusing policy fixed, make gists better drop-in replacements for *exactly the places the policy cares about*.
 
-### Phase B2 — Update LensNet (fix GistNet + LoRA)
+#### Phase B2 — Update LensNet (fix GistNet + LoRA)
 **Fix:** `Gist`, `LoRA`  
 **Update:** `LensNet`
 
@@ -537,7 +616,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 **Intuition:** Given the current gists, learn a better focusing policy.
 
 
-### Phase B3 — Update Base-LoRA (fix GistNet + LensNet)
+#### Phase B3 — Update Base-LoRA (fix GistNet + LensNet)
 **Fix:** `Gist`, `LensNet`  
 **Update:** `LoRA` (small ranks; keep it tiny)
 
@@ -553,7 +632,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 **Intuition:** Slightly adapt the base to “like” gist tokens and the current WC geometry (positional anchoring, variance, etc.).
 
 
-### Schedule & Hyperparameters
+#### Schedule & hyperparameters
 
 - **Cycle length:** B1 → B2 → B3 = **one cycle**. Repeat **3–5 cycles**.
 - **Step counts per phase (per cycle):**  
@@ -562,10 +641,12 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
   - B3 (LoRA): 1–2k steps  
 - **Batching:** mixed long-context tasks; block size K=32; horizon H=64.
 - **Optimizers:** AdamW (bf16), cosine LR with warmup per phase.
+- **Tokens / GPU:** target ~8k effective tokens per microbatch; use gradient accumulation (e.g., 2 microbatches × 4 sequences) to fit within 24 GB GPUs.
+- **Tokenizer:** reuse the base model’s tokenizer and embedding matrix to avoid drift between gist vectors and token embeddings.
 - **Checkpoints:** save after each phase; early-stop on validation **Loss@H vs. token-budget**.
 
 
-### Data flow per cycle (pseudo)
+#### Data flow per cycle (pseudo)
 
 1. **B1:**  
    - Freeze `LensNet`, `LoRA`.  
@@ -582,7 +663,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
    - Run normal blocks (LensNet + focus allocator active) and update `LoRA` on Task NLL@H (+ weak substitutability keep-alive).
 
 
-### Stability & efficiency tips
+#### Stability & efficiency tips
 
 - **Warm starts:** Do a short **sequential pretrain** (GistNet then LensNet) before the first B1; it reduces early oscillations.
 - **Small LoRA ranks:** r=4–16, low LR; the goal is interface alignment, not knowledge injection.
@@ -592,7 +673,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 - **Telemetry:** track (a) Loss@H vs budget, (b) swap rate, (c) residency time, (d) non-causal C1/C2 tests.
 
 
-### When to stop
+#### When to stop
 - **Validation Loss@H vs budget** improves then plateaus across cycles.
 - **Swap rate** stabilizes; no ping-pong.
 - **Ablations:** freezing any one of {GistNet, LensNet, LoRA} now causes a measurable drop.
@@ -616,26 +697,48 @@ MegaContext is *structurally* similar to RAG in that both pull relevant data int
 
 ---
 
-## Training data & streaming behavior
+### Training data & streaming behavior
 
-- **GistNet training:** any long-form corpus; each 32-token window provides (full vs gist) pairs.  
-- **LensNet training:** logged working-context snapshots from real LLM runs.  Counterfactual losses (`expand`/`collapse`) computed offline.  
-- **Streaming:** as new tokens arrive, the system:  
-  1. Buffers 32 tokens → creates new L1 gist.  
-  2. When 32 L1s exist → create L2 gist.  
-  3. LensNet + focus allocator decide which regions to expand/collapse before the next decode step.
+- **GistNet training:** use long-context corpora such as `pg19`, `BookSum`, or code-heavy datasets (e.g., `the-stack-smol`) to expose diverse structures. Each 32-token window supplies (full vs gist) pairs.
+- **LensNet training:** log working-context snapshots from the runtime loop (synthetic stories, coding sessions, agent traces). Replay them offline to compute counterfactual utilities.
+- **Streaming loop:** as new tokens arrive,
+  1. Buffer 32 tokens → create/update the corresponding L1 gist.
+  2. Promote every set of 32 L1 nodes into an L2 gist.
+  3. Invoke LensNet + focus allocator before the next decode step to rebalance detail.
+- **Serialization (optional):** persist gists as fp16 or 8-bit vectors with JSON metadata (`span_id`, `level`, `timestamp`) if you need to resume runs; otherwise keep them in-memory for the POC.
 
-Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata JSON.
+### Counterfactual ΔNLL labeling
 
----
+1. **Snapshot selection:** capture the working context every `K` tokens along with candidate expand/collapse actions that respect legality masks.
+2. **Batch recompute:** for each candidate, rebuild the context with the alternative LOD and run the frozen base model over a short horizon (`H = 64` by default). Reuse tokenizer outputs; caching KV states across candidates is optional but speeds things up.
+3. **Utility extraction:** compute `ΔNLL = NLL_alt - NLL_base`. Positive values favor expansion (detail helps); negative values favor collapse. Normalize by span width so utilities are comparable across levels.
+4. **Score targets:** store utilities alongside the metadata fields that LensNet consumes (`level`, `width`, `distance_to_cursor`, `role_id`, `age_steps`). These form the supervision targets for LensNet regression/ranking losses.
 
-## Evaluation plan
+This batched approach keeps labeling tractable on a single A100 or L4 instance even for 3 B models.
 
-- **Perplexity vs. token budget** (loss @ Horizon).  
-- **Causal vs. non-causal LensNet** on C1/C2-style tests.  
-- **Boundary artifacts** (information split across spans).  
-- **Stress test** at 1024× compression.  
-- **Memory & compute traces** verifying constant per-step cost.
+### Joint training (alternating / “EM-style”)
+
+Refer to the detailed phase descriptions above and track the following during each cycle:
+- ΔNLL@`H` gap between full vs gist contexts (should shrink over cycles).
+- Net expand/collapse mass per block (should stay near zero).
+- LoRA loss on held-out prompts (ensures base compatibility).
+
+### Instrumentation & artifact handling
+
+- **Logging:** stream metrics (losses, swap rates, residency histograms) to Weights & Biases for later comparison; tag runs by dataset + thresholds.
+- **Checkpoints:** save GistNet, LensNet, and LoRA weights under `artifacts/checkpoints/`. Store counterfactual utility tables under `artifacts/deltas/` (Parquet or Arrow for efficient slicing).
+- **Configs:** mirror each run’s YAML under `configs/runs/` so experiments are reproducible.
+- **Testing harness:** add PyTest suites under `tests/` (e.g., `tests/test_gistnet.py`, `tests/test_focus_allocator.py`) and wire `make test` to execute `pytest --maxfail=1 --disable-warnings --cov=src`.
+- **Local tooling:** provide `make setup`, `make fmt`, and `make lint` targets that wrap environment bootstrap, `ruff`, and `black` so contributors can reproduce the workflow quickly.
+
+### Evaluation & validation checklist
+
+- **Perplexity vs. token budget:** measure ΔNLL@`H` while sweeping `W_max`.
+- **Focus ablations:** compare causal vs. non-causal LensNet, and allocator variants (with/without cooldown).
+- **Boundary diagnostics:** ensure gist boundaries do not leak information across spans; use synthetic edge cases.
+- **Compression stress:** validate substitutability at 1024× compression with narrative and code samples.
+- **Resource trace:** log GPU memory, wall-clock latency per block, and reallocations to confirm constant compute.
+- **Benchmarks:** run LongBench or InfiniteBench subsets to compare against baseline summarization/RAG strategies.
 
 ---
 
