@@ -15,7 +15,7 @@
 ## Phase 2 — Structure & Signposting
 - Reorder or trim sections (e.g., relocate **Grand vision**) and add bridges that guide readers from high-level concepts into POC mechanics.
 - Introduce visual aids (diagram reference) and reminder callouts for key invariants.
-**Status:** Pending Phase 1 sign-off.
+**Status:** Ready for your review.
 ### Questions
 - Q4: Are you comfortable moving the **Grand vision** section after the POC mechanics, or would you prefer it summarized instead?
   + A4: yes that's fine.  i don't want it to be a distraction, but at the same time I think it might get people interested in reading the rest of this lengthy document.  your call on what to do with it.  
@@ -27,7 +27,7 @@
 ## Phase 3 — Implementation Interfaces & Storage Details
 - Expand API contracts for runtime classes, document tensor shapes, and spell out serialization layouts (`{L0,L1,L2}.ctx` structure).
 - Align tooling guidance with Python-native workflows (no `make`) and clarify dataset preparation steps.
-**Status:** Blocked on Phase 2.
+**Status:** Blocked on Phase 2 sign-off.
 ### Questions
 - Q7: Do you prefer standard `uv` CLI invocations or `poetry run` as the canonical example in docs?
   + A7: i'm not that familiar with either (or python ecosystem in general) so use your best judgement for whatever is appropriate / modern / popular.
@@ -39,7 +39,7 @@
 ## Phase 4 — Evaluation Criteria & Telemetry
 - Document success thresholds (ΔNLL targets, swap rates, latency budgets) and failure signals so implementers know how to validate runs.
 - Clarify recommended defaults for allocator thresholds/cooldowns and logging expectations.
-**Status:** Blocked on Phase 3.
+**Status:** Blocked on Phase 3 sign-off.
 ### Questions
 - Q10: What ΔNLL reduction and swap-rate ranges should we present as acceptable for the POC?
   + A10: I have never done any serious LLM evals or even a big LLM project like this before, so idk.  use youre best judgement.  What I would like the POC to show is that compared to the non-MegaContext base model the MegaContext version is faster (and compute is bounded) at long contexts for similar or better accuracy.

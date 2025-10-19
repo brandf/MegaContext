@@ -10,7 +10,7 @@ It separates a model’s context into a lifetime context (a hierarchical gist tr
 
 A lightweight learned LensNet (and streaming focus allocator) continuously/incrementally refocus the full lifetime context onto the working context, giving the model effectively infinite memory at constant compute.
 
-The next section walks through how the runtime loop stays within a fixed working context while tracking the entire lifetime history. A later **Grand vision** section explains why the mechanism matters before the remaining sections dive into the proof-of-concept (POC) specification.
+The next section walks through how the runtime loop stays within a fixed working context while tracking the entire lifetime history. Curious about the long-term implications? Jump to [Grand vision](#grand-vision-why-this-matters) near the end; the intervening sections drill into the proof-of-concept (POC) mechanics.
 
 ---
 
@@ -58,6 +58,8 @@ Streaming text  ──► Lifetime Gist Tree  ──►  Focus Allocator  ──
 - **Lifetime tree maintenance:** Both user tokens and model-generated tokens are buffered until a full 32-token block (L0) or 32 L1 children are available before rebuilding the corresponding gist nodes. This keeps gist updates block-aligned and prevents churn in the hierarchy.
 - **LensNet conditioning gists:** LensNet only refreshes its conditioning set on its own schedule (e.g., every 256 working-context entries). Those gists can be read from the lifetime tree or recomputed lazily immediately before each LensNet call; either path observes the same block-aligned buffers.
 
+> **Diagram needed — `assets/runtime_flow.png`:** Visualize the streaming loop from incoming tokens → lifetime gist tree → focus allocator → working context → frozen LLM, with LensNet providing feedback into the allocator.
+
 The next sections unpack each stage: lifetime storage, compression (GistNet), focus control (LensNet + focus allocator), and the training schedule that keeps them aligned.
 
 ---
@@ -84,7 +86,19 @@ These definitions appear throughout the rest of the document; refer back here wh
 
 ---
 
+### Document roadmap
+
+1. **POC architecture & interfaces** — maps the runtime modules and data structures you will build.  
+2. **POC scope & performance sketch** — nails down the proof-of-concept boundaries before diving into components.  
+3. **Module deep dives (GistNet, LensNet, allocator)** — explains how each subsystem works and how they cooperate.  
+4. **Training & operations** — covers alternating optimization, labeling, and instrumentation.  
+5. **Roadmap & vision** — situates the prototype within longer-term ambitions in [Grand vision](#grand-vision-why-this-matters) and future directions.
+
+---
+
 ## POC architecture & interfaces
+
+The runtime is divided into focused modules so each invariant from [Key terms & invariants](#key-terms--invariants) has an explicit owner. The table below outlines those responsibilities before the later sections unpack implementation details.
 
 | Module | Suggested path | Responsibilities | Key inputs/outputs |
 |--------|----------------|------------------|--------------------|
@@ -95,6 +109,8 @@ These definitions appear throughout the rest of the document; refer back here wh
 | Runtime loop | `src/runtime/engine.py` | Orchestrate ingest → refocus → decode | Input: streaming tokens; Output: next-token logits, telemetry |
 | CLI tools | `tools/` | Command-line helpers for dataset prep, logging, evaluation | Input: CLI args/config; Output: reports, artifacts |
 | Evaluation/tests | `tests/` mirrored per module | Validate substitutability, focus policy, end-to-end behavior | Input: synthetic + real traces |
+
+> **Diagram needed — `assets/module_stack.png`:** Layer the modules (lifetime tree, working context, LensNet, allocator, base LLM) and annotate data moving between them each decode cycle.
 
 ### Suggested data structures (Python-style)
 
@@ -196,31 +212,9 @@ The remaining sections reference these interfaces when describing training and e
 
 ---
 
-## Grand vision: why this matters
-
-The POC will prove the mechanism, but the broader implications are transformative:
-
-### ♾️ Virtually infinite memory
-Lifetime context can grow unbounded while per-step compute and GPU RAM remain constant.  A conversation could persist for years without retraining or forgetting.
-
-### 🧩 Smaller, smarter models
-An LLM trained end-to-end with MegaContext could shift parameter budget away from memorized facts toward reasoning, abstraction, and planning.  
-Knowledge lives in the *lifetime memory* instead of the weights.
-
-### 💻 Agentic coding & persistent tasks
-Today, agents rely on brittle, lossy context management (manual summarization, sub-agents, RAG hacks).  
-MegaContext treats context management as a **first-class architectural component**, allowing seamless long-term reasoning and creative iteration.
-
-### 🌐 Core knowledge as dynamic system prompt
-Shipping LLMs with a **core lifetime context** transforms in-context learning:  
-the model boots with a massive “system prompt” of structured world knowledge that updates externally and without retraining weights.  
-- A cloud-hosted MegaContext model could refresh its understanding of the world continually, combining retrieval and reasoning in a unified pipeline.
-- An agentic coding system could provide an entire codebase as a system prompt (lifetime context), eliminating the expensive / error prone processes of reading parts of the projects code.
-
----
-
-
 ## POC scope & constraints
+
+With the module map in place, the POC narrows to the following guardrails to ensure we can verify behavior end to end without boiling the ocean:
 
 - **Frozen base LLM** no fine-tuning initially, with LoRA finetuning as a follow up  
 - **Two-level Lifetime gist tree:** The POC will be limited to moderate sized contexts so only 2 layers should be sufficient   
@@ -328,7 +322,9 @@ g_final = LN(MLP(g_final))
 #### Stage 5 — Hierarchical stacking
 - Two 32→1 layers are stacked hierarchically (32² = 1024 tokens per top-level gist).  
 - The lower layer runs directly on token embeddings; the upper operates on lower-layer outputs.
-- This per-block stacking preserves the contiguity invariant noted earlier—each gist still maps to an exact, non-overlapping span in the lifetime history.
+- This per-block stacking preserves the [contiguity invariant](#key-terms--invariants) noted earlier—each gist still maps to an exact, non-overlapping span in the lifetime history.
+
+> **Diagram needed — `assets/gist_hierarchy.png`:** Depict an L0 token block rolling up into an L1 gist and then into an L2 gist, with pointers back to the lifetime timeline.
 
 
 ### Architectural properties
@@ -419,7 +415,7 @@ It predicts where to spend detail (expand gists into raw tokens) and where to bl
 - LensNet reads the **working context** (not the lifetime tree).  
   It analyzes the embeddings currently fed into the base LLM — the only state that resides on GPU.
 - It outputs one **focus score** per entry (token embedding or gist).
-- The contiguity invariant from the glossary ensures each score maps to a single, non-overlapping lifetime span, so expand/collapse actions remain block-aligned.
+- The [contiguity invariant](#key-terms--invariants) from the glossary ensures each score maps to a single, non-overlapping lifetime span, so expand/collapse actions remain block-aligned.
 
 ### Why non-causal is essential
 LensNet must understand *future queries* to know which past facts matter.
@@ -439,8 +435,10 @@ A non-causal LensNet can look at the full working context (including the query) 
 - It operates directly on the **working context embeddings** (≈ 8k entries), not on live LLM hidden states.  
 - It conditions on a small **gist set** (`L2 + last 5 L1` gists, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.  
 - The model outputs one **signed focus score** `u_i` per entry:
-  - `u_i > 0`: expand / focus (increase detail, go one level down)
-  - `u_i < 0`: collapse / defocus (reduce detail, go one level up)
+- `u_i > 0`: expand / focus (increase detail, go one level down)
+- `u_i < 0`: collapse / defocus (reduce detail, go one level up)
+
+> **Diagram needed — `assets/lensnet_focus.png`:** Show LensNet reading a tail slice of gists plus the working context, then emitting signed scores that the allocator converts into expand/collapse actions.
 
 At runtime, the **focus allocator** interprets these scores to expand and collapse spans while keeping the working context within its token budget.
 
@@ -570,7 +568,7 @@ It runs once per block, predicts balanced signed focus scores for every entry, a
 
 ## Focus allocator — block-aligned actions
 
-LensNet alone only supplies signed focus scores. The allocator turns those scores into concrete expand/collapse actions while preserving contiguity, budget, and level-of-detail (LOD) constraints.
+LensNet alone only supplies signed focus scores. The allocator turns those scores into concrete expand/collapse actions while preserving contiguity, budget, and level-of-detail (LOD) constraints. It is the practical enforcer of the [contiguity invariant](#key-terms--invariants) inside the working context.
 
 ### POC constraints & terminology
 
@@ -827,6 +825,26 @@ Document a similar narrative under `docs/walkthroughs/` once the POC code path i
 4. **Focus allocator** — greedy expand/collapse, hysteresis.  
 5. **E2E POC** — run step-loop (score → allocate → update → decode).  
 6. **Evaluate** — loss vs budget, C1/C2 relevance, stress tests.
+
+---
+
+## Grand vision: why this matters
+
+The POC will prove the mechanism; this section zooms out to why it is worth the effort once the core loop is stable.
+
+### ♾️ Virtually infinite memory
+Lifetime context can grow unbounded while per-step compute and GPU RAM remain constant. A conversation could persist for years without retraining or forgetting.
+
+### 🧩 Smaller, smarter models
+An LLM trained end-to-end with MegaContext could shift parameter budget away from memorized facts toward reasoning, abstraction, and planning. Knowledge lives in the *lifetime memory* instead of the weights.
+
+### 💻 Agentic coding & persistent tasks
+Today, agents rely on brittle, lossy context management (manual summarization, sub-agents, RAG hacks). MegaContext treats context management as a **first-class architectural component**, allowing seamless long-term reasoning and creative iteration.
+
+### 🌐 Core knowledge as dynamic system prompt
+Shipping LLMs with a **core lifetime context** transforms in-context learning: the model boots with a massive “system prompt” of structured world knowledge that updates externally and without retraining weights.
+- A cloud-hosted MegaContext model could refresh its understanding of the world continually, combining retrieval and reasoning in a unified pipeline.
+- An agentic coding system could provide an entire codebase as a system prompt (lifetime context), eliminating the expensive / error prone processes of reading parts of the project's code.
 
 ---
 
