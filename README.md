@@ -150,25 +150,72 @@ def decode_stream(stream):
     allocator = FocusAllocator(...)
     lm = BaseModel.from_pretrained(...)
 
+    # Optional helper to maintain tail gists for LensNet
+    tail_gists = TailGistCache(window=5)
+
     for block in stream.iter_blocks(K=32):
         nodes = lifetime.ingest_block(block)           # updates L0/L1/L2 nodes
         working.patch(nodes)                           # ensure contiguous coverage
-        focus_scores = lens.score(working.tail_view(), working.entries())
+
+        g_t = tail_gists.fetch(lifetime, working)      # L2 + recent L1
+        focus_scores = lens.score(
+            entries=working.entries(),
+            tail_view=working.tail_view(),
+            tail_gists=g_t,
+            metadata=working.metadata(),
+        )
         working = allocator.apply(working, focus_scores, lifetime)
-        logits = lm.forward(working.to_tensor())
+        logits = lm.forward(**working.to_tensors())
         yield logits.argmax()
         lifetime.append_generated_token(logits.argmax())
 ```
+
+### Working context API (runtime)
+
+The loop above relies on a small, explicit surface so implementation teams know which tensors to provide to downstream modules.
+
+| Method | Returns | Shape / Notes |
+|--------|---------|---------------|
+| `working.entries()` | `list[WorkingEntry]` | Block-aligned entries sorted by time (`start_token`). |
+| `working.tail_view(k=256)` | `list[WorkingEntry]` | Last `k` entries for instrumentation; defaults to the LensNet update window. |
+| `working.metadata()` | `torch.FloatTensor[W, F]` | Per-entry features (`level`, `span_width`, `distance_to_cursor`, `role_id`, `age_steps`, `is_system`, …) standardized for LensNet. |
+| `working.to_tensors()` | `dict[str, torch.Tensor]` | Keys: `inputs_embeds` (`[W, d]` mixed token/gist embeddings), `attention_mask` (`[W]`), optional `position_ids` (`[W]`). The base LLM wrapper forwards them as `lm.forward(inputs_embeds=..., attention_mask=..., position_ids=...)`. |
+| `TailGistCache.fetch(lifetime, working)` | `torch.FloatTensor[K, d]` | Returns the L2 root plus the latest `window` L1 gists (default 5) aligned to LensNet conditioning. |
+
+The LensNet scorer mirrors this with the signature `lens.score(entries, tail_view, tail_gists, metadata)` and returns a list of `FocusScore` objects, keeping all runtime contracts type-checked.
 
 ### Framework & environment assumptions
 
 - **Base model:** start with `HuggingFaceTB/SmolLM3-3B` (bf16) or, if compute is tighter, `
 Qwen/Qwen3-1.7B`. Both run comfortably on a single 24–48 GB GPU.
 - **Runtime stack:** PyTorch ≥ 2.2 with FlashAttention 2, Hugging Face `transformers`, `accelerate`, and `datasets`.
+- **Environment bootstrap:** prefer [`uv`](https://github.com/astral-sh/uv) for reproducible installs: `uv venv`, `uv pip install -r requirements.txt`, then `uv run python -m pip install -e .` for editable modules if needed.
 - **Logging:** use [Weights & Biases](https://wandb.ai) for metrics and counterfactual ΔNLL traces; keep raw gists in memory for the POC.
 - **Precision:** bf16 for model forward/backward; fp16 for gist snapshots if you need serialization.
 - **Configuration:** place experiment configs under `configs/` (YAML) documenting block size `K`, horizon `H`, ΔNLL sampling strategy, and thresholds (`τ_expand`, `τ_collapse`).
-- **Storage layout:** persist lifetime memory as `{L0,L1,L2}.ctx` flat binary files (e.g., int for tokens and fp16 for vectors). Fixed block sizes make byte offsets deterministic, so no external index is required.
+- **Dataset staging:** tokenize corpora into contiguous 32-token blocks and store them as `.arrow` shards under `data/<dataset>/<split>.arrow`; provide `uv run python -m tools.prepare_dataset --config configs/data/<name>.yaml` to regenerate them.
+- **Storage layout:** persist lifetime memory as `{L0,L1,L2}.ctx` binary files with a fixed header plus packed data (see below). Fixed block sizes make byte offsets deterministic, so no external index is required.
+
+### Binary storage layout (`{L0,L1,L2}.ctx`)
+
+Each file begins with a 64-byte header followed by tightly packed payloads. The header uses little-endian encoding and the following fields:
+
+| Offset | Field | Type | Meaning |
+|--------|-------|------|---------|
+| 0 | `magic` | `uint32` | Constant `0x4D434354` (`MCCT`) to detect corruption. |
+| 4 | `version` | `uint16` | Format revision (start at `1`). |
+| 6 | `level` | `uint16` | 0, 1, or 2 indicating `L0`, `L1`, or `L2`. |
+| 8 | `block_size` | `uint16` | Number of L0 tokens per gist (default 32). |
+| 10 | `embedding_dim` | `uint16` | Width `d` of gist vectors (for `L1`/`L2`). |
+| 12 | `dtype_code` | `uint16` | 0=`uint32`, 1=`fp16`, 2=`bf16`. |
+| 14 | `model_name` | `char[32]` | UTF-8 null-terminated identifier of the base model (e.g., `SmolLM3-3B`). |
+| 46 | `reserved` | 18 bytes | Zeroed; available for future metadata (checksum, flags). |
+
+Payload layout per level:
+- **L0 (`dtype_code=0`):** contiguous `uint32` token ids matching the base tokenizer vocabulary. Each block stores exactly `block_size` entries.
+- **L1/L2 (`dtype_code=1`):** contiguous `fp16` vectors of shape `[num_nodes, embedding_dim]`. Gists inherit the same orientation as the base embedding matrix, so random access is `offset = header_size + index * embedding_dim * 2`.
+
+Per-node metadata (`span_id`, `start_token`, `level`, parent/child pointers) stays in the lifetime tree’s in-memory index; because the binary payloads are fixed-width, offsets can always be recomputed on the fly.
 
 ### Sample run config (`configs/runs/poc_smollm3.yaml`)
 
@@ -769,9 +816,9 @@ Refer to the detailed phase descriptions above and track the following during ea
 - **Logging:** stream metrics (losses, swap rates, residency histograms) to Weights & Biases for later comparison; tag runs by dataset + thresholds.
 - **Checkpoints:** save GistNet, LensNet, and LoRA weights under `artifacts/checkpoints/`. Store counterfactual utility tables under `artifacts/deltas/` (Parquet or Arrow for efficient slicing).
 - **Configs:** mirror each run’s YAML under `configs/runs/` so experiments are reproducible.
-- **Testing harness:** add PyTest suites under `tests/` (e.g., `tests/test_gistnet.py`, `tests/test_focus_allocator.py`) and wire `make test` to execute `pytest --maxfail=1 --disable-warnings --cov=src`.
-- **Local tooling:** provide `make setup`, `make fmt`, and `make lint` targets that wrap environment bootstrap, `ruff`, and `black` so contributors can reproduce the workflow quickly.
-- **CLI scripts:** keep dataset/labeling helpers in `tools/` and expose them through `make` (e.g., `make ingest-data`, `make label-dnll`) so automated runs stay consistent.
+- **Testing harness:** add PyTest suites under `tests/` (e.g., `tests/test_gistnet.py`, `tests/test_focus_allocator.py`) and document `uv run pytest --maxfail=1 --disable-warnings --cov=src` as the canonical invocation.
+- **Local tooling:** provide Python entry points under `tools/` (e.g., `python -m tools.format`, `python -m tools.lint`) that wrap `ruff` and `black` so contributors can run `uv run python -m tools.format` / `uv run python -m tools.lint`.
+- **CLI scripts:** expose dataset/labeling helpers as modules (`python -m tools.ingest_data`, `python -m tools.label_dnll`) and register hydra/typer CLIs if needed; keep lightweight wrappers under `scripts/` for automation.
 
 ### Limitations & failure modes (watchlist)
 

@@ -27,7 +27,7 @@
 ## Phase 3 — Implementation Interfaces & Storage Details
 - Expand API contracts for runtime classes, document tensor shapes, and spell out serialization layouts (`{L0,L1,L2}.ctx` structure).
 - Align tooling guidance with Python-native workflows (no `make`) and clarify dataset preparation steps.
-**Status:** Blocked on Phase 2 sign-off.
+**Status:** Ready for your review.
 ### Questions
 - Q7: Do you prefer standard `uv` CLI invocations or `poetry run` as the canonical example in docs?
   + A7: i'm not that familiar with either (or python ecosystem in general) so use your best judgement for whatever is appropriate / modern / popular.
