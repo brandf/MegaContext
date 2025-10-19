@@ -44,7 +44,7 @@ The core intuition that's motivating this work is that long context is only usef
 ### Runtime lifecycle at a glance
 
 ```
-Streaming text  ──► 1️⃣ Lifetime Gist Tree  ──►  Focus Allocator  ──►  Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
+Streaming text  ──► Lifetime Gist Tree  ──►  Focus Allocator  ──►  Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
                                ▲                    ▲          
                                └───────── LensNet ──┘
 ```
@@ -507,7 +507,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 - **Focus allocator** is always **discrete greedy** (no relaxation needed)
 
 ### Phase B1 — Update GistNet (fix LensNet + LoRA)
-**Fix:** `LensNet`, `LoRA`, focus allocator  
+**Fix:** `LensNet`, `LoRA`
 **Update:** `Gist`
 
 **Procedure (on-policy):**
