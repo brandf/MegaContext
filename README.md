@@ -148,6 +148,37 @@ Qwen/Qwen3-1.7B`. Both run comfortably on a single 24–48 GB GPU.
 - **Precision:** bf16 for model forward/backward; fp16 for gist snapshots if you need serialization.
 - **Configuration:** place experiment configs under `configs/` (YAML) documenting block size `K`, horizon `H`, ΔNLL sampling strategy, and thresholds (`τ_expand`, `τ_collapse`).
 
+### Sample run config (`configs/runs/poc_smollm3.yaml`)
+
+```yaml
+run_name: poc_smollm3_l4
+base_model: HuggingFaceTB/SmolLM3-3B
+tokenizer: HuggingFaceTB/SmolLM3-3B
+precision: bf16
+block_size: 32                # K
+working_budget: 8192          # W_max
+horizon: 64                   # H for ΔNLL labeling
+focus_thresholds:
+  expand: 0.2
+  collapse: 0.2
+  cooldown_steps: 2
+datasets:
+  gistnet_pretrain:
+    - pg19
+    - booksum
+  lensnet_traces:
+    - synthetic_coding_sessions
+    - longbench_narratives
+optimizer:
+  lr: 1.0e-4
+  weight_decay: 0.01
+  scheduler: cosine
+logging:
+  wandb_project: megacontext-poc
+  log_interval: 50
+artifacts_dir: artifacts/
+```
+
 The remaining sections reference these interfaces when describing training and evaluation pipelines.
 
 ---
@@ -525,8 +556,6 @@ It runs once per block, predicts balanced signed focus scores for every entry, a
 
 ## Focus allocator — block-aligned actions
 
-*(Name TBD: “focus allocator” is a working title until we settle on something punchier.)*
-
 LensNet alone only supplies signed focus scores. The allocator turns those scores into concrete expand/collapse actions while preserving contiguity, budget, and level-of-detail (LOD) constraints.
 
 ### POC constraints & terminology
@@ -731,6 +760,14 @@ Refer to the detailed phase descriptions above and track the following during ea
 - **Testing harness:** add PyTest suites under `tests/` (e.g., `tests/test_gistnet.py`, `tests/test_focus_allocator.py`) and wire `make test` to execute `pytest --maxfail=1 --disable-warnings --cov=src`.
 - **Local tooling:** provide `make setup`, `make fmt`, and `make lint` targets that wrap environment bootstrap, `ruff`, and `black` so contributors can reproduce the workflow quickly.
 
+### Limitations & failure modes (watchlist)
+
+- **Gist drift:** substitutability degrades if GistNet overfits; monitor ΔNLL@`H` gaps and refresh ΔNLL labels after each B1 phase.
+- **Allocator oscillation:** repeated expand/collapse of the same block indicates thresholds/cooldown need adjustment; histogram residency times to catch this.
+- **Boundary artifacts:** compressed spans that straddle critical tokens (e.g., function definitions) may cause performance cliffs; add targeted tests for boundary cases.
+- **Latency spikes:** excessive counterfactual sampling or large `N_diff` values can break constant-time promises; record per-iteration latency in telemetry.
+- **Positional aliasing:** swapping gists without reusing original indices can shift RoPE phases; ensure instrumentation validates positional consistency.
+
 ### Evaluation & validation checklist
 
 - **Perplexity vs. token budget:** measure ΔNLL@`H` while sweeping `W_max`.
@@ -739,6 +776,17 @@ Refer to the detailed phase descriptions above and track the following during ea
 - **Compression stress:** validate substitutability at 1024× compression with narrative and code samples.
 - **Resource trace:** log GPU memory, wall-clock latency per block, and reallocations to confirm constant compute.
 - **Benchmarks:** run LongBench or InfiniteBench subsets to compare against baseline summarization/RAG strategies.
+
+### Example walkthrough (toy coding session)
+
+1. **Setup:** Load a small TypeScript project summary into lifetime memory (≈4k tokens) and seed the working context with the latest user/system gists.
+2. **User turn:** “Add logging to the `fetchUser` helper.” Ingest tokens into the lifetime tree (32-token blocks) and update L1 gists.
+3. **LensNet pass:** Scores the new query tokens highly (`u_i ≈ +0.4`) and suggests expanding the gist that summarizes `fetchUser`.
+4. **Focus allocator:** Applies one expand action (L1→32×L0) and one collapse on distant chatter (`u_i ≈ -0.3`), staying within `W_max`.
+5. **Decode:** The base LLM, now seeing raw tokens for `fetchUser`, produces the patch. Newly generated code is appended to the lifetime tree.
+6. **Trace capture:** Log ΔNLL utilities, focus actions, and residency times to W&B for later analysis.
+
+Document a similar narrative under `docs/walkthroughs/` once the POC code path is live so future contributors can replay it end to end.
 
 ---
 
