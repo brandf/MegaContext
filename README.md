@@ -644,6 +644,19 @@ LensNet alone only supplies signed focus scores. The allocator turns those score
 - **Legality masks:** Blocks at minimum LOD (L0) cannot expand; blocks at maximum LOD (current root level) cannot collapse. These masks should be enforced both in LensNet’s output (runtime masking) and inside the allocator.
 - **Consistency checks:** After every iteration, verify that working-context entries still tile the timeline without overlap and that every node’s children share the same LOD.
 
+### Recommended runtime defaults
+
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `τ_expand` | 0.20 | Minimum signed score magnitude before expanding an entry. |
+| `τ_collapse` | 0.20 | Symmetric collapse threshold; keep equal to `τ_expand` until adaptive tuning is available. |
+| `N_diff` | 4 | Maximum expand/collapse actions per iteration to cap churn. |
+| `cooldown_steps` | 2 | Minimum iterations before a block can flip actions. |
+| `lens_update_interval` | 32 tokens (`K`) | LensNet runs once per block and consumes cached tail gists. |
+| `tail_gist_window` | 5 L1 nodes + current L2 | Conditioning set passed to LensNet. |
+
+These defaults keep the working context near equilibrium while allowing meaningful detail movement; they are the baseline values for automated tests and ablations.
+
 ### Future directions
 
 - Smarter action selection (e.g., matching total expand/collapse mass, soft assignments, or small linear programs) to balance budget and latency.
@@ -819,6 +832,7 @@ Refer to the detailed phase descriptions above and track the following during ea
 - **Testing harness:** add PyTest suites under `tests/` (e.g., `tests/test_gistnet.py`, `tests/test_focus_allocator.py`) and document `uv run pytest --maxfail=1 --disable-warnings --cov=src` as the canonical invocation.
 - **Local tooling:** provide Python entry points under `tools/` (e.g., `python -m tools.format`, `python -m tools.lint`) that wrap `ruff` and `black` so contributors can run `uv run python -m tools.format` / `uv run python -m tools.lint`.
 - **CLI scripts:** expose dataset/labeling helpers as modules (`python -m tools.ingest_data`, `python -m tools.label_dnll`) and register hydra/typer CLIs if needed; keep lightweight wrappers under `scripts/` for automation.
+- **Telemetry (required):** emit per-iteration metrics (`loss_at_h`, `swap_rate`, `mean_residency`, `latency_ms`, `token_budget_utilization`) and persist them alongside allocator action traces so regressions are diagnosable.
 
 ### Limitations & failure modes (watchlist)
 
@@ -830,12 +844,22 @@ Refer to the detailed phase descriptions above and track the following during ea
 
 ### Evaluation & validation checklist
 
-- **Perplexity vs. token budget:** measure ΔNLL@`H` while sweeping `W_max`.
-- **Focus ablations:** compare causal vs. non-causal LensNet, and allocator variants (with/without cooldown).
-- **Boundary diagnostics:** ensure gist boundaries do not leak information across spans; use synthetic edge cases.
-- **Compression stress:** validate substitutability at 1024× compression with narrative and code samples.
-- **Resource trace:** log GPU memory, wall-clock latency per block, and reallocations to confirm constant compute.
-- **Benchmarks:** gate PRs on LongBench (NarrativeQA, Qasper) and InfiniteBench coding/story tasks; add HELM-LC suites once the pipeline stabilizes to compare against baseline summarization/RAG strategies.
+**Accuracy & compression**
+- **ΔNLL vs budget:** sweep `W_max` (4k → 16k) using held-out long-form tasks; target ΔNLL degradation ≤ 0.1 compared to full-context baselines at equivalent token budgets.
+- **Compression stress:** verify substitutability at 32× and 1024× compression with narrative and code samples, ensuring ΔNLL@`H` stays within 0.2 of the uncompressed control.
+- **Focus ablations:** compare causal vs non-causal LensNet and allocator variants (with/without cooldown) to confirm the non-causal controller yields ≥3% lower ΔNLL@`H`.
+
+**Runtime & stability**
+- **Resource trace:** log GPU memory, wall-clock latency per block, and total expand/collapse mass; keep latency within +10% of the frozen baseline at 8k active tokens.
+- **Swap rate & residency:** track mean residency ≥3 iterations per block and swap rate ≤0.25 actions per block to avoid thrashing.
+- **Boundary diagnostics:** run synthetic tests where important tokens align with block edges to ensure no catastrophic degradation (>0.2 ΔNLL jump).
+
+**Benchmarks**
+- Evaluate narrative QA (LongBench `NarrativeQA`), academic QA (`Qasper`), and coding/story tasks (InfiniteBench). Report ΔNLL@`H`, latency, and swap metrics alongside baseline LLM runs.
+- Optional stretch: include HELM-LC suites once the pipeline stabilizes to benchmark against summarization/RAG strategies.
+
+**POC acceptance criteria**
+- Demonstrate ΔNLL degradation ≤0.1 at `W_max = 8k` with constant-time compute (latency overhead ≤10%) and stable swap metrics on at least one narrative and one coding benchmark relative to the frozen base model.
 
 ### Example walkthrough (toy coding session)
 
