@@ -949,6 +949,15 @@ MegaContext offers a pragmatic path to this separation by treating the lifetime 
 - **Focus policies:** RL or bandit strategies that optimize accuracy × latency beyond the current greedy allocator.
 - **Safety & alignment:** policies for moderating which knowledge segments are surfaced to the working context in sensitive domains.
 
+### Curating the core knowledge corpus
+
+- **Segmented ordering:** Group documents by domain or task (e.g., coding, scientific literature, product docs). Within each segment, order files so high-level gists correspond to coherent themes; for code, a chain like `README → design notes → module docs → source files` gives LensNet clear zoom targets.
+- **Granularity & bridges:** Keep base blocks contiguous, but insert “bridge” gists when cross-document reasoning is common (API description ↔ implementation). These bridges live at higher levels (L3/L4) and help LensNet jump across related materials.
+- **Metadata enrichment:** Tag each span with domain, file path, language, timestamp, recency, and trust scores. Feed these as features into LensNet so focus policies can prefer fresher or context-matching knowledge.
+- **Quality control:** Deduplicate near-identical spans before gist extraction; monitor gist variance to detect noisy inputs. Track provenance IDs for every gist so hallucinations can be traced back to the original source and corrected.
+- **Incremental updates:** Append new partitions instead of reprocessing the entire tree. Because offsets are deterministic, you can rebuild affected gists in place and avoid full re-ingest. Version each partition so rollbacks or audits remain manageable.
+- **Curriculum for training:** As the corpus grows, schedule tasks that encourage the base model to rely on relevant segments (e.g., code tasks sample from the “code” partition). Penalize ignoring retrieved spans by comparing ΔNLL with and without expansions during training.
+
 This “cognitive core” roadmap builds directly on the [core knowledge as dynamic system prompt](#-core-knowledge-as-dynamic-system-prompt) concept and frames MegaContext as the enabling substrate for long-lived, updatable reasoning systems.
 
 ---
