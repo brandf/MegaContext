@@ -6,8 +6,9 @@
 - When adding implementation work, organize runtime code under `src/` and supporting experiments under `research/`; mirror that structure in `tests/` so each module has a focused test target.
 
 ## Build, Test, and Development Commands
-- Prefer `make` targets for repeatable workflows; add `make setup` for environment bootstrapping and `make fmt` / `make lint` hooks so contributors can run a single command.
-- Use `pytest` for unit and integration coverage: `make test` should call `pytest --maxfail=1 --disable-warnings`.
+- Prefer Python-native workflows: document setup via `uv` or `poetry` (e.g., `uv venv`, `uv pip install -r requirements.txt`, `uv run python -m <module>`).
+- Provide CLI entry points or `python -m` commands for routine tasks (`python -m tools.format`, `uv run ruff check`, `uv run black .`), and consolidate common tasks into scripts under `tools/`.
+- Use `pytest` for unit and integration coverage: standard command is `uv run pytest --maxfail=1 --disable-warnings`.
 - Prototype notebooks should rely on `uv` or `poetry` lockfiles—document any new dependencies in `pyproject.toml` and regenerate the lock before committing.
 
 ## Coding Style & Naming Conventions
@@ -22,5 +23,5 @@
 
 ## Commit & Pull Request Guidelines
 - Follow the existing imperative, capitalized commit style (`Enhance README with...`); group related edits into a single logical commit.
-- PRs must describe the problem, the solution, and validation steps; attach Terminal output for `make test` and relevant plots or tensors as screenshots when behavior changes.
+- PRs must describe the problem, the solution, and validation steps; attach terminal output for the canonical test command (e.g., `uv run pytest --maxfail=1 --disable-warnings`) and relevant plots or tensors as screenshots when behavior changes.
 - Link issues with `Fixes #ID` to trigger auto-closure, and request review from both architecture and implementation maintainers when changes touch shared interfaces.

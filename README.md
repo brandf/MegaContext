@@ -54,6 +54,10 @@ Streaming text  ──► Lifetime Gist Tree  ──►  Focus Allocator  ──
 3. **Refocus.** LensNet reads the current working context (plus tail gists), emits signed focus scores, and the (currently greedy) focus allocator applies block-aligned expansions/collapses without breaking contiguity or budget.
 4. **Decode.** The frozen base LLM consumes the refreshed working context to predict the next token(s), feeding newly generated tokens back into step 1.
 
+**Update cadence & buffering.**
+- **Lifetime tree maintenance:** Both user tokens and model-generated tokens are buffered until a full 32-token block (L0) or 32 L1 children are available before rebuilding the corresponding gist nodes. This keeps gist updates block-aligned and prevents churn in the hierarchy.
+- **LensNet conditioning gists:** LensNet only refreshes its conditioning set on its own schedule (e.g., every 256 working-context entries). Those gists can be read from the lifetime tree or recomputed lazily immediately before each LensNet call; either path observes the same block-aligned buffers.
+
 The next sections unpack each stage: lifetime storage, compression (GistNet), focus control (LensNet + focus allocator), and the training schedule that keeps them aligned.
 
 ---
@@ -68,7 +72,7 @@ The next sections unpack each stage: lifetime storage, compression (GistNet), fo
 | `L0 / L1 / L2` | Level of detail (LOD): `L0`=tokens, `L1`=32→1 gist, `L2`=gist of gists. Higher `L` means coarser detail and lower token cost. |
 | `W_max` | Token-equivalent budget for the working context (sum of entry costs ≤ `W_max`). |
 | Block size `K` | Number of new tokens processed per update (POC: `K = 32`). |
-| Horizon `H` | Lookahead range used when computing ΔNLL or task losses (typically 32–128 tokens). |
+| Horizon `H` | Lookahead range used when computing ΔNLL or task losses (defaults: 64 for narrative traces, 96 for mixed agent turns, 128 for code). |
 | ΔNLL@`H` | Change in negative log-likelihood over horizon `H` when replacing a region with its gist; used for supervision. |
 
 **Invariants**
@@ -219,7 +223,7 @@ the model boots with a massive “system prompt” of structured world knowledge
 ## POC scope & constraints
 
 - **Frozen base LLM** no fine-tuning initially, with LoRA finetuning as a follow up  
-- **Two-level Lifetime gist tree:** The POC will be limited to moderate sized contexts so only 2 laters should be sufficient   
+- **Two-level Lifetime gist tree:** The POC will be limited to moderate sized contexts so only 2 layers should be sufficient   
 - **Synchronous updates.** Lifetime tree lives in RAM/GPU for POC (rather than disk); updates happen between autoregressive steps.
   
 ---
@@ -277,8 +281,8 @@ Stacking two 32→1 layers provides **1024× compression** in the proof of conce
 | Symbol | Shape | Meaning |
 |---------|--------|---------|
 | `E ∈ R[32, d]` | 32 raw token embeddings (no contextualization) |
-| `G₀ ∈ R[K, d]` | learnable slot query (`K=1` for 32→1) |
-| `g* ∈ R[d]` | single gist vector aligned with base LLM embedding dim |
+| `Q₁, Q₂ ∈ R[1, d]` | learned slot queries for the two compression passes |
+| `g_final ∈ R[d]` | final gist vector aligned with the base LLM embedding dim |
 
 ---
 
@@ -292,11 +296,11 @@ GistNet alternates **self-attention** and **cross-attention** to gradually compr
 - Output is `E1`, a locally contextualized version of the raw embeddings.
 
 #### Stage 2 — Compression (32 → 1)
-- Introduce a single learned slot query `G₀`.  
+- Introduce the first learned slot query `Q₁` (shared across spans).  
 - Perform cross-attention where the slot reads from the tokens:  
 
 ```
-G1 = CrossAttn(query=G0, key=E1, value=E1)
+G1 = CrossAttn(query=Q1, key=E1, value=E1)
 G1 = G1 + MLP(LN(G1)) # residual + feedforward
 ```
 
@@ -313,18 +317,18 @@ E2 = E1 + MLP(LN(E2))
 - Optionally run one self-attention block over `E2` to diffuse the gist info across tokens.
 
 #### Stage 4 — Final compression (32 → 1)
-- Run a second cross-attention with a fresh slot query derived from `G1`:  
+- Run a second cross-attention with the independent learned slot query `Q₂`:  
 
 ```
-G2 = G1 + ε
-g_star = CrossAttn(query=G2, key=E2, value=E2)
-g_star = LN(MLP(g_star))
+g_final = CrossAttn(query=Q2, key=E2, value=E2)
+g_final = LN(MLP(g_final))
 ```
-- The result `g_star` is the final gist vector for the span and becomes a node in the lifetime gist tree.
+- The result `g_final` is the final gist vector for the span and becomes a node in the lifetime gist tree.
 
 #### Stage 5 — Hierarchical stacking
 - Two 32→1 layers are stacked hierarchically (32² = 1024 tokens per top-level gist).  
 - The lower layer runs directly on token embeddings; the upper operates on lower-layer outputs.
+- This per-block stacking preserves the contiguity invariant noted earlier—each gist still maps to an exact, non-overlapping span in the lifetime history.
 
 
 ### Architectural properties
@@ -362,7 +366,7 @@ Loss_recon = || E_reconstructed - E ||^2
 Discourage neighboring spans from collapsing to identical gists:
 
 ```
-Loss_contrast = max(0, margin - cosine_similarity(g_i*, g_j*))
+Loss_contrast = max(0, margin - cosine_similarity(g_i_final, g_j_final))
 ```
 for adjacent spans (margin ≈ 0.2).
 
@@ -375,7 +379,7 @@ Loss = Loss_subst + 0.1 * Loss_recon + 0.05 * Loss_contrast
 | Item | Setting |
 |------|----------|
 | Window size | 32 tokens |
-| Slots | 1 (single learnable query) |
+| Slots | 2 shared learned queries (`Q₁`, `Q₂`) |
 | Layers per 32→1 block | 2 self + 2 cross |
 | Refinement stack | 32→1→32→1 |
 | Embedding dim | same as base LLM (e.g., 4096) |
@@ -385,7 +389,7 @@ Loss = Loss_subst + 0.1 * Loss_recon + 0.05 * Loss_contrast
 | Activation | GELU |
 | Norm | Pre-LayerNorm |
 | Parameters | ~0.5M per layer |
-| Output | single `g*` vector per span |
+| Output | single `g_final` vector per span |
 | Runtime | <1 ms per 32-token span on GPU |
 
 Runtime figures assume a single NVIDIA L4 running bf16 inference with `HuggingFaceTB/SmolLM3-3B`; expect faster throughput on A100-class hardware.
@@ -401,7 +405,7 @@ Runtime figures assume a single NVIDIA L4 running bf16 inference with `HuggingFa
 ### Recap
 GistNet is a **local autoencoder for token spans** that learns to produce substitutable embeddings aligned with the base model’s token space.  
 It uses **self- and cross-attention refinement (32→1→32→1)** to compress meaning while remaining directly compatible with the base LLM’s embedding layer.  
-Stacked hierarchically, GistNet forms the **Lifetime Gist Tree** that supports scalable, virtualized context in MegaContext.
+Stacked hierarchically, GistNet forms the **Lifetime Gist Tree** that supports scalable, virtualized context in MegaContext and supplies the tail gists that condition LensNet at its scheduled refreshes.
 
 ---
 
@@ -415,6 +419,7 @@ It predicts where to spend detail (expand gists into raw tokens) and where to bl
 - LensNet reads the **working context** (not the lifetime tree).  
   It analyzes the embeddings currently fed into the base LLM — the only state that resides on GPU.
 - It outputs one **focus score** per entry (token embedding or gist).
+- The contiguity invariant from the glossary ensures each score maps to a single, non-overlapping lifetime span, so expand/collapse actions remain block-aligned.
 
 ### Why non-causal is essential
 LensNet must understand *future queries* to know which past facts matter.
@@ -748,7 +753,7 @@ MegaContext is *structurally* similar to RAG in that both pull relevant data int
 ### Counterfactual ΔNLL labeling
 
 1. **Snapshot selection:** capture the working context every `K` tokens along with candidate expand/collapse actions that respect legality masks.
-2. **Batch recompute:** for each candidate, rebuild the context with the alternative LOD and run the frozen base model over a short horizon (`H = 64` by default). Reuse tokenizer outputs; caching KV states across candidates is optional but speeds things up.
+2. **Batch recompute:** for each candidate, rebuild the context with the alternative LOD and run the frozen base model over a short horizon (`H = 64` for narrative traces, up to 96–128 for code-heavy or cross-turn reasoning workloads). Reuse tokenizer outputs; caching KV states across candidates is optional but speeds things up.
 3. **Utility extraction:** compute `ΔNLL = NLL_alt - NLL_base`. Positive values favor expansion (detail helps); negative values favor collapse. Normalize by span width so utilities are comparable across levels.
 4. **Score targets:** store utilities alongside the metadata fields that LensNet consumes (`level`, `width`, `distance_to_cursor`, `role_id`, `age_steps`). These form the supervision targets for LensNet regression/ranking losses.
 
