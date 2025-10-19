@@ -45,8 +45,9 @@ The core intuition that's motivating this work is that long context is only usef
 
 ```
 Streaming text  ──► Lifetime Gist Tree  ──►  Focus Allocator  ──►  Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
-                               ▲                    ▲
-                               └───────── LensNet ──┘
+                      ▲           | ▲              ▲                    |      ▲                                   |
+                      └─ GistNet ─┘ |              └────── LensNet ─────┘      |                                   |
+                                    └──────────────────────────────────────────┘───────── Autoregression ──────────┘
 ```
 
 1. **Ingest & summarize.** Buffer incoming tokens in 32-token blocks, roll them into new or updated gist nodes, and persist the lifetime tree (disk later, RAM for the POC).
