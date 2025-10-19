@@ -806,6 +806,26 @@ MegaContext is *structurally* similar to RAG in that both pull relevant data int
 
 ---
 
+### Conversation: “Isn’t this just RAG with tools?”
+
+**Alex (Devil’s Advocate):** We already have agents that retrieve docs, call APIs, and stitch context together. Why train GistNet/LensNet when heuristics plus vector search gives us long-term memory today?
+
+**Sam (MegaContext advocate):** RAG retrieves; MegaContext *represents*. The lifetime tree keeps a contiguous, multi-resolution memory so the base model always sees a coherent mix of tokens and gists. Learned focus (LensNet) uses ΔNLL signals to decide what detail actually matters.
+
+**Alex:** Agents already summarize conversation history and pull relevant snippets on demand. With nightly re-indexing and heuristics for cache hits, it works fine.
+
+**Sam:** Until you scale to 100 M+ tokens. MegaContext ensures substitutability at every level, keeps latency bounded (working context stays 8–32 k), and provides traceability—you can pinpoint which gist drove a response. Retrieval snippets can’t guarantee positional alignment or stability.
+
+**Alex:** Starting from scratch sounds heavy. With RAG, we ship features immediately.
+
+**Sam:** MegaContext is about a platform shift. The lifetime tree becomes the knowledge substrate, enabling “cognitive core” models—small weights focused on reasoning while knowledge updates externally. It plays nicely with RAG: ingest retrieved results into the tree, and LensNet manages detail thereafter. Think of it as the memory layer that unifies tools, not a replacement.
+
+**Alex:** So it complements existing agents?
+
+**Sam:** Exactly. Tools and RAG stay in the loop, but MegaContext virtualizes memory with learned compression/focus. You trade ad-hoc prompt assembly for a consistent, updatable architecture built to scale.
+
+---
+
 ### Training data & streaming behavior
 
 - **GistNet training:** use long-context corpora such as `pg19`, `BookSum`, or code-heavy datasets (e.g., `the-stack-smol`) to expose diverse structures. Each 32-token window supplies (full vs gist) pairs.
