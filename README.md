@@ -8,7 +8,7 @@ MegaContext is a proposed system architecture for virtualized LLM context - thin
 
 It separates a model’s context into a lifetime context (a hierarchical gist tree stored on disk) and a working context (a fixed-size mix of tokens and gists on GPU).  A standard (even pre-trained) LLM then operates on the working context.
 
-A lightweight learned LensNet (and streaming Allocator) continuously/incrementally refocus the full lifetime context onto the working context, giving the model effectively infinite memory at constant compute.
+A lightweight learned LensNet (and streaming focus allocator) continuously/incrementally refocus the full lifetime context onto the working context, giving the model effectively infinite memory at constant compute.
 
 The next section walks through how the runtime loop stays within a fixed working context while tracking the entire lifetime history. A later **Grand vision** section explains why the mechanism matters before the remaining sections dive into the proof-of-concept (POC) specification.
 
@@ -27,7 +27,7 @@ MegaContext removes this limit by separating:
 - **Lifetime gist tree** — built incrementally as text streams in (every 32 tokens → L1 gist; every 32 L1 gists → L2 gist; etc.).  
 - **Working context** — contiguous window over the tree; total token cost is capped by `W_max`.  
 - **GistNet** — a lightweight network that compresses local spans (e.g., 32→1) into **gists** that act as substitutable stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full lifetime history.  
-- **LensNet + allocator** — LensNet scores each working-context entry (token embedding or gist) for expansion or collapse; a deterministic allocator applies those scores, streaming finer- or coarser-grained entries in and out while respecting the budget.
+- **LensNet + focus allocator** — LensNet scores each working-context entry (token embedding or gist) for expansion or collapse; a block-aligned focus allocator applies those scores, streaming finer- or coarser-grained entries in and out while respecting contiguity and the budget.
 
 ### Analogy: MegaTexture → MegaContext
 This is not required to understand MegaContext, but for those that are interested in learning about the inspiration [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
@@ -44,17 +44,17 @@ The core intuition that's motivating this work is that long context is only usef
 ### Runtime lifecycle at a glance
 
 ```
-Streaming text  ──► 1️⃣ Lifetime Gist Tree  ──►  Allocator ──►  Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
+Streaming text  ──► 1️⃣ Lifetime Gist Tree  ──►  Focus Allocator  ──►  Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
                                ▲                    ▲          
                                └───────── LensNet ──┘
 ```
 
 1. **Ingest & summarize.** Buffer incoming tokens in 32-token blocks, roll them into new or updated gist nodes, and persist the lifetime tree (disk later, RAM for the POC).
 2. **Assemble the working context.** Lay out a contiguous-in-time sequence of tokens and gists whose combined token-equivalent cost stays within `W_max`. Every position represents exactly one interval of the lifetime history at some level of detail.
-3. **Refocus.** LensNet reads the current working context (plus tail gists), emits signed focus scores, and the (currently greedy) allocator applies expansions/collapses without breaking contiguity or budget.
+3. **Refocus.** LensNet reads the current working context (plus tail gists), emits signed focus scores, and the (currently greedy) focus allocator applies block-aligned expansions/collapses without breaking contiguity or budget.
 4. **Decode.** The frozen base LLM consumes the refreshed working context to predict the next token(s), feeding newly generated tokens back into step 1.
 
-The next sections unpack each stage: lifetime storage, compression (GistNet), focus control (LensNet + allocator), and the training schedule that keeps them aligned.
+The next sections unpack each stage: lifetime storage, compression (GistNet), focus control (LensNet + focus allocator), and the training schedule that keeps them aligned.
 
 ---
 
@@ -74,7 +74,7 @@ The next sections unpack each stage: lifetime storage, compression (GistNet), fo
 **Invariants**
 - Working context entries tile the lifetime history without gaps or overlaps; switching LOD swaps entries but preserves temporal continuity.
 - GistNet outputs **gists** that reuse the base embedding dimension and can replace their source token blocks directly in the working context.
-- LensNet and the allocator update entries between decode steps while keeping the budget and contiguity invariants intact.
+- LensNet and the focus allocator update entries between decode steps while keeping the budget and contiguity invariants intact.
 
 These definitions appear throughout the rest of the document; refer back here when new notation shows up later.
 
@@ -282,7 +282,7 @@ Loss = Loss_subst + 0.1 * Loss_recon + 0.05 * Loss_contrast
 3. **Objective:** minimize ΔNLL@H between original and gist-replaced contexts.  
 4. **Curriculum:** start with contiguous text, then include structured data (lists, code, tables).  
 5. **Optimizer:** AdamW, lr = 1e-4, cosine decay, bf16 precision.  
-6. **Output:** store 32→1 and 1024→1 gists in the lifetime gist tree for later use by LensNet and Allocator.
+6. **Output:** store 32→1 and 1024→1 gists in the lifetime gist tree for later use by LensNet and the focus allocator.
 
 ### Recap
 GistNet is a **local autoencoder for token spans** that learns to produce substitutable embeddings aligned with the base model’s token space.  
@@ -323,7 +323,7 @@ A non-causal LensNet can look at the full working context (including the query) 
   - `u_i > 0`: expand / focus (increase detail, go one level down)
   - `u_i < 0`: collapse / defocus (reduce detail, go one level up)
 
-At runtime, the **Allocator** interprets these scores to expand and collapse spans while keeping the working context within its token budget.
+At runtime, the **focus allocator** interprets these scores to expand and collapse spans while keeping the working context within its token budget.
 
 ### Why dynamic LOD matters
 Traditional compression methods summarize once and lose detail forever.  
@@ -373,7 +373,7 @@ During each block update:
 
 1. Gather the latest gists `G`.  
 2. Run LensNet to produce signed scores `u_i`.  
-3. The Allocator executes expansions/collapses subject to the working-context budget.  
+3. The focus allocator executes expansions/collapses subject to the working-context budget.  
 4. The updated context is frozen for the next K tokens.
 
 This matches the intended inference cadence (no per-token recompute).
@@ -423,8 +423,8 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 ### Inference procedure
 
 1. **Mask** illegal sides (L0 can’t expand; L2 can’t collapse).  
-2. **Optional rebalance**: rescale positive/negative masses to match before sending to the Allocator.  
-3. **Allocator** greedily applies expand/collapse actions within the token budget, honoring hysteresis rules.
+2. **Optional rebalance**: rescale positive/negative masses to match before sending to the focus allocator.  
+3. The focus allocator greedily applies expand/collapse actions within the token budget, honoring hysteresis rules.
 
 ### Summary of POC parameters
 
@@ -443,13 +443,55 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 
 **In short:**  
 LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`).  
-It runs once per block, predicts balanced signed focus scores for every entry, and guides the Allocator to keep the working context sharp, legal, and budget-neutral.
+It runs once per block, predicts balanced signed focus scores for every entry, and guides the focus allocator to keep the working context sharp, legal, and budget-neutral.
+
+---
+
+## Focus allocator — block-aligned actions
+
+*(Name TBD: “focus allocator” is a working title until we settle on something punchier.)*
+
+LensNet alone only supplies signed focus scores. The allocator turns those scores into concrete expand/collapse actions while preserving contiguity, budget, and level-of-detail (LOD) constraints.
+
+### POC constraints & terminology
+
+- **Block alignment:** GistNet currently compresses 32-token blocks. In the POC, every working-context entry must cover exactly one full block at a single LOD (either 32 raw tokens or their 32→1 gist). Higher-level gists (e.g., L2) cover 32 contiguous L1 blocks.
+- **Score granularity:** LensNet may emit per-entry scores, but the allocator aggregates them per block so that siblings share a single action score. A future LensNet variant can predict directly per block to avoid this aggregation.
+- **Action budget:** Apply at most `N_diff` expand/collapse operations per iteration (default 4). This keeps the system near equilibrium and prevents thrashing.
+
+### Greedy loop (POC)
+
+1. **Collect candidates.** Partition focus scores by block and compute one score per expandable or collapsible unit:
+   - Positive scores (`> τ_expand`) become expand candidates (e.g., replace an L1 gist with its 32 L0 tokens or expand an L2 gist into 32 L1 children).
+   - Negative scores (`< -τ_collapse`) become collapse candidates (e.g., replace 32 L0 tokens with their L1 gist).
+   - Ignore candidates that would violate block alignment (mixed LODs) or budget limits.
+2. **Rank.** Maintain two priority queues: descending for expands, ascending for collapses. Tie-break by recency or distance to the cursor.
+3. **Apply diff-limited updates.** Pop from the queues alternately (largest expand, largest collapse) until:
+   - You have applied `N_diff` actions,
+   - One queue empties, or
+   - Applying the next action would break the `W_max` budget.
+   Collapses refund token budget; expands consume it. If the net cost drifts away from `W_max`, bias the next iteration toward the side that restores balance.
+4. **Re-run LensNet if needed.** Because changing LODs alters the scores, optionally iterate LensNet → allocator until either (a) no legal actions remain above thresholds or (b) you reach a maximum number of refinement steps (default 2–3).
+
+### Hysteresis & guardrails
+
+- **Action cooldown:** Track the last action applied per block and dampen (or mask out) the opposite action for `cooldown_steps` iterations. This prevents jitter where the allocator repeatedly expands and collapses the same span.
+- **Legality masks:** Blocks at minimum LOD (L0) cannot expand; blocks at maximum LOD (current root level) cannot collapse. These masks should be enforced both in LensNet’s output (runtime masking) and inside the allocator.
+- **Consistency checks:** After every iteration, verify that working-context entries still tile the timeline without overlap and that every node’s children share the same LOD.
+
+### Future directions
+
+- Smarter action selection (e.g., matching total expand/collapse mass, soft assignments, or small linear programs) to balance budget and latency.
+- Learning a differentiable surrogate (“focus router”) that could eventually replace the greedy loop.
+- Adaptive thresholds (`τ_expand`, `τ_collapse`) based on recent utilization to keep the loop stable.
+
+For now, the greedy, block-aligned allocator keeps the POC simple while leaving room for more sophisticated controllers later.
 
 ---
 
 ## Joint Training (Alternating / “EM-style”): GistNet + LensNet + Base-LoRA
 
-**Goal:** Let all three modules co-adapt without full end-to-end backprop through the discrete Allocator or long unrolls.  
+**Goal:** Let all three modules co-adapt without full end-to-end backprop through the discrete focus allocator or long unrolls.  
 **Method:** Short alternating phases where some modules are frozen while others learn from on-policy signals produced by the frozen parts. Repeat for a few cycles.
 
 ### What “EM-style” means here
@@ -462,15 +504,15 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 - **GistNet** `Gist` (32→1, two levels; substitutability objective)
 - **LensNet** `LensNet` (dual cross-attn 8k→6→8k; signed focus scores)
 - **Base-LoRA** `LoRA` (tiny adapters on the base LLM to improve gist compatibility)
-- **Allocator** is always **discrete greedy** (no relaxation needed)
+- **Focus allocator** is always **discrete greedy** (no relaxation needed)
 
 ### Phase B1 — Update GistNet (fix LensNet + LoRA)
-**Fix:** `LensNet`, `LoRA`, `Allocator`  
+**Fix:** `LensNet`, `LoRA`, focus allocator  
 **Update:** `Gist`
 
 **Procedure (on-policy):**
 1. Build/refresh lifetime trees with current `Gist`.
-2. For each training block (size K=32): run `LensNet` + `Allocator` to pick expands/collapses; form the working context used by the base LLM.
+2. For each training block (size K=32): run `LensNet` + focus allocator to pick expands/collapses; form the working context used by the base LLM.
 3. Optimize **GistNet** on spans touched in this block using:
    - **Substitutability loss**: KL(full || replaced) or ΔNLL@H (H=32–128) for the gist that *was actually* inserted.
    - **Stability loss** (optional): L2 between current gist and previous checkpoint to avoid drift.
@@ -504,7 +546,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 - QKV/O of the **first 2 attention blocks** *or* the **last 2** (pick one set; not both)
 
 **Losses:**
-- **Task NLL@H** with the *discrete* working context produced by `LensNet+Allocator`
+- **Task NLL@H** with the *discrete* working context produced by `LensNet` + focus allocator
 - **Substitutability keep-alive** (weak): prevents gist semantics drifting away from what the base understands
 - (Optional) **KL to teacher** if you have a larger teacher-with-MegaContext
 
@@ -527,7 +569,7 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 
 1. **B1:**  
    - Freeze `LensNet`, `LoRA`.  
-   - Decode blocks with current WC (from LensNet+Allocator).  
+   - Decode blocks with current WC (from LensNet + focus allocator).  
    - Update `Gist` using on-policy substitutability losses on the replaced spans.
 
 2. **B2:**  
@@ -537,14 +579,14 @@ It’s not exact EM; it’s an **alternating optimization schedule** that stabil
 
 3. **B3:**  
    - Freeze `Gist`, `LensNet`.  
-   - Run normal blocks (LensNet+Allocator active) and update `LoRA` on Task NLL@H (+ weak substitutability keep-alive).
+   - Run normal blocks (LensNet + focus allocator active) and update `LoRA` on Task NLL@H (+ weak substitutability keep-alive).
 
 
 ### Stability & efficiency tips
 
 - **Warm starts:** Do a short **sequential pretrain** (GistNet then LensNet) before the first B1; it reduces early oscillations.
 - **Small LoRA ranks:** r=4–16, low LR; the goal is interface alignment, not knowledge injection.
-- **Hysteresis in Allocator:** min residency steps to prevent expand/collapse thrash during B2/B3.
+- **Hysteresis in focus allocator:** min residency steps to prevent expand/collapse thrash during B2/B3.
 - **On-policy labeling:** Always regenerate ΔNLL labels *after* the last B1 so LensNet trains on current gists.
 - **Curriculum:** start with narrative/doc tasks; add lists/tables/code once stable.
 - **Telemetry:** track (a) Loss@H vs budget, (b) swap rate, (c) residency time, (d) non-causal C1/C2 tests.
@@ -581,7 +623,7 @@ MegaContext is *structurally* similar to RAG in that both pull relevant data int
 - **Streaming:** as new tokens arrive, the system:  
   1. Buffers 32 tokens → creates new L1 gist.  
   2. When 32 L1s exist → create L2 gist.  
-  3. LensNet+Allocator decide which regions to expand/collapse before the next decode step.
+  3. LensNet + focus allocator decide which regions to expand/collapse before the next decode step.
 
 Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata JSON.
 
@@ -616,7 +658,7 @@ Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata
 1. **32→1 GistNet** — implement & train substitutability.  
 2. **Lifetime Tree Builder** — streaming, 2-level hierarchy in RAM.  
 3. **LensNet v1 (non-causal)** — implement query-conditioned scorer, train on offline labels.  
-4. **Allocator** — greedy expand/collapse, hysteresis.  
+4. **Focus allocator** — greedy expand/collapse, hysteresis.  
 5. **E2E POC** — run step-loop (score → allocate → update → decode).  
 6. **Evaluate** — loss vs budget, C1/C2 relevance, stress tests.
 
@@ -625,7 +667,7 @@ Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata
 ## Future directions
 
 - Async disk streaming of the lifetime tree.  
-- RL-trained allocator optimizing accuracy × latency.  
+- RL-trained focus allocator optimizing accuracy × latency.  
 - Multi-token gists for structured data.  
 - Joint training of LLM + MegaContext from scratch.  
 - Shared or federated lifetime memories between agents.
@@ -635,7 +677,7 @@ Gists can be serialized as fp16 or quantized vectors (e.g., 8-bit) with metadata
 ## License & contributions
 
 MIT License (suggested).  
-PRs welcome — please include reproducible tests for GistNet, LensNet, allocator, and end-to-end demos.
+PRs welcome — please include reproducible tests for GistNet, LensNet, the focus allocator, and end-to-end demos.
 
 ---
 
