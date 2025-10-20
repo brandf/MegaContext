@@ -8,7 +8,7 @@ MegaContext is a proposed system architecture for virtualized LLM context - insp
 
 It separates a model’s context into a "MegaContext" (a hierarchical gist tree stored on disk) and a "working context" (a fixed-size mix of tokens and gist on GPU).  
 
-To dynamical adapt level of detail, a learned LensNet model that's conditioned on the query gist continuously/incrementally refocuses the MegaContext onto the working context, giving the model effectively infinite memory at constant compute.
+To dynamical adapt level of detail, a learned LensNet model, conditioned on the query gist, continuously/incrementally refocuses the MegaContext onto the working context, giving the model effectively infinite memory at constant compute.
 
 A pre-trained LLM then operates on the working context.
 
