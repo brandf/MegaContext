@@ -607,6 +607,7 @@ Per-step compute ≈ base decode cost; gist extraction and LensNet overhead < 1 
 ### Joint training (alternating / “EM-style”)
 
 **Goal:** Let all three modules co-adapt without full end-to-end backprop through the discrete focus allocator or long unrolls.
+
 **Method:** Short alternating phases where some modules are frozen while others learn from on-policy signals produced by the frozen parts. Repeat for a few cycles.
 
 #### What “EM-style” means here
