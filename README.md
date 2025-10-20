@@ -4,8 +4,13 @@
 
 ---
 ## TL;DR — MegaContext
-MegaContext is a proposed system architecture for virtualized LLM context - inspired by a graphics concept called MegaTexture by ID software.
-It separates a model’s context into a "MegaContext" (a hierarchical gist tree stored on disk) and a "working context" (a fixed-size mix of tokens and gist on GPU). A pre-trained LLM then operates on the working context. To dynamical adapt level of detail, a learned LensNet model that's conditioned on the query gist continuously/incrementally refocuses the MegaContext onto the working context, giving the model effectively infinite memory at constant compute.
+MegaContext is a proposed system architecture for virtualized LLM context - inspired by a graphics concept called MegaTexture by ID software. 
+
+It separates a model’s context into a "MegaContext" (a hierarchical gist tree stored on disk) and a "working context" (a fixed-size mix of tokens and gist on GPU).  
+
+To dynamical adapt level of detail, a learned LensNet model that's conditioned on the query gist continuously/incrementally refocuses the MegaContext onto the working context, giving the model effectively infinite memory at constant compute.
+
+A pre-trained LLM then operates on the working context.
 
 The next section walks through how the runtime loop stays within a fixed working context while tracking the entire MegaContext history. Curious about the long-term implications? Jump to [Grand vision](#grand-vision-why-this-matters) near the end; the intervening sections drill into the proof-of-concept (POC) mechanics.
 
