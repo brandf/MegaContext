@@ -42,6 +42,7 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 2.2.2: Cache token embeddings from the frozen base model to avoid redundant forward passes.
   - Task 2.2.3: Stage long-form corpora for training: DeepMind PG-19 (novels), AllenAI BookSum (chapter-level prose + summaries), and filtered slices of The Stack (Python/TypeScript/JavaScript) for structured code traces.
   - Task 2.2.4: Provide `configs/runs/gistnet_pretrain.yaml` capturing dataset blends (narrative vs code weights), optimizer, and logging cadence; include held-out splits from each corpus for ΔNLL evaluation.
+  - Task 2.2.5: Document the Hugging Face workflow (use `datasets` for ingest, `AutoTokenizer`/`AutoModelForCausalLM` for tokenization and teacher logits) so Phase 2 scripts follow the same conventions.
 
 - **Feature 2.3: Training loop & losses**
   - Task 2.3.1: Implement `src/gistnet/trainer.py` computing substitutability ΔNLL@H and optional contrastive losses; support gradient accumulation.
