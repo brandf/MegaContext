@@ -30,13 +30,14 @@ MegaContext removes this limit by separating:
 - **LensNet + focus allocator** — LensNet scores each working-context entry (token embedding or gist) for expansion or collapse; a block-aligned focus allocator applies those scores, streaming finer- or coarser-grained entries in and out while respecting contiguity and the budget.
 
 ### Analogy: MegaTexture → MegaContext
-This is not required to understand MegaContext, but for those that are interested in learning about the inspiration [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
+This is not required to understand MegaContext, but for those that are interested in learning about the inspiration, [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
 - In graphics, **MegaTexture** streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.
 - **MegaContext** mirrors that idea for language: instead of mipmap tiles, it maintains embeddings at multiple levels of detail (token L0, gist L1, gist L2, …), yielding effectively unbounded context for a frozen LLM.
 
 ### Intuitions / Motivation
-The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors (efficiently).
-- "Relevant parts" is inherently non-causal (something that wasn't previously relevant can become relevant), so this implies dynamic focusing/defocusing.  One-way compression/summarization schemes are fundamentally flawed.
+The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors efficiently.
+- "Relevant parts" is inherently non-causal - something that wasn't previously relevant can become relevant, so this implies dynamic focusing/defocusing.  One-way compression/summarization schemes are fundamentally flawed.
+- RAG/tools without context maintainance is anti-productive for long running context, it's trading more context for the immediate task for more distractors on all future tasks.
 - Exciting new future LLM scenarios will be unlocked at 100M+ context lengths, and at this scale both memory and compute requirements must be sub-linear to be practical for widespread consumer applications.
 
 ---
