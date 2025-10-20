@@ -40,7 +40,8 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
 - **Feature 2.2: GistNet training data pipeline**
   - Task 2.2.1: Extend dataset tooling to emit paired `(full_context, gist_replaced_context)` tensors over horizons `H=64`.
   - Task 2.2.2: Cache token embeddings from the frozen base model to avoid redundant forward passes.
-  - Task 2.2.3: Provide `configs/runs/gistnet_pretrain.yaml` capturing datasets, optimizer, and logging cadence.
+  - Task 2.2.3: Stage long-form corpora for training: DeepMind PG-19 (novels), AllenAI BookSum (chapter-level prose + summaries), and filtered slices of The Stack (Python/TypeScript/JavaScript) for structured code traces.
+  - Task 2.2.4: Provide `configs/runs/gistnet_pretrain.yaml` capturing dataset blends (narrative vs code weights), optimizer, and logging cadence; include held-out splits from each corpus for ΔNLL evaluation.
 
 - **Feature 2.3: Training loop & losses**
   - Task 2.3.1: Implement `src/gistnet/trainer.py` computing substitutability ΔNLL@H and optional contrastive losses; support gradient accumulation.
