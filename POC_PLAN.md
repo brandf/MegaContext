@@ -43,16 +43,20 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 2.2.3: Stage long-form corpora for training: DeepMind PG-19 (novels), AllenAI BookSum (chapter-level prose + summaries), and filtered slices of The Stack (Python/TypeScript/JavaScript) for structured code traces.
   - Task 2.2.4: Provide `configs/runs/gistnet_pretrain.yaml` capturing dataset blends (narrative vs code weights), optimizer, and logging cadence; include held-out splits from each corpus for ΔNLL evaluation.
   - Task 2.2.5: Document the Hugging Face workflow (use `datasets` for ingest, `AutoTokenizer`/`AutoModelForCausalLM` for tokenization and teacher logits) so Phase 2 scripts follow the same conventions.
+  - Task 2.2.6: Distill LLMLingua-2 style keep/drop labels from a teacher model (e.g., GPT-4 or curated experts), storing token-importance probabilities alongside gist batches for future LensNet supervision.
 
 - **Feature 2.3: Training loop & losses**
   - Task 2.3.1: Implement `src/gistnet/trainer.py` computing substitutability ΔNLL@H and optional contrastive losses; support gradient accumulation.
   - Task 2.3.2: Add CLI `uv run python -m tools.train_gistnet --config ...` with resume/checkpoint support, writing to `artifacts/checkpoints/gistnet/`.
   - Task 2.3.3: Track ΔNLL metrics in W&B, emit per-span diagnostics (e.g., boundary tokens).
+  - Task 2.3.4: Add a masked-attention training curriculum (per Gist Tokens) that forces gist slots to reconstruct prompts without peeking at original tokens; compare against baseline ablations.
 
 - **Feature 2.4: Evaluation & tests**
   - Task 2.4.1: Add unit tests for block alignment, tensor shapes, and determinism under seeded RNG.
   - Task 2.4.2: Create a smoke eval script comparing base vs gist-replaced Loss@H on a held-out dataset; target ≤5% degradation.
   - Task 2.4.3: Update `README.md` with training results and add `docs/gistnet.md` summarizing architecture knobs.
+  - Task 2.4.4: Benchmark gist-cache reuse (latency, FLOPs) versus re-encoding full prompts to quantify expected savings from cached gist tokens.
+  - Task 2.4.5: Integrate LLMLingua-2 faithfulness checks (alignment coverage, hallucination filters) to flag degenerate or repetitive gist outputs before publishing checkpoints.
 
 **Exit criteria:** Trained GistNet checkpoints for both layers, ΔNLL@H dashboards, reproducible training scripts, and tests ensuring deterministic outputs.
 
@@ -73,16 +77,19 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 3.3.1: Implement `src/lensnet/model.py` with dual cross-attention blocks, scalar feature embeddings, legality masking, and signed score head.
   - Task 3.3.2: Build `src/lensnet/dataloader.py` replaying working-context snapshots with counterfactual utility targets.
   - Task 3.3.3: Create training script `tools/train_lensnet.py` logging regression/ranking/budget losses to W&B.
+  - Task 3.3.4: Prototype Perceiver-inspired latent slots (cross-attention from working entries into a fixed latent array) and compare focus-score quality versus the baseline encoder.
 
 - **Feature 3.4: Focus allocator**
   - Task 3.4.1: Implement `src/runtime/focus_allocator.py` with greedy expand/collapse loop, thresholds, cooldown logic, and diff limits.
   - Task 3.4.2: Enforce contiguity, token budgets, and legality masks; integrate with `WorkingEntry` data.
   - Task 3.4.3: Provide unit tests for expand/collapse scenarios, hysteresis, and budget guardrails.
+  - Task 3.4.4: Incorporate Slot-Attention-style normalised competition so expansion weights form a simplex, and log slot utilisation telemetry for pruning or spawning focus groups.
 
 - **Feature 3.5: Integrated runtime loop**
   - Task 3.5.1: Assemble `src/runtime/engine.py` ingesting streams, updating the MegaContext tree, calling LensNet/allocator, and decoding via the base model.
   - Task 3.5.2: Add CLI `uv run python -m tools.run_poc_loop --config configs/runs/poc_smollm3.yaml` processing a sample dataset and logging telemetry.
   - Task 3.5.3: Implement end-to-end tests with synthetic streams verifying token budgets, focus score signs, and decode outputs under seeded RNG.
+  - Task 3.5.4: Expose a Perceiver IO-style query interface so expansion plans, provenance requests, and diagnostics read the latent working context via structured queries.
 
 **Exit criteria:** End-to-end runtime loop executes with mocked datasets, the MegaContext tree persists correctly, LensNet scores apply legal focus actions, and integration tests confirm budget invariants.
 
@@ -93,6 +100,7 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 4.1.1: Define `configs/eval/<benchmark>.yaml` covering narrative, coding, and retrieval-heavy tasks with expected metric budgets.
   - Task 4.1.2: Implement `tools/run_benchmarks.py` orchestrating base vs MegaContext runs, collecting Loss@H, accuracy, latency, and swap metrics.
   - Task 4.1.3: Store results under `artifacts/evals/<date>` with metadata (model, config, commit hash).
+  - Task 4.1.4: Add knowledge-intensive QA benchmarks (e.g., Natural Questions, TriviaQA) with RAG baselines to quantify MegaContext’s gains over external retrieval.
 
 - **Feature 4.2: MegaContext visualization web app**
   - Task 4.2.1: Build a backend service (e.g., FastAPI + WebSocket) streaming working-context state, focus scores, and MegaContext node metadata in near real time.
@@ -104,6 +112,7 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 4.3.1: Automate runs toggling LensNet, GistNet, and allocator components to measure Δ performance; capture swap rate, residency histograms, and token budgets.
   - Task 4.3.2: Generate narrative reports (`docs/reports/poc_eval_<date>.md`) summarizing benchmarks and key visuals.
   - Task 4.3.3: Update `README.md` with highlight metrics and links to the visualization app.
+  - Task 4.3.4: Compare MegaContext against RAG pipelines, documenting provenance fidelity, answer quality, and compute trade-offs.
 
 **Exit criteria:** Benchmark scripts run reproducibly, visualization app streams live working-context data with drill-down to MegaContext nodes, ablation data stored with plots, and documentation reflects eval setup plus visualization usage.
 
@@ -173,6 +182,7 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 8.1.1: Define `configs/core_knowledge/*.yaml` describing domain partitions, ordering, retention policies, and external knowledge sources.
   - Task 8.1.2: Implement ingestion scripts that tokenize, gist, and tag spans with domain, timestamps, provenance IDs, and trust scores.
   - Task 8.1.3: Add metadata indexing (Parquet/Arrow) for filtering and attach to MegaContext nodes.
+  - Task 8.1.4: Capture RAG-style provenance (source doc IDs, retrieval scores) for each gist node so downstream agents can surface evidence with responses.
 
 - **Feature 8.2: Storage management & pruning**
   - Task 8.2.1: Extend MegaContext storage for append-only partitions, versioning, and pruning signals (access counts, decay timers).
@@ -183,6 +193,7 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 8.3.1: Build scripts sampling queries across domains to verify LensNet surfaces relevant spans from the core memory.
   - Task 8.3.2: Monitor storage growth, quantization precision, and gist variance; alert when thresholds exceed budgets.
   - Task 8.3.3: Update docs with corpus composition, retention policies, and monitoring dashboards.
+  - Task 8.3.4: Add gist quality monitors (entropy, repetition detectors) to flag the degenerate outputs noted in Gist Tokens before they pollute long-term memory.
 
 **Exit criteria:** Core knowledge tree populated with at least one curated domain, storage/versioning tools operational, telemetry confirms access patterns, and documentation outlines maintenance workflows.
 
