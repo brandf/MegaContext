@@ -55,11 +55,11 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
 
 **Exit criteria:** Trained GistNet checkpoints for both layers, ΔNLL@H dashboards, reproducible training scripts, and tests ensuring deterministic outputs.
 
-## Phase 3 — Lifetime Tree, LensNet, and Focus Allocator
-**Goal:** Build the runtime loop that ingests tokens, maintains the lifetime gist tree, scores focus, and keeps the working context within budget.
+## Phase 3 — MegaContext Tree, LensNet, and Focus Allocator
+**Goal:** Build the runtime loop that ingests tokens, maintains the MegaContext gist tree, scores focus, and keeps the working context within budget.
 
-- **Feature 3.1: Lifetime gist tree & storage**
-  - Task 3.1.1: Implement `src/lifetime/tree.py` with node structs (`span_id`, `start_token`, `level`, parent/child pointers) and ingest/update APIs honoring 32-token blocks.
+- **Feature 3.1: MegaContext gist tree & storage**
+  - Task 3.1.1: Implement `src/megacontext/memory/tree.py` with node structs (`span_id`, `start_token`, `level`, parent/child pointers) and ingest/update APIs honoring 32-token blocks.
   - Task 3.1.2: Add serialization to `{L0,L1,L2}.ctx` files per the binary layout (headers, offsets) with bf16/fp16 payload support.
   - Task 3.1.3: Provide round-trip tests ensuring deterministic offsets and lossless persistence.
 
@@ -79,14 +79,14 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 3.4.3: Provide unit tests for expand/collapse scenarios, hysteresis, and budget guardrails.
 
 - **Feature 3.5: Integrated runtime loop**
-  - Task 3.5.1: Assemble `src/runtime/engine.py` ingesting streams, updating the lifetime tree, calling LensNet/allocator, and decoding via the base model.
+  - Task 3.5.1: Assemble `src/runtime/engine.py` ingesting streams, updating the MegaContext tree, calling LensNet/allocator, and decoding via the base model.
   - Task 3.5.2: Add CLI `uv run python -m tools.run_poc_loop --config configs/runs/poc_smollm3.yaml` processing a sample dataset and logging telemetry.
   - Task 3.5.3: Implement end-to-end tests with synthetic streams verifying token budgets, focus score signs, and decode outputs under seeded RNG.
 
-**Exit criteria:** End-to-end runtime loop executes with mocked datasets, lifetime tree persists correctly, LensNet scores apply legal focus actions, and integration tests confirm budget invariants.
+**Exit criteria:** End-to-end runtime loop executes with mocked datasets, the MegaContext tree persists correctly, LensNet scores apply legal focus actions, and integration tests confirm budget invariants.
 
 ## Phase 4 — Evaluation Harness & Visual Analytics
-**Goal:** Quantify MegaContext gains against baselines and deliver real-time visuals for the lifetime/working context interaction.
+**Goal:** Quantify MegaContext gains against baselines and deliver real-time visuals for the MegaContext/working context interaction.
 
 - **Feature 4.1: Benchmark suite**
   - Task 4.1.1: Define `configs/eval/<benchmark>.yaml` covering narrative, coding, and retrieval-heavy tasks with expected metric budgets.
@@ -94,8 +94,8 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 4.1.3: Store results under `artifacts/evals/<date>` with metadata (model, config, commit hash).
 
 - **Feature 4.2: MegaContext visualization web app**
-  - Task 4.2.1: Build a backend service (e.g., FastAPI + WebSocket) streaming working-context state, focus scores, and lifetime node metadata in near real time.
-  - Task 4.2.2: Implement a front-end (React/Vite or similar) rendering the working context as vertical glyphs color-coded by LOD, with click-through to lifetime tree explorers showing L0 text/gists.
+  - Task 4.2.1: Build a backend service (e.g., FastAPI + WebSocket) streaming working-context state, focus scores, and MegaContext node metadata in near real time.
+  - Task 4.2.2: Implement a front-end (React/Vite or similar) rendering the working context as vertical glyphs color-coded by LOD, with click-through to MegaContext tree explorers showing L0 text/gists.
   - Task 4.2.3: Add playback mode for recorded runs and ensure dashboards link to W&B metrics.
   - Task 4.2.4: Package deployment instructions (`docs/visualizer.md`) and integration tests for the streaming API.
 
@@ -104,7 +104,7 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 4.3.2: Generate narrative reports (`docs/reports/poc_eval_<date>.md`) summarizing benchmarks and key visuals.
   - Task 4.3.3: Update `README.md` with highlight metrics and links to the visualization app.
 
-**Exit criteria:** Benchmark scripts run reproducibly, visualization app streams live working-context data with drill-down to lifetime nodes, ablation data stored with plots, and documentation reflects eval setup plus visualization usage.
+**Exit criteria:** Benchmark scripts run reproducibly, visualization app streams live working-context data with drill-down to MegaContext nodes, ablation data stored with plots, and documentation reflects eval setup plus visualization usage.
 
 ## Phase 5 — Alternate Base Model Portability (Qwen Qwen2.5-Coder-3B-Instruct)
 **Goal:** Prove the stack can adapt to a different frozen model with minimal friction and codify the portability workflow.
@@ -148,10 +148,10 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
 ## Phase 7 — Coding Assistant Showcase with MegaContext
 **Goal:** Deliver a compelling coding-assistant demo using `Qwen/Qwen2.5-Coder-32B-Instruct` (when compute permits) and live repository memory.
 
-- **Feature 7.1: Repository lifetime context tooling**
-  - Task 7.1.1: Implement `tools/codebase_ingest.py` that walks a repository, chunks files, and builds an initial lifetime gist tree (L0/L1/L2) tagged with file paths and language metadata.
+-- **Feature 7.1: Repository MegaContext tooling**
+  - Task 7.1.1: Implement `tools/codebase_ingest.py` that walks a repository, chunks files, and builds an initial MegaContext gist tree (L0/L1/L2) tagged with file paths and language metadata.
   - Task 7.1.2: Add filesystem watcher service (e.g., `watchdog`) to detect changes, re-gist affected spans incrementally, and update serialized `{L0,L1,L2}.ctx` artifacts.
-  - Task 7.1.3: Support compositing with external language/framework knowledge bases; merge metadata into the lifetime tree with provenance tags.
+  - Task 7.1.3: Support compositing with external language/framework knowledge bases; merge metadata into the MegaContext tree with provenance tags.
 
 - **Feature 7.2: Coding model integration**
   - Task 7.2.1: Extend base-model loader to switch between Qwen coder 3B and 32B variants; document memory requirements and precision settings.
@@ -165,16 +165,16 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
 
 **Exit criteria:** Coding assistant CLI operates against a live repo with incremental gist updates, MegaContext-enhanced Qwen coder produces competitive results on sample tasks, and visualization links demonstrate focus actions over code spans.
 
-## Phase 8 — Core Knowledge Lifetime Context
-**Goal:** Build a durable lifetime memory populated with curated knowledge (beyond coding repos), including metadata, pruning, and monitoring.
+## Phase 8 — Core Knowledge MegaContext
+**Goal:** Build a durable MegaContext memory populated with curated knowledge (beyond coding repos), including metadata, pruning, and monitoring.
 
 - **Feature 8.1: Corpus curation & metadata**
   - Task 8.1.1: Define `configs/core_knowledge/*.yaml` describing domain partitions, ordering, retention policies, and external knowledge sources.
   - Task 8.1.2: Implement ingestion scripts that tokenize, gist, and tag spans with domain, timestamps, provenance IDs, and trust scores.
-  - Task 8.1.3: Add metadata indexing (Parquet/Arrow) for filtering and attach to lifetime nodes.
+  - Task 8.1.3: Add metadata indexing (Parquet/Arrow) for filtering and attach to MegaContext nodes.
 
 - **Feature 8.2: Storage management & pruning**
-  - Task 8.2.1: Extend lifetime storage for append-only partitions, versioning, and pruning signals (access counts, decay timers).
+  - Task 8.2.1: Extend MegaContext storage for append-only partitions, versioning, and pruning signals (access counts, decay timers).
   - Task 8.2.2: Provide pruning jobs moving low-utility spans to a cold tier while preserving audit metadata.
   - Task 8.2.3: Document operational playbooks for adding new knowledge slices, merging with repository memories, and rolling back bad ingests.
 
