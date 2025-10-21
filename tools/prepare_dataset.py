@@ -272,8 +272,8 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    # Allow arbitrarily long documents while chunking without warnings.
-    tokenizer.model_max_length = max(config.horizon, config.block_size) * 1024
+    # Allow very long documents; chunking keeps blocks within block_size.
+    tokenizer.model_max_length = int(1e6)
     teacher_model = None
     if config.teacher_model is not None:
         dtype = resolve_torch_dtype(config.teacher_dtype)

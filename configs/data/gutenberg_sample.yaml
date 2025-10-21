@@ -5,7 +5,7 @@ horizon: 64
 teacher_model: sshleifer/tiny-gpt2
 teacher_batch_size: 4
 teacher_dtype: float32
-teacher_device: cpu
+teacher_device: cuda
 splits:
   train:
     name: train
