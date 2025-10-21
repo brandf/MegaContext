@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import shutil
+import subprocess
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
@@ -330,8 +332,18 @@ def process_split(
             teacher_context_hidden=teacher_context_hidden,
             teacher_future_hidden=teacher_future_hidden,
         )
-        examples_emitted += len(batch_examples)
+        produced_examples = len(batch_examples)
+        examples_emitted += produced_examples
         batch_examples = []
+        if (
+            torch.cuda.is_available()
+            and shutil.which("nvidia-smi")
+            and produced_examples > 0
+        ):
+            try:
+                subprocess.run(["nvidia-smi"], check=False)
+            except OSError:
+                pass
 
     for doc in doc_iter:
         encoded = tokenizer(doc, add_special_tokens=False, return_attention_mask=False)
@@ -382,6 +394,8 @@ def process_split(
             ):
                 if batch_examples:
                     flush_batch()
+                doc_iter.close()
+                context_bar.close()
                 writer.close()
                 summary = {
                     "documents": documents_processed,
