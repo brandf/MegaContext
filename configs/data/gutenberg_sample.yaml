@@ -2,11 +2,11 @@ dataset_name: gutenberg_sample
 tokenizer: gpt2
 block_size: 32
 horizon: 64
-teacher_model: facebook/MobileLLM-R1-360M
+teacher_model: HuggingFaceTB/SmolLM2-360M-Instruct
 teacher_batch_size: 2
 teacher_dtype: bfloat16
 teacher_device: cuda
-teacher_trust_remote_code: true
+teacher_trust_remote_code: false
 splits:
   train:
     name: train

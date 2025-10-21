@@ -1,5 +1,5 @@
 model:
-  hidden_size: 1024
+  hidden_size: 2048
   block_size: 32
   num_heads: 16
   mlp_ratio: 4.0
