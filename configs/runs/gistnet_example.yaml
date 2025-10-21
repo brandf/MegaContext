@@ -1,7 +1,7 @@
 model:
   hidden_size: 2
   block_size: 4
-  num_heads: 2
+  num_heads: 1
   mlp_ratio: 2.0
   rope_base: 10000.0
 training:
