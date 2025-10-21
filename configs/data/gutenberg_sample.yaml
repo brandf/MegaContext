@@ -3,9 +3,9 @@ tokenizer: gpt2
 block_size: 32
 horizon: 64
 teacher_model: HuggingFaceTB/SmolLM2-360M-Instruct
-teacher_batch_size: 2
-teacher_dtype: float16
-teacher_device: cuda
+teacher_batch_size: 1
+teacher_dtype: float32
+teacher_device: cpu
 teacher_trust_remote_code: false
 splits:
   train:
