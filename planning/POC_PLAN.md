@@ -31,9 +31,11 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 **Upcoming extensions under evaluation:**
 - Treat the current pooled hidden-state regression as a stepping stone. Long-term we want to phase it out in favour of training directly on prediction fidelity.
 - Expand dataset prep to emit 4k-token MegaContext slices plus 32–64 token horizons, capturing teacher logits and hidden states for ΔNLL comparisons.
+- Proposed schema sketch: store `mega_context_tokens` (4k L0 ids), `mega_context_mask`, per-level gist tensors (`l1_gists`, `l2_gists` with offsets), cached teacher KV/hidden stacks for every block, and `future_tokens`/`future_logits` covering the horizon. Include metadata that pins tokenizer, stride, and layout so downstream code can reconstruct tree structure deterministically.
 - Generate hierarchical L1/L2 gists for each slice so training can sample full MegaContext structures instead of isolated blocks.
 - Construct batched working-context windows of width `W_l` by sliding across each prepared MegaContext (optionally ordered for KV-cache reuse), run the base model forward with those contexts, and compare the horizon rollout in latent/logit space to the teacher outputs to maximize gist substitutability.
 - Prototype a curriculum that gradually shrinks `W_l` during training to push the model toward using higher-level, lossy summaries.
+- Introduce lightweight `MegaContext`/`WorkingContext` tensor wrappers that own contiguous L0/L1/L2 buffers, expose combinator utilities (e.g., enumerate all legal `W_l`-sized windows, replace spans with specific gist levels), and surface batching hooks the trainer can call without hand-rolling slicing logic. The `MegaContext` helper should encapsulate offsets/parent pointers and emit iterator handles (or precomputed index tensors) that the trainer can batch together; `WorkingContext` should provide views for token embeddings vs gist embeddings, plus utilities to materialize KV-cache keys for a chosen slice.
 
 **Exit criteria:** Gist checkpoints reproduce ΔNLL targets, deterministic tests pass, and documentation explains the compression pipeline.
 
