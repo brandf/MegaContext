@@ -19,6 +19,7 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 
 ## Phase 2 — Minimal Gist Compression
 **Goal:** Train and validate a single-level (32→1) gist model sufficient to replace segments without catastrophic degradation.
+- **Design directive:** keep gist-side components tensor-first. Prefer thin Python wrappers around PyTorch modules and persist MegaContext structures as contiguous L0/L1/L2 tensors that mirror on-disk layouts instead of dense Python object graphs.
 - Task 2.1: Implement `src/gistnet/blocks.py` and `src/gistnet/model.py` with RoPE-enabled self-attention, shared slot queries, and residual MLPs outputting the base embedding dimension.
 - Task 2.2: Extend dataset tooling to emit paired `(tokens, gist_tokens)` batches over horizon `H=64`; cache teacher embeddings for repeatability.
 - Task 2.3: Build `tools/train_gistnet.py` with a masked-attention curriculum (per Gist Token paper) and W&B logging of ΔNLL@H.
