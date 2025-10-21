@@ -30,6 +30,18 @@ The sample configuration uses `sshleifer/tiny-gpt2` as the teacher and writes a
 single shard to `data/sample_text/train.arrow`. Adjust `teacher_device` or the
 horizon in the config to match your setup.
 
+### Larger corpus option
+
+For more realistic experiments (<1 GB total), run:
+
+```
+bash tools/download_gutenberg.sh data/raw/gutenberg
+uv run python -m tools.prepare_dataset --config configs/data/gutenberg_sample.yaml
+```
+
+The Gutenberg subset feeds into the same pipeline (`block_size=32`,
+`horizon=64`) and produces `data/gutenberg_sample/train.arrow` for training.
+
 ## Training Scaffold
 
 `tools/train_gistnet.py` provides a thin training loop that:
@@ -69,3 +81,12 @@ runs. Adjust these fields once you generate shards with larger teacher models.
 When the script detects a notebook environment (e.g., Colab), it automatically
 renders the loss curve inline *and* saves the PNG. Headless terminals simply
 receive the file/log output unless you add `--save-plot` or `--use-wandb`.
+
+### Colab notebook
+
+Open the curated notebook via Colab:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/<your-org>/MegaContext/blob/main/notebooks/gistnet_demo.ipynb)
+
+The notebook automates cloning, dataset download, preparation, and training with
+inline visualisations.
