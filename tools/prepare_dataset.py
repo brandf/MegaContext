@@ -18,7 +18,7 @@ import pyarrow as pa
 import pyarrow.ipc as pa_ipc
 import torch
 import yaml
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from megacontext.data import DatasetConfig, SplitConfig
