@@ -1,28 +1,31 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `README.md` holds the definitive architecture spec; read it before making changes, and update it whenever implementation work shifts the high-level contract so it always reflects the current system.
-- Roadmaps are split across `POC_PLAN.md` (hot path prototype), `PAPER_PLAN.md` (research milestone), and `FUTURE_PLAN.md` (post-paper growth). Review the plan relevant to your task, record progress, and log new work items so hand-offs stay seamless.
-- Keep visual assets such as `megacontext.png` (and future diagrams) in an `assets/` subtree; reference them from docs with relative paths.
-- When adding implementation work, organize runtime code under `src/` and supporting experiments under `research/`; mirror that structure in `tests/` so each module has a focused test target.
+- `README.md` is the architecture contract—revise it alongside behavior changes. Active workstreams are tracked in `planning/POC_PLAN.md`, `planning/PAPER_PLAN.md`, and `planning/FUTURE_PLAN.md`; note progress and new follow-ups before hand-off.
+- Runtime code lives in `src/` (e.g., `src/focus/allocator.py`) with mirror tests in `tests/`. Keep exploratory notebooks in `research/` until they stabilize.
+- House shared diagrams under `assets/` (e.g., `assets/megacontext.png`); reference images with relative paths.
+- Store configuration schemas in `configs/` as YAML and document each field inline, preferring enums for mode switches.
 
 ## Build, Test, and Development Commands
-- Prefer Python-native workflows: document setup via `uv` or `poetry` (e.g., `uv venv`, `uv pip install -r requirements.txt`, `uv run python -m <module>`).
-- Provide CLI entry points or `python -m` commands for routine tasks (`python -m tools.format`, `uv run ruff check`, `uv run black .`), and consolidate common tasks into scripts under `tools/`.
-- Use `pytest` for unit and integration coverage: standard command is `uv run pytest --maxfail=1 --disable-warnings`.
-- Prototype notebooks should rely on `uv` or `poetry` lockfiles; document any new dependencies in `pyproject.toml` and regenerate the lock before committing.
+- `uv venv` creates the local environment; follow with `uv sync` (or `uv pip install -r requirements.txt`) to install dependencies.
+- `uv run pytest --maxfail=1 --disable-warnings` is the canonical test entry point. Extend with `--cov=src --cov-report=term-missing` before publishing coverage figures.
+- `uv run ruff check src tests` enforces linting, and `uv run black src tests` keeps formatting at the project-wide 88-column limit.
+- `uv run python tools/bootstrap_env.py` provisions demo assets, and `uv run python tools/decode_demo.py --help` exposes the end-to-end inference harness.
 
 ## Coding Style & Naming Conventions
-- Default to Python 3.11; enforce `ruff` + `black` via pre-commit to keep imports sorted and code wrapped at 88 columns.
-- Name modules with snake_case (`lens_controller.py`), classes in PascalCase (`LensController`), and public functions in snake_case with verb-first names (`allocate_focus()`).
-- Store configuration schemas as `.yaml` under `configs/` and document each field inside the file; prefer explicit enums over booleans for allocator modes.
+- Target Python 3.11 semantics. Keep imports sorted and code formatted via the `ruff` + `black` toolchain; wire both through pre-commit when you touch configuration.
+- Modules use snake_case names, classes use PascalCase, and public functions begin with an action verb in snake_case (e.g., `allocate_focus()`).
 
 ## Testing Guidelines
-- Mirror each `src/` module with a `tests/test_<module>.py` file and include both happy-path and failure-path assertions.
-- Target >=90% statement coverage for core allocator and summarizer logic; measure via `pytest --cov=src --cov-report=term-missing`.
-- When adding models, include deterministic smoke tests that seed RNG (`PYTHONHASHSEED=0`, `torch.manual_seed(42)`) to stabilize CI results.
+- Mirror new runtime modules with `tests/test_<module>.py`, covering both success and failure paths. Use parametrization to cover focus edge cases.
+- Maintain ≥90 % statement coverage for focus allocation and summarization flows (`uv run pytest --cov=src --cov-report=term-missing`).
+- Seed randomness (`PYTHONHASHSEED=0`, `torch.manual_seed(42)`) in any model-facing tests to stabilize CI.
 
 ## Commit & Pull Request Guidelines
-- Follow the existing imperative, capitalized commit style (`Enhance README with...`); group related edits into a single logical commit.
-- PRs must describe the problem, the solution, and validation steps; attach terminal output for the canonical test command (e.g., `uv run pytest --maxfail=1 --disable-warnings`) and relevant plots or tensors as screenshots when behavior changes.
-- Link issues with `Fixes #ID` to trigger auto-closure, and request review from both architecture and implementation maintainers when changes touch shared interfaces.
+- Commits follow imperative, capitalized subjects (e.g., `Align Allocator API`), combining related changes into one reviewable unit.
+- Pull requests must summarize the problem, outline the solution, and paste the latest `uv run pytest --maxfail=1 --disable-warnings` output. Attach plots or tensors when behavior shifts.
+- Link issues with `Fixes #ID` and request review from both architecture and implementation maintainers whenever shared interfaces move.
+
+## Documentation & Communication
+- Update `README.md` diagrams or references when APIs change, adding new visuals under `assets/`.
+- Record roadmap shifts in the relevant `planning/*.md` file so the next agent can resume without rediscovery.
