@@ -242,7 +242,10 @@ def process_split(
         records["teacher_hidden"].append(teacher_rows[idx])
         records["gist_target"].append(gist_targets[idx])
 
-    write_arrow(Path(split_config.output_path), records)
+    output_path = Path(split_config.output_path)
+    if not output_path.is_absolute():
+        output_path = (base_dir / output_path).resolve()
+    write_arrow(output_path, records)
 
     blocks_processed = sum(len(blocks) for blocks in doc_blocks)
     summary: dict[str, Any] = {
