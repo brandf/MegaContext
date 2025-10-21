@@ -1,8 +1,8 @@
 model:
-  hidden_size: 1024
-  block_size: 32
-  num_heads: 8
-  mlp_ratio: 4.0
+  hidden_size: 2
+  block_size: 4
+  num_heads: 2
+  mlp_ratio: 2.0
   rope_base: 10000.0
 training:
   batch_size: 8

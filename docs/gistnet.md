@@ -51,9 +51,9 @@ uv run python -m tools.train_gistnet \
 The scaffold logs step-wise losses to stdout and keeps the code path entirely
 tensor-first so future phases can swap in larger datasets or evaluation metrics.
 
-The provided `configs/runs/gistnet_example.yaml` uses a lightweight CPU-friendly
-setup (hidden size 1024, batch size 8, 200 steps). Adjust the hyperparameters
-and device as needed once a GPU-backed teacher/model pair is available.
+The provided `configs/runs/gistnet_example.yaml` matches the toy dataset defaults
+(`block_size=4`, hidden size 2) and keeps computation light for CPU or Colab T4
+runs. Adjust these fields once you generate shards with larger teacher models.
 
 ### Logging & Visualisation
 
