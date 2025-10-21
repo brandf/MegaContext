@@ -25,8 +25,12 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     tqdm = None
 
-from megacontext.gistnet import GistNet, GistNetConfig
-from megacontext.utils import in_notebook_env
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:  # pragma: no cover - runtime convenience
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from megacontext.gistnet import GistNet, GistNetConfig  # noqa: E402
+from megacontext.utils import in_notebook_env  # noqa: E402
 
 
 def load_train_config(path: Path | None) -> dict[str, Any]:
