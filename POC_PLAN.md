@@ -44,12 +44,14 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 2.2.4: Provide `configs/runs/gistnet_pretrain.yaml` capturing dataset blends (narrative vs code weights), optimizer, and logging cadence; include held-out splits from each corpus for ΔNLL evaluation.
   - Task 2.2.5: Document the Hugging Face workflow (use `datasets` for ingest, `AutoTokenizer`/`AutoModelForCausalLM` for tokenization and teacher logits) so Phase 2 scripts follow the same conventions.
   - Task 2.2.6: Distill LLMLingua-2 style keep/drop labels from a teacher model (e.g., GPT-4 or curated experts), storing token-importance probabilities alongside gist batches for future LensNet supervision.
+  - Task 2.2.7: Incorporate layout-rich textual corpora (e.g., OmniDocBench transcripts and chart/table explanations) without rasterization, capturing layout metadata to enrich MegaContext span annotations.
 
 - **Feature 2.3: Training loop & losses**
   - Task 2.3.1: Implement `src/gistnet/trainer.py` computing substitutability ΔNLL@H and optional contrastive losses; support gradient accumulation.
   - Task 2.3.2: Add CLI `uv run python -m tools.train_gistnet --config ...` with resume/checkpoint support, writing to `artifacts/checkpoints/gistnet/`.
   - Task 2.3.3: Track ΔNLL metrics in W&B, emit per-span diagnostics (e.g., boundary tokens).
   - Task 2.3.4: Add a masked-attention training curriculum (per Gist Tokens) that forces gist slots to reconstruct prompts without peeking at original tokens; compare against baseline ablations.
+  - Task 2.3.5: Evaluate multi-scale gist schedules inspired by DeepSeek’s resolution modes—train curricula that progressively tighten gist budgets and log how LensNet handles variable compression ratios.
 
 - **Feature 2.4: Evaluation & tests**
   - Task 2.4.1: Add unit tests for block alignment, tensor shapes, and determinism under seeded RNG.
@@ -57,6 +59,7 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 2.4.3: Update `README.md` with training results and add `docs/gistnet.md` summarizing architecture knobs.
   - Task 2.4.4: Benchmark gist-cache reuse (latency, FLOPs) versus re-encoding full prompts to quantify expected savings from cached gist tokens.
   - Task 2.4.5: Integrate LLMLingua-2 faithfulness checks (alignment coverage, hallucination filters) to flag degenerate or repetitive gist outputs before publishing checkpoints.
+  - Task 2.4.6: Report gist performance across compression bands (≤5×, ≤10×, >10×) to understand safe operating regions, mirroring DeepSeek-OCR’s compression analysis but purely in-token.
 
 **Exit criteria:** Trained GistNet checkpoints for both layers, ΔNLL@H dashboards, reproducible training scripts, and tests ensuring deterministic outputs.
 
@@ -84,12 +87,14 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 3.4.2: Enforce contiguity, token budgets, and legality masks; integrate with `WorkingEntry` data.
   - Task 3.4.3: Provide unit tests for expand/collapse scenarios, hysteresis, and budget guardrails.
   - Task 3.4.4: Incorporate Slot-Attention-style normalised competition so expansion weights form a simplex, and log slot utilisation telemetry for pruning or spawning focus groups.
+  - Task 3.4.5: Teach the allocator to propose multi-scale expansion bundles (e.g., fine-grain + coarse summaries) based on compression bands, reusing lessons from DeepSeek’s resolution scheduling without leaving the token domain.
 
 - **Feature 3.5: Integrated runtime loop**
   - Task 3.5.1: Assemble `src/runtime/engine.py` ingesting streams, updating the MegaContext tree, calling LensNet/allocator, and decoding via the base model.
   - Task 3.5.2: Add CLI `uv run python -m tools.run_poc_loop --config configs/runs/poc_smollm3.yaml` processing a sample dataset and logging telemetry.
   - Task 3.5.3: Implement end-to-end tests with synthetic streams verifying token budgets, focus score signs, and decode outputs under seeded RNG.
   - Task 3.5.4: Expose a Perceiver IO-style query interface so expansion plans, provenance requests, and diagnostics read the latent working context via structured queries.
+  - Task 3.5.5: Persist layout/context-type metadata with working entries so multi-scale allocations can respect structured-doc regions (headings, tables, formulas).
 
 **Exit criteria:** End-to-end runtime loop executes with mocked datasets, the MegaContext tree persists correctly, LensNet scores apply legal focus actions, and integration tests confirm budget invariants.
 
@@ -101,6 +106,7 @@ This roadmap turns the MegaContext architecture from `README.md` into an executa
   - Task 4.1.2: Implement `tools/run_benchmarks.py` orchestrating base vs MegaContext runs, collecting Loss@H, accuracy, latency, and swap metrics.
   - Task 4.1.3: Store results under `artifacts/evals/<date>` with metadata (model, config, commit hash).
   - Task 4.1.4: Add knowledge-intensive QA benchmarks (e.g., Natural Questions, TriviaQA) with RAG baselines to quantify MegaContext’s gains over external retrieval.
+  - Task 4.1.5: Include structured-document datasets (Fox benchmark transcripts, OmniDocBench textual renderings) to measure MegaContext’s handling of dense layouts without optical compression.
 
 - **Feature 4.2: MegaContext visualization web app**
   - Task 4.2.1: Build a backend service (e.g., FastAPI + WebSocket) streaming working-context state, focus scores, and MegaContext node metadata in near real time.
