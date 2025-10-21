@@ -1,244 +1,49 @@
-# MegaContext POC Implementation Plan
+# MegaContext Proof of Concept (POC) Plan
 
-This roadmap turns the MegaContext architecture from `README.md` into an executable proof-of-concept. Each phase builds on the previous one; start a phase only after the prior phase’s exit criteria are satisfied. Tests default to `uv run pytest --maxfail=1 --disable-warnings`. Update `README.md` and relevant configs whenever an interface or workflow changes.
+This milestone isolates the minimum “hot path” required to demonstrate MegaContext end-to-end on a single base model. The goal is to show that hierarchical gists plus dynamic focus can keep a frozen LLM within a fixed working window while retaining task-relevant history. We aim for clarity, determinism, and reproducibility rather than exhaustive optimization.
 
-## Phase 1 — Base Runtime & Infrastructure
-**Goal:** Stand up the frozen base-model runtime, data tooling, and observability so later modules plug into a stable loop.
+## Phase 0 — Repository Readiness
+**Goal:** Ensure contributors can reproduce the prototype quickly.
+- Task 0.1: Verify `uv` bootstrap script provisions the environment, installs dependencies, and documents canonical commands (`uv venv`, `uv run pytest`, `uv run python -m …`).
+- Task 0.2: Refresh `README.md` to reference the POC plan, describe prerequisites (Python 3.11, GPU requirements), and outline the expected proof demo.
+- Task 0.3: Confirm smoke tests for dataset tooling and base model stubs run in CI.
 
-- **Feature 1.1: Environment bootstrap & repository skeleton**
-  - [x] Task 1.1.1: Add `pyproject.toml` targeting Python 3.11 with dependencies (`torch`, `transformers`, `accelerate`, `datasets`, `wandb`, `uv`, `ruff`, `black`, `pytest`); lock with `uv lock`.
-  - [x] Task 1.1.2: Provide `tools/bootstrap_env.py` (or shell script) that runs `uv venv`, installs requirements, and prints canonical commands.
-  - [x] Task 1.1.3: Configure `ruff`/`black` plus pre-commit hooks in `.pre-commit-config.yaml`; wire `uv run pre-commit install`.
-  - [x] Task 1.1.4: Scaffold module directories (`src/runtime`, `src/data`, `src/utils`) with parallel `tests/` stubs and placeholder smoke tests.
+## Phase 1 — Base Runtime Skeleton
+**Goal:** Stand up the frozen base-model runtime and data pipelines used later in the loop.
+- Task 1.1: Finalize `tools/prepare_dataset.py` and associated configs to produce deterministic 32-token blocks from a toy corpus (e.g., project docs).
+- Task 1.2: Implement `src/runtime/base_model.py` targeting `HuggingFaceTB/SmolLM3-3B` (bf16) with forward helpers used across the prototype.
+- Task 1.3: Provide `src/runtime/working_context.py` (token pass-through version) and unit tests covering tensor shapes, legality masks, and budget calculations.
+- Task 1.4: Add a CLI demo (`uv run python -m tools.decode_demo --config configs/runs/base_llm.yaml`) that streams a short prompt to confirm logits generation.
 
-- **Feature 1.2: Dataset staging pipeline**
-  - [x] Task 1.2.1: Implement `tools/prepare_dataset.py` to tokenize raw text into contiguous 32-token blocks, writing `.arrow` shards under `data/<dataset>/<split>.arrow` plus metadata (tokenizer, block size).
-  - [x] Task 1.2.2: Define `configs/data/<dataset>.yaml`; validate via Pydantic or `pydantic-core` schemas.
-  - [x] Task 1.2.3: Add dataset unit tests covering config parsing and a tiny synthetic corpus to prove deterministic chunking.
+**Exit criteria:** Dataset prep works on a sample corpus, base model forwards succeed, smoke tests pass under CI.
 
-- **Feature 1.3: Base LLM wrapper & working context I/O**
-  - [x] Task 1.3.1: Implement `src/runtime/base_model.py` with `BaseModel.from_pretrained()` loading `HuggingFaceTB/SmolLM3-3B` (bf16), exposing `forward(inputs_embeds, attention_mask, position_ids=None)`.
-  - [x] Task 1.3.2: Create an initial `src/runtime/working_context.py` that returns pass-through tensors from tokens only; include dataclasses matching `WorkingEntry` from the README for later replacement.
-  - [x] Task 1.3.3: Provide CLI `uv run python -m tools.decode_demo --config configs/runs/base_llm.yaml` that streams a short prompt and verifies logits generation.
-  - [x] Task 1.3.4: Write integration tests mocking a small tokenizer to assert logits have correct batch/sequence shapes.
+## Phase 2 — Minimal Gist Compression
+**Goal:** Train and validate a single-level (32→1) gist model sufficient to replace segments without catastrophic degradation.
+- Task 2.1: Implement `src/gistnet/blocks.py` and `src/gistnet/model.py` with RoPE-enabled self-attention, shared slot queries, and residual MLPs outputting the base embedding dimension.
+- Task 2.2: Extend dataset tooling to emit paired `(tokens, gist_tokens)` batches over horizon `H=64`; cache teacher embeddings for repeatability.
+- Task 2.3: Build `tools/train_gistnet.py` with a masked-attention curriculum (per Gist Token paper) and W&B logging of ΔNLL@H.
+- Task 2.4: Add unit tests for determinism (seeded RNG) plus a smoke eval comparing base vs gist-replaced loss with ≤5 % degradation on the toy corpus.
+- Task 2.5: Document gist training steps and expected metrics in `docs/gistnet.md`.
 
-- **Feature 1.4: Observability & logging**
-  - [x] Task 1.4.1: Wire basic Weights & Biases logging (guarded by env flag) for losses, throughput, and config snapshots.
-  - [x] Task 1.4.2: Add structured logging to `artifacts/run_logs/` for latency, memory, and token throughput.
-  - [x] Task 1.4.3: Document setup + run instructions in `README.md` and `docs/runs/base_runtime.md`.
+**Exit criteria:** Gist checkpoints reproduce ΔNLL targets, deterministic tests pass, and documentation explains the compression pipeline.
 
-**Exit criteria:** One-command environment setup, dataset preparation for a sample corpus, base LLM decoding 32-token blocks via CLI, CI passes on lint/tests, and metrics visible in W&B.
+## Phase 3 — LensNet, Focus Allocator, and Runtime Loop
+**Goal:** Integrate MegaContext storage with dynamic focus so a streaming run respects a fixed working budget.
+- Task 3.1: Implement `src/megacontext/memory/tree.py` with ingest/update APIs for 32-token blocks, node metadata (span id, level, offsets), and persistence to `{L0,L1,L2}.ctx`; include round-trip tests.
+- Task 3.2: Finish `src/runtime/working_context.py` to tile L0 tokens and L1 gists contiguously, reporting token-equivalent costs.
+- Task 3.3: Build `src/lensnet/model.py` with dual cross-attention (working entries ↔ gist cache) and a signed focus score head; create `src/lensnet/dataloader.py` to replay working-context snapshots.
+- Task 3.4: Implement `src/runtime/focus_allocator.py` with greedy expand/collapse respecting contiguity, cooldowns, and budget hysteresis. Include Slot-Attention-style normalised competition to keep allocation bounded.
+- Task 3.5: Assemble `src/runtime/engine.py` that ingests streams, updates the gist tree, queries LensNet, applies focus adjustments, and decodes via the base model.
+- Task 3.6: Provide unit tests across components (tree ingest, allocator edge cases, LensNet mask handling) plus an integration test with a deterministic synthetic stream.
+- Task 3.7: Ship `uv run python -m tools.run_poc_loop --config configs/runs/poc_smollm3.yaml` demonstrating a short session that expands/collapses spans while respecting the budget.
 
-## Phase 2 — GistNet Implementation & Training
-**Goal:** Train the 32→1 hierarchical GistNet so token spans can be replaced by gists with minimal ΔNLL.
+**Exit criteria:** End-to-end loop runs on the demo corpus, logs focus actions, maintains budget invariants, and tests cover core behavior.
 
-- **Feature 2.1: GistNet model implementation**
-  - Task 2.1.1: Implement `src/gistnet/blocks.py` (self-attn + cross-attn modules with RoPE) and `src/gistnet/model.py` exposing `GistNet.forward(tokens: Tensor[32, d]) -> Tensor[d]`.
-  - Task 2.1.2: Add shared learned slot queries `Q₁`, `Q₂`, residual MLPs, and stacking logic for two-level hierarchy (L1, L2).
-  - Task 2.1.3: Ensure outputs align with the base embedding dim; register buffers for block size and positional offsets.
+## Phase 4 — Proof Demo & Documentation
+**Goal:** Capture evidence that MegaContext works and explain the prototype clearly.
+- Task 4.1: Create a minimal benchmark script comparing (a) baseline LLM, (b) MegaContext-enabled run on a single synthetic task; report loss, swap rate, and latency.
+- Task 4.2: Record a short walkthrough (structured log or screenshots) showing focus reallocations in the demo run.
+- Task 4.3: Update `README.md` with a POC summary: architecture sketch, command sequence, expected outcomes, troubleshooting.
+- Task 4.4: Ensure `docs/poc_results.md` captures metrics, figures, and lessons learned leading into the next milestone.
 
-- **Feature 2.2: GistNet training data pipeline**
-  - Task 2.2.1: Extend dataset tooling to emit paired `(full_context, gist_replaced_context)` tensors over horizons `H=64`.
-  - Task 2.2.2: Cache token embeddings from the frozen base model to avoid redundant forward passes.
-  - Task 2.2.3: Stage long-form corpora for training: DeepMind PG-19 (novels), AllenAI BookSum (chapter-level prose + summaries), and filtered slices of The Stack (Python/TypeScript/JavaScript) for structured code traces.
-  - Task 2.2.4: Provide `configs/runs/gistnet_pretrain.yaml` capturing dataset blends (narrative vs code weights), optimizer, and logging cadence; include held-out splits from each corpus for ΔNLL evaluation.
-  - Task 2.2.5: Document the Hugging Face workflow (use `datasets` for ingest, `AutoTokenizer`/`AutoModelForCausalLM` for tokenization and teacher logits) so Phase 2 scripts follow the same conventions.
-  - Task 2.2.6: Distill LLMLingua-2 style keep/drop labels from a teacher model (e.g., GPT-4 or curated experts), storing token-importance probabilities alongside gist batches for future LensNet supervision.
-  - Task 2.2.7: Incorporate layout-rich textual corpora (e.g., OmniDocBench transcripts and chart/table explanations) without rasterization, capturing layout metadata to enrich MegaContext span annotations.
-
-- **Feature 2.3: Training loop & losses**
-  - Task 2.3.1: Implement `src/gistnet/trainer.py` computing substitutability ΔNLL@H and optional contrastive losses; support gradient accumulation.
-  - Task 2.3.2: Add CLI `uv run python -m tools.train_gistnet --config ...` with resume/checkpoint support, writing to `artifacts/checkpoints/gistnet/`.
-  - Task 2.3.3: Track ΔNLL metrics in W&B, emit per-span diagnostics (e.g., boundary tokens).
-  - Task 2.3.4: Add a masked-attention training curriculum (per Gist Tokens) that forces gist slots to reconstruct prompts without peeking at original tokens; compare against baseline ablations.
-  - Task 2.3.5: Evaluate multi-scale gist schedules inspired by DeepSeek’s resolution modes—train curricula that progressively tighten gist budgets and log how LensNet handles variable compression ratios.
-
-- **Feature 2.4: Evaluation & tests**
-  - Task 2.4.1: Add unit tests for block alignment, tensor shapes, and determinism under seeded RNG.
-  - Task 2.4.2: Create a smoke eval script comparing base vs gist-replaced Loss@H on a held-out dataset; target ≤5% degradation.
-  - Task 2.4.3: Update `README.md` with training results and add `docs/gistnet.md` summarizing architecture knobs.
-  - Task 2.4.4: Benchmark gist-cache reuse (latency, FLOPs) versus re-encoding full prompts to quantify expected savings from cached gist tokens.
-  - Task 2.4.5: Integrate LLMLingua-2 faithfulness checks (alignment coverage, hallucination filters) to flag degenerate or repetitive gist outputs before publishing checkpoints.
-  - Task 2.4.6: Report gist performance across compression bands (≤5×, ≤10×, >10×) to understand safe operating regions, mirroring DeepSeek-OCR’s compression analysis but purely in-token.
-
-**Exit criteria:** Trained GistNet checkpoints for both layers, ΔNLL@H dashboards, reproducible training scripts, and tests ensuring deterministic outputs.
-
-## Phase 3 — MegaContext Tree, LensNet, and Focus Allocator
-**Goal:** Build the runtime loop that ingests tokens, maintains the MegaContext gist tree, scores focus, and keeps the working context within budget.
-
-- **Feature 3.1: MegaContext gist tree & storage**
-  - Task 3.1.1: Implement `src/megacontext/memory/tree.py` with node structs (`span_id`, `start_token`, `level`, parent/child pointers) and ingest/update APIs honoring 32-token blocks.
-  - Task 3.1.2: Add serialization to `{L0,L1,L2}.ctx` files per the binary layout (headers, offsets) with bf16/fp16 payload support.
-  - Task 3.1.3: Provide round-trip tests ensuring deterministic offsets and lossless persistence.
-
-- **Feature 3.2: Working context manager**
-  - Task 3.2.1: Implement `src/runtime/working_context.py` to tile spans contiguously, compute token-equivalent costs, and expose the `pack()`/`to_tensors()` APIs from the README.
-  - Task 3.2.2: Add `TailGistCache` utilities returning L2 + recent L1 gists for LensNet conditioning.
-  - Task 3.2.3: Write tests verifying contiguity, cost accounting, and legality masks.
-
-- **Feature 3.3: LensNet model**
-  - Task 3.3.1: Implement `src/lensnet/model.py` with dual cross-attention blocks, scalar feature embeddings, legality masking, and signed score head.
-  - Task 3.3.2: Build `src/lensnet/dataloader.py` replaying working-context snapshots with counterfactual utility targets.
-  - Task 3.3.3: Create training script `tools/train_lensnet.py` logging regression/ranking/budget losses to W&B.
-  - Task 3.3.4: Prototype Perceiver-inspired latent slots (cross-attention from working entries into a fixed latent array) and compare focus-score quality versus the baseline encoder.
-
-- **Feature 3.4: Focus allocator**
-  - Task 3.4.1: Implement `src/runtime/focus_allocator.py` with greedy expand/collapse loop, thresholds, cooldown logic, and diff limits.
-  - Task 3.4.2: Enforce contiguity, token budgets, and legality masks; integrate with `WorkingEntry` data.
-  - Task 3.4.3: Provide unit tests for expand/collapse scenarios, hysteresis, and budget guardrails.
-  - Task 3.4.4: Incorporate Slot-Attention-style normalised competition so expansion weights form a simplex, and log slot utilisation telemetry for pruning or spawning focus groups.
-  - Task 3.4.5: Teach the allocator to propose multi-scale expansion bundles (e.g., fine-grain + coarse summaries) based on compression bands, reusing lessons from DeepSeek’s resolution scheduling without leaving the token domain.
-
-- **Feature 3.5: Integrated runtime loop**
-  - Task 3.5.1: Assemble `src/runtime/engine.py` ingesting streams, updating the MegaContext tree, calling LensNet/allocator, and decoding via the base model.
-  - Task 3.5.2: Add CLI `uv run python -m tools.run_poc_loop --config configs/runs/poc_smollm3.yaml` processing a sample dataset and logging telemetry.
-  - Task 3.5.3: Implement end-to-end tests with synthetic streams verifying token budgets, focus score signs, and decode outputs under seeded RNG.
-  - Task 3.5.4: Expose a Perceiver IO-style query interface so expansion plans, provenance requests, and diagnostics read the latent working context via structured queries.
-  - Task 3.5.5: Persist layout/context-type metadata with working entries so multi-scale allocations can respect structured-doc regions (headings, tables, formulas).
-
-**Exit criteria:** End-to-end runtime loop executes with mocked datasets, the MegaContext tree persists correctly, LensNet scores apply legal focus actions, and integration tests confirm budget invariants.
-
-## Phase 4 — Evaluation Harness & Visual Analytics
-**Goal:** Quantify MegaContext gains against baselines and deliver real-time visuals for the MegaContext/working context interaction.
-
-- **Feature 4.1: Benchmark suite**
-  - Task 4.1.1: Define `configs/eval/<benchmark>.yaml` covering narrative, coding, and retrieval-heavy tasks with expected metric budgets.
-  - Task 4.1.2: Implement `tools/run_benchmarks.py` orchestrating base vs MegaContext runs, collecting Loss@H, accuracy, latency, and swap metrics.
-  - Task 4.1.3: Store results under `artifacts/evals/<date>` with metadata (model, config, commit hash).
-  - Task 4.1.4: Add knowledge-intensive QA benchmarks (e.g., Natural Questions, TriviaQA) with RAG baselines to quantify MegaContext’s gains over external retrieval.
-  - Task 4.1.5: Include structured-document datasets (Fox benchmark transcripts, OmniDocBench textual renderings) to measure MegaContext’s handling of dense layouts without optical compression.
-
-- **Feature 4.2: MegaContext visualization web app**
-  - Task 4.2.1: Build a backend service (e.g., FastAPI + WebSocket) streaming working-context state, focus scores, and MegaContext node metadata in near real time.
-  - Task 4.2.2: Implement a front-end (React/Vite or similar) rendering the working context as vertical glyphs color-coded by LOD, with click-through to MegaContext tree explorers showing L0 text/gists.
-  - Task 4.2.3: Add playback mode for recorded runs and ensure dashboards link to W&B metrics.
-  - Task 4.2.4: Package deployment instructions (`docs/visualizer.md`) and integration tests for the streaming API.
-
-- **Feature 4.3: Ablations & reports**
-  - Task 4.3.1: Automate runs toggling LensNet, GistNet, and allocator components to measure Δ performance; capture swap rate, residency histograms, and token budgets.
-  - Task 4.3.2: Generate narrative reports (`docs/reports/poc_eval_<date>.md`) summarizing benchmarks and key visuals.
-  - Task 4.3.3: Update `README.md` with highlight metrics and links to the visualization app.
-  - Task 4.3.4: Compare MegaContext against RAG pipelines, documenting provenance fidelity, answer quality, and compute trade-offs.
-
-**Exit criteria:** Benchmark scripts run reproducibly, visualization app streams live working-context data with drill-down to MegaContext nodes, ablation data stored with plots, and documentation reflects eval setup plus visualization usage.
-
-## Phase 5 — Alternate Base Model Portability (Qwen Qwen2.5-Coder-3B-Instruct)
-**Goal:** Prove the stack can adapt to a different frozen model with minimal friction and codify the portability workflow.
-
-- **Feature 5.1: Model integration & configs**
-  - Task 5.1.1: Add configuration `configs/runs/qwen25_coder3b.yaml` selecting `Qwen/Qwen2.5-Coder-3B-Instruct`, precision settings, and tokenizer overrides.
-  - Task 5.1.2: Extend `BaseModel.from_pretrained()` to cover Qwen coder variants (both 3B and 32B) with appropriate attention mask handling.
-  - Task 5.1.3: Provide smoke tests ensuring logits and embedding dims align with GistNet/LensNet assumptions.
-
-- **Feature 5.2: Portability pipeline**
-  - Task 5.2.1: Script `tools/port_model.py` that clones configs, verifies dataset compatibility, and scaffolds gist/lens training jobs for the new base.
-  - Task 5.2.2: Run Phase 2–4 workflows on the Qwen 3B model; document deltas (training time, ΔNLL, latency).
-  - Task 5.2.3: Record reusable adapter notes in `docs/portability.md` (tokenization quirks, attention mask shapes, precision caveats).
-
-- **Feature 5.3: Regression tests & CI hooks**
-  - Task 5.3.1: Add model-specific regression tests (shape checks, runtime smoke loops) gated behind `pytest -m portability`.
-  - Task 5.3.2: Ensure CI can run lightweight checks for both base models (SmolLM3 + Qwen 3B) within resource limits.
-
-**Exit criteria:** Qwen2.5-Coder-3B runs through gist/lens pipelines with documented results, portability script/templates exist, and CI covers both model families.
-
-## Phase 6 — EM-Style Co-Learning with Prior Gist/Lens and Base LoRA
-**Goal:** Starting from prior-trained checkpoints, execute alternating optimization cycles that include a lightweight LoRA on the base LLM.
-
-- **Feature 6.1: Checkpoint ingestion & validation**
-  - Task 6.1.1: Implement loaders for external `gistnet.pt` and `lensnet.pt` weights (both SmolLM3 and Qwen variants), verifying config compatibility.
-  - Task 6.1.2: Add sanity-check scripts comparing ΔNLL/LensNet utilities before and after load.
-  - Task 6.1.3: Document expected checkpoint provenance and SHA hashes.
-
-- **Feature 6.2: LoRA integration**
-  - Task 6.2.1: Insert LoRA adapters (rank configurable, default 8) on input embedding and selected transformer layers via `peft` or custom modules.
-  - Task 6.2.2: Expose LoRA configuration in `configs/runs/em_cycle.yaml` and ensure gradients freeze non-LoRA weights by default.
-  - Task 6.2.3: Add tests confirming LoRA-only parameter updates and deterministic forward outputs when adapters are disabled.
-
-- **Feature 6.3: Alternating training scheduler**
-  - Task 6.3.1: Implement `tools/run_em_cycle.py` orchestrating Phase B1/B2/B3 (Gist → Lens → LoRA) as described in the README, with configurable step counts per base model.
-  - Task 6.3.2: Automate counterfactual utility regeneration after each B1 before LensNet updates.
-  - Task 6.3.3: Log cycle-level metrics (ΔNLL gaps, swap rate, LoRA loss) and checkpoint after each sub-phase under `artifacts/checkpoints/em_cycle/`.
-
-**Exit criteria:** EM cycles run end-to-end for both base models, LoRA adapters update as expected, telemetry shows converging metrics, and documentation describes cycle configuration.
-
-## Phase 7 — Coding Assistant Showcase with MegaContext
-**Goal:** Deliver a compelling coding-assistant demo using `Qwen/Qwen2.5-Coder-32B-Instruct` (when compute permits) and live repository memory.
-
--- **Feature 7.1: Repository MegaContext tooling**
-  - Task 7.1.1: Implement `tools/codebase_ingest.py` that walks a repository, chunks files, and builds an initial MegaContext gist tree (L0/L1/L2) tagged with file paths and language metadata.
-  - Task 7.1.2: Add filesystem watcher service (e.g., `watchdog`) to detect changes, re-gist affected spans incrementally, and update serialized `{L0,L1,L2}.ctx` artifacts.
-  - Task 7.1.3: Support compositing with external language/framework knowledge bases; merge metadata into the MegaContext tree with provenance tags.
-
-- **Feature 7.2: Coding model integration**
-  - Task 7.2.1: Extend base-model loader to switch between Qwen coder 3B and 32B variants; document memory requirements and precision settings.
-  - Task 7.2.2: Provide configs (`configs/runs/coding_showcase.yaml`) tuning working-context budgets, LensNet thresholds, and dataset sampling for coding tasks.
-  - Task 7.2.3: Add evaluation scripts running representative coding benchmarks (e.g., HumanEval-lite) with and without MegaContext memory.
-
-- **Feature 7.3: Agentic CLI & showcase experience**
-  - Task 7.3.1: Build a CLI (`uv run python -m tools.coding_agent`) that connects to the visualization app, streams working-context updates, and executes file-edit actions.
-  - Task 7.3.2: Integrate repository-aware prompts, context expansion logs, and success-metric tracking (latency, completion scores).
-  - Task 7.3.3: Produce demo scripts and documentation (`docs/showcase/coding_assistant.md`) highlighting the workflow and benefits.
-
-**Exit criteria:** Coding assistant CLI operates against a live repo with incremental gist updates, MegaContext-enhanced Qwen coder produces competitive results on sample tasks, and visualization links demonstrate focus actions over code spans.
-
-## Phase 8 — Core Knowledge MegaContext
-**Goal:** Build a durable MegaContext memory populated with curated knowledge (beyond coding repos), including metadata, pruning, and monitoring.
-
-- **Feature 8.1: Corpus curation & metadata**
-  - Task 8.1.1: Define `configs/core_knowledge/*.yaml` describing domain partitions, ordering, retention policies, and external knowledge sources.
-  - Task 8.1.2: Implement ingestion scripts that tokenize, gist, and tag spans with domain, timestamps, provenance IDs, and trust scores.
-  - Task 8.1.3: Add metadata indexing (Parquet/Arrow) for filtering and attach to MegaContext nodes.
-  - Task 8.1.4: Capture RAG-style provenance (source doc IDs, retrieval scores) for each gist node so downstream agents can surface evidence with responses.
-
-- **Feature 8.2: Storage management & pruning**
-  - Task 8.2.1: Extend MegaContext storage for append-only partitions, versioning, and pruning signals (access counts, decay timers).
-  - Task 8.2.2: Provide pruning jobs moving low-utility spans to a cold tier while preserving audit metadata.
-  - Task 8.2.3: Document operational playbooks for adding new knowledge slices, merging with repository memories, and rolling back bad ingests.
-
-- **Feature 8.3: Validation & telemetry**
-  - Task 8.3.1: Build scripts sampling queries across domains to verify LensNet surfaces relevant spans from the core memory.
-  - Task 8.3.2: Monitor storage growth, quantization precision, and gist variance; alert when thresholds exceed budgets.
-  - Task 8.3.3: Update docs with corpus composition, retention policies, and monitoring dashboards.
-  - Task 8.3.4: Add gist quality monitors (entropy, repetition detectors) to flag the degenerate outputs noted in Gist Tokens before they pollute long-term memory.
-
-**Exit criteria:** Core knowledge tree populated with at least one curated domain, storage/versioning tools operational, telemetry confirms access patterns, and documentation outlines maintenance workflows.
-
-## Phase 9 — Cognitive Core Training
-**Goal:** Train a compact “cognitive core” transformer that reasons over mixed token/gist inputs using LensNet/focus allocator, leveraging the core knowledge context.
-
-- **Feature 9.1: Small-model training harness**
-  - Task 9.1.1: Configure a ≤1 B parameter transformer (distilled SmolLM variant or similar) with adapters for mixed embeddings.
-  - Task 9.1.2: Implement training pipeline `tools/train_cognitive_core.py` consuming core knowledge working-context batches, using gradient checkpointing and bf16 precision.
-  - Task 9.1.3: Track multi-hop reasoning tasks requiring focus reallocations; log performance vs baseline runs without MegaContext.
-
-- **Feature 9.2: Teacher distillation & memory dependence**
-  - Task 9.2.1: Integrate a teacher model capable of direct knowledge access to produce supervision signals.
-  - Task 9.2.2: Add penalties/rewards based on whether the cognitive core expands relevant spans (ΔNLL with/without expansions).
-  - Task 9.2.3: Produce validation suites demonstrating improved reasoning when MegaContext memory is enabled.
-
-- **Feature 9.3: Documentation & release artifacts**
-  - Task 9.3.1: Package cognitive core checkpoints, configs, and instructions for deployment.
-  - Task 9.3.2: Create `docs/cognitive_core.md` detailing architecture, training schedule, and expected metrics.
-  - Task 9.3.3: Record outstanding research questions and future experiments.
-
-**Exit criteria:** Cognitive core checkpoints trained, validation tasks show reliance on MegaContext memory, and documentation explains deployment and limitations.
-
-## Phase 10 — EM-Style Fine-Tuning of GistNet, LensNet, and Cognitive Core
-**Goal:** Run a second alternating optimization cycle that jointly refines GistNet, LensNet, the cognitive core, and optional LoRA adapters for production readiness.
-
-- **Feature 10.1: Extended alternating scheduler**
-  - Task 10.1.1: Update EM tooling to include cognitive core fine-tuning stages (e.g., Core → Gist → Lens → LoRA) with configurable ordering.
-  - Task 10.1.2: Introduce curriculum scheduling so each cycle covers narrative, coding, QA, and repository workloads.
-  - Task 10.1.3: Automate metric gating (stop if ΔNLL or accuracy regresses beyond thresholds).
-
-- **Feature 10.2: Shared telemetry & ablations**
-  - Task 10.2.1: Capture cross-module metrics (gist variance, focus score distributions, cognitive core accuracy) per cycle.
-  - Task 10.2.2: Run ablations freezing one module at a time to quantify contributions to final benchmarks.
-  - Task 10.2.3: Publish final report `docs/reports/em_round2.md` summarizing improvements over Phase 9 and the coding showcase.
-
-- **Feature 10.3: Release packaging**
-  - Task 10.3.1: Bundle checkpoints, configs, visualization assets, and reproducibility scripts under `artifacts/releases/<tag>/`.
-  - Task 10.3.2: Update `README.md`, `POC_PLAN.md`, and `ROADMAP.md` with completion status and next-step suggestions (e.g., RL focus allocator, async disk streaming).
-  - Task 10.3.3: Provide deployment guidance for running MegaContext-enabled models in production or demos.
-
-**Exit criteria:** Second EM cycle converges with measurable benchmark gains, artifacts packaged for sharing, visualization assets refreshed, and documentation captures outcomes plus forward-looking research directions.
+**Exit criteria:** Demo artifacts prove that MegaContext can retain context beyond the working window with manageable complexity, unlocking the PAPER milestone.

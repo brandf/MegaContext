@@ -2,11 +2,16 @@
 
 *A system architecture for virtualized LLM memory. This document is both a conceptual overview and a technical design spec for an initial proof-of-concept (POC).*
 
+**Roadmaps:** Development is tracked across three plans:
+- `POC_PLAN.md` — the hot-path prototype proving MegaContext end-to-end.
+- `PAPER_PLAN.md` — the research milestone targeting a publishable system.
+- `FUTURE_PLAN.md` — post-paper growth, adoption, and advanced research.
+
 ---
 ## TL;DR — MegaContext
-MegaContext is a proposed system architecture for virtualized LLM context - inspired by a graphics concept called MegaTexture by ID software. 
+MegaContext is a proposed system architecture for virtualized LLM context - inspired by a graphics concept called MegaTexture by ID software.
 
-It separates a model’s context into a "MegaContext" (a hierarchical gist tree stored on disk) and a "working context" (a fixed-size mix of tokens and gist on GPU).  
+It separates a model’s context into a "MegaContext" (a hierarchical gist tree stored on disk) and a "working context" (a fixed-size mix of tokens and gist on GPU).
 
 To dynamical adapt level of detail, a learned LensNet model, conditioned on the query gist, continuously/incrementally refocuses the MegaContext onto the working context, giving the model effectively infinite memory at constant compute.
 

@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 - `README.md` holds the definitive architecture spec; read it before making changes, and update it whenever implementation work shifts the high-level contract so it always reflects the current system.
-- `POC_PLAN.md` captures the active phase/feature/task roadmap; always review it before starting work, record progress as tasks complete, and log newly discovered work items there so hand-offs stay seamless.
+- Roadmaps are split across `POC_PLAN.md` (hot path prototype), `PAPER_PLAN.md` (research milestone), and `FUTURE_PLAN.md` (post-paper growth). Review the plan relevant to your task, record progress, and log new work items so hand-offs stay seamless.
 - Keep visual assets such as `megacontext.png` (and future diagrams) in an `assets/` subtree; reference them from docs with relative paths.
 - When adding implementation work, organize runtime code under `src/` and supporting experiments under `research/`; mirror that structure in `tests/` so each module has a focused test target.
 
