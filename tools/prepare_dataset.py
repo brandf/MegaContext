@@ -268,6 +268,13 @@ def process_split(
         dynamic_ncols=True,
         mininterval=0.2,
     )
+    context_bar = tqdm(
+        desc=f"Contexts {split_config.name}",
+        leave=False,
+        position=2,
+        dynamic_ncols=True,
+        mininterval=0.2,
+    )
 
     def flush_batch() -> None:
         nonlocal batch_examples, teacher_hidden_size, examples_emitted
@@ -368,6 +375,7 @@ def process_split(
                 }
             )
             contexts_processed += 1
+            context_bar.update(1)
             if (
                 split_config.max_tokens is not None
                 and tokens_consumed >= split_config.max_tokens
@@ -393,6 +401,8 @@ def process_split(
             break
 
     flush_batch()
+    doc_iter.close()
+    context_bar.close()
     writer.close()
 
     summary = {
