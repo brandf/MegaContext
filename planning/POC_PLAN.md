@@ -28,6 +28,13 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 
 *Progress (current): core GistNet modules, dataset tooling with teacher caches, trainer scaffold, and notebook documentation are implemented; outstanding work covers curriculum training, ΔNLL smoke evals, and logging.*
 
+**Upcoming extensions under evaluation:**
+- Treat the current pooled hidden-state regression as a stepping stone. Long-term we want to phase it out in favour of training directly on prediction fidelity.
+- Expand dataset prep to emit 4k-token MegaContext slices plus 32–64 token horizons, capturing teacher logits and hidden states for ΔNLL comparisons.
+- Generate hierarchical L1/L2 gists for each slice so training can sample full MegaContext structures instead of isolated blocks.
+- Construct batched working-context windows of width `W_l` by sliding across each prepared MegaContext (optionally ordered for KV-cache reuse), run the base model forward with those contexts, and compare the horizon rollout in latent/logit space to the teacher outputs to maximize gist substitutability.
+- Prototype a curriculum that gradually shrinks `W_l` during training to push the model toward using higher-level, lossy summaries.
+
 **Exit criteria:** Gist checkpoints reproduce ΔNLL targets, deterministic tests pass, and documentation explains the compression pipeline.
 
 ## Phase 3 — LensNet, Focus Allocator, and Runtime Loop
