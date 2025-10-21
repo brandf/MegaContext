@@ -53,8 +53,12 @@ class DatasetConfig(BaseModel):
         description="Batch size used when computing teacher embeddings.",
     )
     teacher_dtype: str | None = Field(
-        default="float32",
-        description="Torch dtype for teacher model outputs (e.g., float32, bfloat16).",
+        default="auto",
+        description=(
+            "Torch dtype for teacher model outputs. Use 'auto' to select float16 on "
+            "older CUDA (e.g. T4) and bfloat16 on newer GPUs; fall back to float32 "
+            "otherwise."
+        ),
     )
     teacher_device: str = Field(
         default="cpu",

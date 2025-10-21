@@ -4,7 +4,7 @@ block_size: 4
 horizon: 8
 teacher_model: sshleifer/tiny-gpt2
 teacher_batch_size: 2
-teacher_dtype: float32
+teacher_dtype: auto
 teacher_device: cpu
 splits:
   train:

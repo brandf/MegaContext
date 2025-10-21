@@ -61,11 +61,53 @@ def resolve_torch_dtype(value: str | None) -> torch.dtype | None:
     raise TypeError(f"Expected dtype string or None, received {type(value)!r}")
 
 
+def torch_dtype_to_str(dtype: torch.dtype) -> str:
+    if dtype is torch.float16:
+        return "float16"
+    if dtype is torch.bfloat16:
+        return "bfloat16"
+    if dtype is torch.float32:
+        return "float32"
+    raise ValueError(f"Unsupported torch dtype {dtype!r}")
+
+
+def select_teacher_dtype(requested: str | None, device_str: str) -> torch.dtype:
+    resolved = resolve_torch_dtype(requested)
+    if resolved is not None:
+        return resolved
+    device = torch.device(device_str)
+    if device.type == "cuda" and torch.cuda.is_available():
+        index = (
+            device.index if device.index is not None else torch.cuda.current_device()
+        )
+        major, _ = torch.cuda.get_device_capability(index)
+        if major >= 8:
+            return torch.bfloat16
+        return torch.float16
+    return torch.float32
+
+
+def torch_dtype_to_arrow(dtype: torch.dtype) -> pa.DataType:
+    if dtype is torch.float16:
+        return pa.float16()
+    if dtype is torch.bfloat16:
+        if hasattr(pa, "bfloat16"):
+            return pa.bfloat16()
+        raise RuntimeError(
+            "pyarrow does not support bfloat16; upgrade pyarrow or choose a "
+            "different dtype"
+        )
+    if dtype is torch.float32:
+        return pa.float32()
+    raise ValueError(f"Unsupported torch dtype {dtype!r} for Arrow export")
+
+
 class ArrowShardWriter:
-    def __init__(self, output_path: Path) -> None:
+    def __init__(self, output_path: Path, *, teacher_type: pa.DataType) -> None:
         self._path = output_path
         self._file_handle = None
         self._writer: pa_ipc.RecordBatchWriter | None = None
+        self._teacher_type = teacher_type
 
     def _ensure_writer(self) -> None:
         if self._writer is not None:
@@ -77,8 +119,8 @@ class ArrowShardWriter:
                 pa.field("attention_mask", pa.list_(pa.int8())),
                 pa.field("context_input_ids", pa.list_(pa.int64())),
                 pa.field("context_attention_mask", pa.list_(pa.int8())),
-                pa.field("teacher_hidden", pa.list_(pa.list_(pa.float32()))),
-                pa.field("gist_target", pa.list_(pa.float32())),
+                pa.field("teacher_hidden", pa.list_(pa.list_(self._teacher_type))),
+                pa.field("gist_target", pa.list_(self._teacher_type)),
             ]
         )
         self._file_handle = self._path.open("wb")
@@ -109,9 +151,9 @@ class ArrowShardWriter:
                     context_attention_mask, type=pa.list_(pa.int8())
                 ),
                 "teacher_hidden": pa.array(
-                    teacher_hidden, type=pa.list_(pa.list_(pa.float32()))
+                    teacher_hidden, type=pa.list_(pa.list_(self._teacher_type))
                 ),
-                "gist_target": pa.array(gist_target, type=pa.list_(pa.float32())),
+                "gist_target": pa.array(gist_target, type=pa.list_(self._teacher_type)),
             }
         )
         self._writer.write_table(table)
@@ -129,6 +171,8 @@ def update_metadata(
     meta_path: Path,
     config: DatasetConfig,
     summary: dict[str, dict[str, Any]],
+    *,
+    teacher_dtype: str,
 ) -> None:
     meta_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -137,7 +181,8 @@ def update_metadata(
         "block_size": config.block_size,
         "horizon": config.horizon,
         "teacher_model": config.teacher_model,
-        "teacher_dtype": config.teacher_dtype,
+        "teacher_dtype": teacher_dtype,
+        "teacher_dtype_config": config.teacher_dtype,
         "splits": summary,
     }
     if meta_path.suffix in {".yaml", ".yml"}:
@@ -153,13 +198,24 @@ def process_split(
     *,
     base_dir: Path,
     teacher_model,
+    teacher_dtype: torch.dtype,
 ) -> dict[str, Any]:
     documents = gather_documents(split_config, base_dir=base_dir)
     blocks_per_window = config.horizon // config.block_size
     output_path = Path(split_config.output_path)
     if not output_path.is_absolute():
         output_path = (base_dir / output_path).resolve()
-    writer = ArrowShardWriter(output_path)
+    try:
+        teacher_arrow_type = torch_dtype_to_arrow(teacher_dtype)
+    except (RuntimeError, ValueError) as exc:
+        print(
+            f"Warning: {exc}. Falling back to float32 for teacher embeddings.",
+            flush=True,
+        )
+        teacher_dtype = torch.float32
+        teacher_arrow_type = torch_dtype_to_arrow(teacher_dtype)
+    teacher_dtype_str = torch_dtype_to_str(teacher_dtype)
+    writer = ArrowShardWriter(output_path, teacher_type=teacher_arrow_type)
 
     teacher_device = None
     if teacher_model is not None:
@@ -201,12 +257,13 @@ def process_split(
                     use_cache=False,
                 )
             hidden = outputs.hidden_states[-1][:, : config.block_size, :].to(
-                torch.float32
+                teacher_dtype
             )
             teacher_hidden_size = int(hidden.shape[-1])
-            hidden_cpu = hidden.cpu()
+            hidden_cpu = hidden.detach().cpu()
             teacher_hidden = hidden_cpu.tolist()
-            gist_target = hidden_cpu.mean(dim=1).tolist()
+            pooled = hidden.mean(dim=1)
+            gist_target = pooled.detach().cpu().tolist()
         else:
             teacher_hidden = [[] for _ in batch_examples]
             gist_target = [[] for _ in batch_examples]
@@ -267,6 +324,7 @@ def process_split(
                     "blocks": blocks_processed,
                     "examples": examples_emitted,
                     "teacher_hidden_size": teacher_hidden_size,
+                    "teacher_dtype": teacher_dtype_str,
                 }
                 return summary
             if len(batch_examples) >= flush_threshold:
@@ -286,6 +344,7 @@ def process_split(
         "blocks": blocks_processed,
         "examples": examples_emitted,
         "teacher_hidden_size": teacher_hidden_size,
+        "teacher_dtype": teacher_dtype_str,
     }
     return summary
 
@@ -307,19 +366,20 @@ def main() -> None:
         tokenizer.pad_token = tokenizer.eos_token
     # Allow very long documents; chunking keeps blocks within block_size.
     tokenizer.model_max_length = int(1e6)
+    teacher_dtype = select_teacher_dtype(config.teacher_dtype, config.teacher_device)
     teacher_model = None
     if config.teacher_model is not None:
-        dtype = resolve_torch_dtype(config.teacher_dtype)
         teacher_model = AutoModelForCausalLM.from_pretrained(
             config.teacher_model,
-            dtype=dtype,
+            torch_dtype=teacher_dtype,
             trust_remote_code=config.teacher_trust_remote_code,
         )
-        teacher_model.eval()
         teacher_model.to(config.teacher_device)
+        teacher_model.eval()
 
     base_dir = config_path.parent
     split_summaries: dict[str, dict[str, Any]] = {}
+    actual_teacher_dtype_str: str | None = None
     for split_name, split_config in tqdm(config.splits.items(), desc="Splits"):
         summary = process_split(
             split_config,
@@ -327,19 +387,28 @@ def main() -> None:
             config,
             base_dir=base_dir,
             teacher_model=teacher_model,
+            teacher_dtype=teacher_dtype,
         )
         split_summaries[split_name] = summary
+        actual_teacher_dtype_str = summary["teacher_dtype"]
         summary_line = (
             f"[{split_name}] {summary['documents']} docs, {summary['blocks']} blocks "
             f"→ {summary['examples']} examples "
-            f"(teacher dim={summary['teacher_hidden_size']})"
+            f"(teacher dim={summary['teacher_hidden_size']} "
+            f"dtype={summary['teacher_dtype']})"
         )
         print(summary_line)
 
     metadata_path = config.metadata_path()
     if metadata_path.suffix not in {".yaml", ".yml"}:
         metadata_path = metadata_path.with_suffix(".yaml")
-    update_metadata(metadata_path, config, split_summaries)
+    dtype_str = actual_teacher_dtype_str or torch_dtype_to_str(teacher_dtype)
+    update_metadata(
+        metadata_path,
+        config,
+        split_summaries,
+        teacher_dtype=dtype_str,
+    )
     print(f"Wrote metadata to {metadata_path}")
 
 

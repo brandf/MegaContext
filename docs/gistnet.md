@@ -13,12 +13,13 @@ gist compressor.
   teacher model produced cached embeddings.
 - `context_attention_mask` — mask for the horizon window.
 - `teacher_hidden` — cached teacher embeddings with shape
-  `[block_size, teacher_hidden_size]` stored as float32 lists.
-- `gist_target` — pooled target vector (mean of the teacher hidden states) with
-  length `teacher_hidden_size`.
+  `[block_size, teacher_hidden_size]` stored using the configured dtype
+  (auto → float16 on T4, bfloat16 on bf16-capable GPUs, otherwise float32).
+- `gist_target` — pooled target vector (mean of the teacher hidden states) emitted
+  in the same dtype as `teacher_hidden`.
 
 The metadata written to `data/<dataset>/metadata.yaml` records the tokenizer,
-block size, horizon, teacher model, and per-split statistics.
+block size, horizon, teacher model/dtype, and per-split statistics.
 
 ## Preparing the Sample Dataset
 

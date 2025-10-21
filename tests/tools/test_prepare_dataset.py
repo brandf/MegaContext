@@ -75,10 +75,12 @@ def test_process_split_writes_arrow(tmp_path) -> None:
         config,
         base_dir=tmp_path,
         teacher_model=DummyTeacher(hidden_size=3),
+        teacher_dtype=torch.float32,
     )
     assert summary["examples"] == 1
     assert summary["blocks"] == 2
     assert summary["teacher_hidden_size"] == 3
+    assert summary["teacher_dtype"] == "float32"
 
     with pa_ipc.open_file((tmp_path / "out.arrow").open("rb")) as reader:
         table = reader.read_all()

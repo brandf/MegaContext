@@ -8,13 +8,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import sys
 from itertools import cycle
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
 import pyarrow.ipc as pa_ipc
+import pyarrow.types as pa_types
 import torch
 import yaml
 from torch import optim
@@ -50,30 +53,64 @@ def load_train_config(path: Path | None) -> dict[str, Any]:
 
 class GistArrowDataset(Dataset):
     def __init__(self, shard_path: Path) -> None:
-        with pa_ipc.open_file(shard_path.open("rb")) as reader:
-            table = reader.read_all()
-        self.tokens = torch.tensor(
-            table.column("input_ids").to_pylist(), dtype=torch.long
-        )
-        self.attention_mask = torch.tensor(
-            table.column("attention_mask").to_pylist(), dtype=torch.long
-        )
-        self.teacher_hidden = torch.tensor(
-            table.column("teacher_hidden").to_pylist(), dtype=torch.float32
-        )
-        self.gist_target = torch.tensor(
-            table.column("gist_target").to_pylist(), dtype=torch.float32
-        )
+        self._mm_file = pa.memory_map(str(shard_path), "rb")
+        self._reader = pa_ipc.open_file(self._mm_file)
+        self._batches = [
+            self._reader.get_batch(i) for i in range(self._reader.num_record_batches)
+        ]
+        teacher_field = self._reader.schema.field("teacher_hidden")
+        value_type = teacher_field.type
+        while pa_types.is_list(value_type):
+            value_type = value_type.value_type
+        if pa_types.is_float16(value_type):
+            self.teacher_dtype = torch.float16
+        elif hasattr(pa_types, "is_bfloat16") and pa_types.is_bfloat16(value_type):
+            self.teacher_dtype = torch.bfloat16
+        elif pa_types.is_float32(value_type):
+            self.teacher_dtype = torch.float32
+        else:
+            raise ValueError(f"Unsupported teacher_hidden arrow type: {value_type!r}")
+        self._cumulative_rows: list[int] = []
+        total = 0
+        for batch in self._batches:
+            total += batch.num_rows
+            self._cumulative_rows.append(total)
+        self._length = total
 
     def __len__(self) -> int:
-        return self.tokens.shape[0]
+        return self._length
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        if index < 0:
+            index += self._length
+        if not 0 <= index < self._length:
+            raise IndexError(index)
+        batch_idx = bisect.bisect_right(self._cumulative_rows, index)
+        batch = self._batches[batch_idx]
+        batch_start = 0 if batch_idx == 0 else self._cumulative_rows[batch_idx - 1]
+        row = index - batch_start
+
+        tokens = torch.tensor(
+            batch.column("input_ids")[row].as_py(),
+            dtype=torch.long,
+        )
+        attention_mask = torch.tensor(
+            batch.column("attention_mask")[row].as_py(),
+            dtype=torch.long,
+        )
+        teacher_hidden = torch.tensor(
+            batch.column("teacher_hidden")[row].as_py(),
+            dtype=self.teacher_dtype,
+        )
+        gist_target = torch.tensor(
+            batch.column("gist_target")[row].as_py(),
+            dtype=self.teacher_dtype,
+        )
         return {
-            "tokens": self.tokens[index],
-            "attention_mask": self.attention_mask[index],
-            "teacher_hidden": self.teacher_hidden[index],
-            "gist_target": self.gist_target[index],
+            "tokens": tokens,
+            "attention_mask": attention_mask,
+            "teacher_hidden": teacher_hidden,
+            "gist_target": gist_target,
         }
 
 
@@ -94,9 +131,12 @@ def train_step(
     device: torch.device,
 ) -> float:
     model.train()
-    embeddings = batch["teacher_hidden"].to(device)  # [B, block, hidden]
+    model_dtype = next(model.parameters()).dtype
+    embeddings = batch["teacher_hidden"].to(
+        device=device, dtype=model_dtype
+    )  # [B, block, hidden]
     inputs = embeddings.unsqueeze(1)  # [B, 1, block, hidden]
-    targets = batch["gist_target"].to(device)  # [B, hidden]
+    targets = batch["gist_target"].to(device=device, dtype=model_dtype)  # [B, hidden]
 
     optimizer.zero_grad(set_to_none=True)
     preds = model(inputs)  # [B, 1, hidden]
@@ -235,7 +275,16 @@ def main() -> None:
     use_tqdm = (not args.no_tqdm) and tqdm is not None
     step_iter = range(1, max_steps + 1)
     progress = (
-        tqdm(step_iter, desc="training", leave=False) if use_tqdm else step_iter  # type: ignore[arg-type]
+        tqdm(
+            step_iter,
+            desc="training",
+            leave=True,
+            position=0,
+            dynamic_ncols=True,
+            mininterval=0.2,
+        )
+        if use_tqdm
+        else step_iter  # type: ignore[arg-type]
     )
     print_interval = max(1, max_steps // 10)
     for step in progress:
