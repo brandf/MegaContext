@@ -24,9 +24,9 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 - Task 2.2: Extend dataset tooling to emit paired `(tokens, gist_tokens)` batches over horizon `H=64`; cache teacher embeddings for repeatability.
 - Task 2.3: Build `tools/train_gistnet.py` with a masked-attention curriculum (per Gist Token paper) and W&B logging of ΔNLL@H.
 - Task 2.4: Add unit tests for determinism (seeded RNG) plus a smoke eval comparing base vs gist-replaced loss with ≤5 % degradation on the toy corpus.
-- Task 2.5: Document gist training steps and expected metrics in `docs/gistnet.md`.
+- Task 2.5: Document gist training steps and expected metrics in `notebooks/gistnet.ipynb` (Colab-ready guide).
 
-*Progress (current): core GistNet modules, dataset tooling with teacher caches, trainer scaffold, and docs are implemented; outstanding work covers curriculum training, ΔNLL smoke evals, and logging.*
+*Progress (current): core GistNet modules, dataset tooling with teacher caches, trainer scaffold, and notebook documentation are implemented; outstanding work covers curriculum training, ΔNLL smoke evals, and logging.*
 
 **Exit criteria:** Gist checkpoints reproduce ΔNLL targets, deterministic tests pass, and documentation explains the compression pipeline.
 
