@@ -57,7 +57,9 @@ def test_process_split_writes_arrow(tmp_path) -> None:
             "dataset_name": "demo",
             "tokenizer": "dummy",
             "block_size": 4,
-            "horizon": 8,
+            "context_tokens": 4,
+            "context_stride": 4,
+            "horizon": 4,
             "teacher_batch_size": 2,
             "splits": {
                 "train": {
@@ -78,7 +80,7 @@ def test_process_split_writes_arrow(tmp_path) -> None:
         teacher_dtype=torch.float32,
     )
     assert summary["examples"] == 1
-    assert summary["blocks"] == 2
+    assert summary["contexts"] == 1
     assert summary["teacher_hidden_size"] == 3
     assert summary["teacher_dtype"] == "float32"
 
@@ -86,12 +88,16 @@ def test_process_split_writes_arrow(tmp_path) -> None:
         table = reader.read_all()
     assert table.num_rows == 1
 
-    teacher_hidden = table.column("teacher_hidden")[0].as_py()
-    assert len(teacher_hidden) == 4
-    assert len(teacher_hidden[0]) == 3
-
-    gist_target = table.column("gist_target")[0].as_py()
-    assert len(gist_target) == 3
-
     context_ids = table.column("context_input_ids")[0].as_py()
-    assert len(context_ids) == 8
+    assert len(context_ids) == 4
+
+    future_ids = table.column("future_input_ids")[0].as_py()
+    assert len(future_ids) == 4
+
+    teacher_context_hidden = table.column("teacher_context_hidden")[0].as_py()
+    assert len(teacher_context_hidden) == 4
+    assert len(teacher_context_hidden[0]) == 3
+
+    teacher_future_hidden = table.column("teacher_future_hidden")[0].as_py()
+    assert len(teacher_future_hidden) == 4
+    assert len(teacher_future_hidden[0]) == 3

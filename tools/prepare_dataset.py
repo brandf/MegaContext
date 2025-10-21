@@ -115,12 +115,16 @@ class ArrowShardWriter:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         schema = pa.schema(
             [
-                pa.field("input_ids", pa.list_(pa.int64())),
-                pa.field("attention_mask", pa.list_(pa.int8())),
                 pa.field("context_input_ids", pa.list_(pa.int64())),
                 pa.field("context_attention_mask", pa.list_(pa.int8())),
-                pa.field("teacher_hidden", pa.list_(pa.list_(self._teacher_type))),
-                pa.field("gist_target", pa.list_(self._teacher_type)),
+                pa.field("future_input_ids", pa.list_(pa.int64())),
+                pa.field("future_attention_mask", pa.list_(pa.int8())),
+                pa.field(
+                    "teacher_context_hidden", pa.list_(pa.list_(self._teacher_type))
+                ),
+                pa.field(
+                    "teacher_future_hidden", pa.list_(pa.list_(self._teacher_type))
+                ),
             ]
         )
         self._file_handle = self._path.open("wb")
@@ -129,31 +133,37 @@ class ArrowShardWriter:
     def write_batch(
         self,
         *,
-        input_ids: list[list[int]],
-        attention_mask: list[list[int]],
         context_input_ids: list[list[int]],
         context_attention_mask: list[list[int]],
-        teacher_hidden: list[list[list[float]]],
-        gist_target: list[list[float]],
+        future_input_ids: list[list[int]],
+        future_attention_mask: list[list[int]],
+        teacher_context_hidden: list[list[list[float]]],
+        teacher_future_hidden: list[list[list[float]]],
     ) -> None:
-        if not input_ids:
+        if not context_input_ids:
             return
         self._ensure_writer()
         assert self._writer is not None
         table = pa.table(
             {
-                "input_ids": pa.array(input_ids, type=pa.list_(pa.int64())),
-                "attention_mask": pa.array(attention_mask, type=pa.list_(pa.int8())),
                 "context_input_ids": pa.array(
                     context_input_ids, type=pa.list_(pa.int64())
                 ),
                 "context_attention_mask": pa.array(
                     context_attention_mask, type=pa.list_(pa.int8())
                 ),
-                "teacher_hidden": pa.array(
-                    teacher_hidden, type=pa.list_(pa.list_(self._teacher_type))
+                "future_input_ids": pa.array(
+                    future_input_ids, type=pa.list_(pa.int64())
                 ),
-                "gist_target": pa.array(gist_target, type=pa.list_(self._teacher_type)),
+                "future_attention_mask": pa.array(
+                    future_attention_mask, type=pa.list_(pa.int8())
+                ),
+                "teacher_context_hidden": pa.array(
+                    teacher_context_hidden, type=pa.list_(pa.list_(self._teacher_type))
+                ),
+                "teacher_future_hidden": pa.array(
+                    teacher_future_hidden, type=pa.list_(pa.list_(self._teacher_type))
+                ),
             }
         )
         self._writer.write_table(table)
@@ -179,6 +189,8 @@ def update_metadata(
         "dataset_name": config.dataset_name,
         "tokenizer": config.tokenizer,
         "block_size": config.block_size,
+        "context_tokens": config.context_tokens,
+        "context_stride": config.context_stride or config.context_tokens,
         "horizon": config.horizon,
         "teacher_model": config.teacher_model,
         "teacher_dtype": teacher_dtype,
@@ -201,7 +213,15 @@ def process_split(
     teacher_dtype: torch.dtype,
 ) -> dict[str, Any]:
     documents = gather_documents(split_config, base_dir=base_dir)
-    blocks_per_window = config.horizon // config.block_size
+    context_tokens = config.context_tokens
+    horizon_tokens = config.horizon
+    stride_tokens = config.context_stride or context_tokens
+    block_size = config.block_size
+    blocks_per_context = context_tokens // block_size
+    blocks_per_horizon = horizon_tokens // block_size
+    blocks_per_example = blocks_per_context + blocks_per_horizon
+    stride_blocks = stride_tokens // block_size
+
     output_path = Path(split_config.output_path)
     if not output_path.is_absolute():
         output_path = (base_dir / output_path).resolve()
@@ -224,10 +244,10 @@ def process_split(
     batch_examples: list[dict[str, list[int]]] = []
     flush_threshold = config.teacher_batch_size if teacher_model is not None else 512
 
-    blocks_processed = 0
+    contexts_processed = 0
     examples_emitted = 0
     teacher_hidden_size = 0
-    tokens_emitted = 0
+    tokens_consumed = 0
     documents_processed = 0
 
     doc_iter = tqdm(
@@ -244,10 +264,10 @@ def process_split(
         if not batch_examples:
             return
         if teacher_model is not None:
-            context_tokens = [ex["context_tokens"] for ex in batch_examples]
-            input_ids = torch.tensor(
-                context_tokens, dtype=torch.long, device=teacher_device
-            )
+            sequences = [
+                ex["context_tokens"] + ex["future_tokens"] for ex in batch_examples
+            ]
+            input_ids = torch.tensor(sequences, dtype=torch.long, device=teacher_device)
             attention_mask = torch.ones_like(input_ids, device=teacher_device)
             with torch.no_grad():
                 outputs = teacher_model(
@@ -256,27 +276,28 @@ def process_split(
                     output_hidden_states=True,
                     use_cache=False,
                 )
-            hidden = outputs.hidden_states[-1][:, : config.block_size, :].to(
-                teacher_dtype
-            )
+            hidden = outputs.hidden_states[-1][:, : context_tokens + horizon_tokens, :]
+            hidden = hidden.to(teacher_dtype)
             teacher_hidden_size = int(hidden.shape[-1])
-            hidden_cpu = hidden.detach().cpu()
-            teacher_hidden = hidden_cpu.tolist()
-            pooled = hidden.mean(dim=1)
-            gist_target = pooled.detach().cpu().tolist()
+            context_hidden = hidden[:, :context_tokens, :]
+            future_hidden = hidden[:, context_tokens:, :]
+            context_hidden_cpu = context_hidden.detach().cpu()
+            future_hidden_cpu = future_hidden.detach().cpu()
+            teacher_context_hidden = context_hidden_cpu.tolist()
+            teacher_future_hidden = future_hidden_cpu.tolist()
         else:
-            teacher_hidden = [[] for _ in batch_examples]
-            gist_target = [[] for _ in batch_examples]
+            teacher_context_hidden = [[] for _ in batch_examples]
+            teacher_future_hidden = [[] for _ in batch_examples]
 
-        attention_mask = [[1] * config.block_size for _ in batch_examples]
-        context_attention = [[1] * len(ex["context_tokens"]) for ex in batch_examples]
+        context_attention = [[1] * context_tokens for _ in batch_examples]
+        future_attention = [[1] * horizon_tokens for _ in batch_examples]
         writer.write_batch(
-            input_ids=[ex["tokens"] for ex in batch_examples],
-            attention_mask=attention_mask,
             context_input_ids=[ex["context_tokens"] for ex in batch_examples],
             context_attention_mask=context_attention,
-            teacher_hidden=teacher_hidden,
-            gist_target=gist_target,
+            future_input_ids=[ex["future_tokens"] for ex in batch_examples],
+            future_attention_mask=future_attention,
+            teacher_context_hidden=teacher_context_hidden,
+            teacher_future_hidden=teacher_future_hidden,
         )
         examples_emitted += len(batch_examples)
         batch_examples = []
@@ -287,41 +308,52 @@ def process_split(
         blocks: list[list[int]] = []
         for block in chunkify(token_ids, config.block_size):
             blocks.append(block)
-            blocks_processed += 1
-            tokens_emitted += len(block)
+            tokens_consumed += len(block)
             if (
                 split_config.max_tokens is not None
-                and tokens_emitted >= split_config.max_tokens
+                and tokens_consumed >= split_config.max_tokens
             ):
                 break
         documents_processed += 1
-        if len(blocks) < blocks_per_window:
+        total_blocks = len(blocks)
+        if total_blocks < blocks_per_example:
             if (
                 split_config.max_tokens is not None
-                and tokens_emitted >= split_config.max_tokens
+                and tokens_consumed >= split_config.max_tokens
             ):
                 break
             continue
 
-        for start in range(0, len(blocks) - blocks_per_window + 1):
-            window = blocks[start : start + blocks_per_window]
-            context_tokens = [token for block in window for token in block]
+        max_start = total_blocks - blocks_per_example + 1
+        for start in range(0, max_start, stride_blocks):
+            context_blocks = blocks[start : start + blocks_per_context]
+            future_blocks = blocks[
+                start + blocks_per_context : start + blocks_per_example
+            ]
+            context_flat = [token for block in context_blocks for token in block]
+            future_flat = [token for block in future_blocks for token in block]
+            if (
+                len(context_flat) != context_tokens
+                or len(future_flat) != horizon_tokens
+            ):
+                continue
             batch_examples.append(
                 {
-                    "tokens": window[0],
-                    "context_tokens": context_tokens,
+                    "context_tokens": context_flat,
+                    "future_tokens": future_flat,
                 }
             )
+            contexts_processed += 1
             if (
                 split_config.max_tokens is not None
-                and tokens_emitted >= split_config.max_tokens
+                and tokens_consumed >= split_config.max_tokens
             ):
                 if batch_examples:
                     flush_batch()
                 writer.close()
                 summary = {
                     "documents": documents_processed,
-                    "blocks": blocks_processed,
+                    "contexts": contexts_processed,
                     "examples": examples_emitted,
                     "teacher_hidden_size": teacher_hidden_size,
                     "teacher_dtype": teacher_dtype_str,
@@ -332,7 +364,7 @@ def process_split(
 
         if (
             split_config.max_tokens is not None
-            and tokens_emitted >= split_config.max_tokens
+            and tokens_consumed >= split_config.max_tokens
         ):
             break
 
@@ -341,7 +373,7 @@ def process_split(
 
     summary = {
         "documents": documents_processed,
-        "blocks": blocks_processed,
+        "contexts": contexts_processed,
         "examples": examples_emitted,
         "teacher_hidden_size": teacher_hidden_size,
         "teacher_dtype": teacher_dtype_str,
@@ -392,8 +424,8 @@ def main() -> None:
         split_summaries[split_name] = summary
         actual_teacher_dtype_str = summary["teacher_dtype"]
         summary_line = (
-            f"[{split_name}] {summary['documents']} docs, {summary['blocks']} blocks "
-            f"→ {summary['examples']} examples "
+            f"[{split_name}] {summary['documents']} docs, "
+            f"{summary['contexts']} contexts → {summary['examples']} examples "
             f"(teacher dim={summary['teacher_hidden_size']} "
             f"dtype={summary['teacher_dtype']})"
         )

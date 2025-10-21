@@ -40,6 +40,17 @@ class DatasetConfig(BaseModel):
         default=32,
         description="Number of L0 tokens per block.",
     )
+    context_tokens: int = Field(
+        default=4096,
+        description="Number of tokens retained as the MegaContext slice per example.",
+    )
+    context_stride: int | None = Field(
+        default=None,
+        description=(
+            "Stride (in tokens) between successive context windows. "
+            "Defaults to `context_tokens` when omitted."
+        ),
+    )
     horizon: int = Field(
         default=64,
         description="Total token horizon for teacher context windows.",
@@ -75,6 +86,28 @@ class DatasetConfig(BaseModel):
     def block_size_positive(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("block_size must be > 0")
+        return value
+
+    @field_validator("context_tokens")
+    @classmethod
+    def context_multiple_of_block(cls, value: int, info) -> int:
+        block_size = info.data.get("block_size", 32)
+        if value <= 0:
+            raise ValueError("context_tokens must be > 0")
+        if value % block_size != 0:
+            raise ValueError("context_tokens must be a multiple of block_size")
+        return value
+
+    @field_validator("context_stride")
+    @classmethod
+    def stride_multiple_of_block(cls, value: int | None, info) -> int | None:
+        if value is None:
+            return value
+        block_size = info.data.get("block_size", 32)
+        if value <= 0:
+            raise ValueError("context_stride must be > 0 when provided")
+        if value % block_size != 0:
+            raise ValueError("context_stride must be a multiple of block_size")
         return value
 
     @field_validator("horizon")

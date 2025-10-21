@@ -31,6 +31,8 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 
 *Progress (current): core GistNet modules, dataset tooling with teacher caches, trainer scaffold, and notebook documentation are implemented; outstanding work covers curriculum training, ΔNLL smoke evals, and logging.*
 
+*Notes:* Tail→gist substitution is an intentional waypoint that lets us validate the compressor before expanding to full-tree summarisation. GistNet distills pooled *teacher* hidden states so we can regenerate contextualised gists without the teacher at runtime; naive mean-embedding pooling remains a baseline. Retain the pooling-MSE training path long term so we can compare (a) pure pooling loss, (b) pooling pretrain + ΔNLL fine-tune, and (c) ΔNLL-from-scratch across model variants—`tools/train_gistnet.py` now accepts multi-phase schedules so we can automate those comparisons. ΔNLL stays the gold-standard substitutability check—we audit with it now and plan to fine-tune against it once the end-to-end loop is wired. The dataset continues to cache a wider teacher horizon so targets stay context-rich, balanced against storage/compute budgets.
+
 **Upcoming extensions under evaluation:**
 - Treat the current pooled hidden-state regression as a stepping stone. Long-term we want to phase it out in favour of training directly on prediction fidelity.
 - Expand dataset prep to emit 4k-token contexts plus 32–64 token horizons, caching the teacher’s final hidden states so later stages can reconstruct rollouts and ΔNLL without re-running the model.
