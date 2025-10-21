@@ -50,6 +50,8 @@ uv run pytest --maxfail=1 --disable-warnings
 
 ## 7. Dataset prep smoke test
 ```bash
+# Optional: persist shards somewhere else (e.g., mounted Drive in Colab)
+# export MEGACONTEXT_DATA_ROOT=/path/to/storage
 uv run python -m tools.prepare_dataset --config configs/data/sample_text.yaml
 ```
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Iterable, Sequence
@@ -234,9 +235,28 @@ def process_split(
     blocks_per_example = blocks_per_context + blocks_per_horizon
     stride_blocks = stride_tokens // block_size
 
-    output_path = Path(split_config.output_path)
-    if not output_path.is_absolute():
-        output_path = (base_dir / output_path).resolve()
+    output_path_cfg = Path(split_config.output_path)
+    data_root_env = os.environ.get("MEGACONTEXT_DATA_ROOT")
+    if output_path_cfg.is_absolute():
+        output_path = output_path_cfg
+    else:
+        default_output = (base_dir / output_path_cfg).resolve()
+        if data_root_env:
+            resolved_base = base_dir.resolve()
+            repo_root = (
+                resolved_base.parents[1]
+                if len(resolved_base.parents) >= 2
+                else resolved_base
+            )
+            try:
+                relative = default_output.relative_to(repo_root)
+            except ValueError:
+                relative = default_output.name
+            output_path = (
+                Path(data_root_env).expanduser().resolve() / relative
+            ).resolve()
+        else:
+            output_path = default_output
     try:
         teacher_arrow_type = torch_dtype_to_arrow(teacher_dtype)
     except (RuntimeError, ValueError) as exc:
@@ -279,7 +299,8 @@ def process_split(
     )
 
     def flush_batch() -> None:
-        nonlocal batch_examples, teacher_hidden_size, examples_emitted
+        nonlocal batch_examples, teacher_hidden_size
+        nonlocal examples_emitted, contexts_processed
         if not batch_examples:
             return
         if teacher_model is not None:
@@ -338,7 +359,8 @@ def process_split(
         if (
             torch.cuda.is_available()
             and shutil.which("nvidia-smi")
-            and produced_examples > 0
+            and contexts_processed > 0
+            and contexts_processed % 50 == 0
         ):
             try:
                 subprocess.run(["nvidia-smi"], check=False)
