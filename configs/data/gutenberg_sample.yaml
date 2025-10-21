@@ -1,11 +1,11 @@
 dataset_name: gutenberg_sample
 tokenizer: HuggingFaceTB/SmolLM2-360M-Instruct
 block_size: 32
-context_tokens: 1024
-context_stride: 256
-horizon: 64
+context_tokens: 512
+context_stride: 512
+horizon: 32
 teacher_model: HuggingFaceTB/SmolLM2-360M-Instruct
-teacher_batch_size: 24
+teacher_batch_size: 32
 teacher_dtype: auto
 teacher_device: cuda
 teacher_trust_remote_code: false
