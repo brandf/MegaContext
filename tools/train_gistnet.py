@@ -20,6 +20,11 @@ import yaml
 from torch import optim
 from torch.utils.data import DataLoader, Dataset
 
+try:  # pragma: no cover - runtime convenience
+    from IPython import get_ipython  # type: ignore
+except ImportError:  # pragma: no cover
+    get_ipython = None
+
 try:
     from tqdm.auto import tqdm
 except ImportError:  # pragma: no cover - optional dependency
@@ -307,6 +312,31 @@ def main() -> None:
             plt.savefig(args.save_plot, dpi=150)
             plt.close()
             print(f"Saved loss plot to {args.save_plot}")
+
+    notebook_context = False
+    if get_ipython is not None:  # pragma: no cover - interactive convenience
+        try:
+            shell = get_ipython().__class__.__name__
+            in_shell = shell in {"ZMQInteractiveShell", "Shell"}
+            notebook_context = in_shell and "google.colab" in sys.modules
+        except Exception:
+            notebook_context = False
+
+    if notebook_context:
+        try:
+            import matplotlib.pyplot as plt  # type: ignore
+            from IPython.display import display  # type: ignore
+        except ImportError:
+            pass
+        else:
+            plt.figure(figsize=(6, 4))
+            plt.plot(range(1, len(losses) + 1), losses, label="training loss")
+            plt.xlabel("Step")
+            plt.ylabel("MSE loss")
+            plt.title(run_name)
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            display(plt.gcf())
 
 
 if __name__ == "__main__":

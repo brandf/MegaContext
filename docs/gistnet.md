@@ -65,3 +65,7 @@ runs. Adjust these fields once you generate shards with larger teacher models.
   back gracefully if `matplotlib` is missing).
 - CLI runs on infra like Novita can pass `--use-wandb --wandb-project <name>` to
   stream the same metrics to Weights & Biases without touching notebook code.
+
+When the script detects a notebook environment (e.g., Colab), it automatically
+renders the loss curve inline *and* saves the PNG. Headless terminals simply
+receive the file/log output unless you add `--save-plot` or `--use-wandb`.
