@@ -3,9 +3,9 @@
 *A system architecture for virtualized LLM memory. This document is both a conceptual overview and a technical design spec for an initial proof-of-concept (POC).*
 
 **Roadmaps:** Development is tracked across three plans:
-- `POC_PLAN.md` — the hot-path prototype proving MegaContext end-to-end.
-- `PAPER_PLAN.md` — the research milestone targeting a publishable system.
-- `FUTURE_PLAN.md` — post-paper growth, adoption, and advanced research.
+- `planning/POC_PLAN.md` — the hot-path prototype proving MegaContext end-to-end.
+- `planning/PAPER_PLAN.md` — the research milestone targeting a publishable system.
+- `planning/FUTURE_PLAN.md` — post-paper growth, adoption, and advanced research.
 
 ---
 ## TL;DR — MegaContext
