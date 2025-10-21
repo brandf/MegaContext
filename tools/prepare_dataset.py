@@ -137,8 +137,8 @@ class ArrowShardWriter:
         context_attention_mask: list[list[int]],
         future_input_ids: list[list[int]],
         future_attention_mask: list[list[int]],
-        teacher_context_hidden: list[list[list[float]]],
-        teacher_future_hidden: list[list[list[float]]],
+        teacher_context_hidden: list[list[list[float]]] | pa.Array,
+        teacher_future_hidden: list[list[list[float]]] | pa.Array,
     ) -> None:
         if not context_input_ids:
             return
@@ -158,11 +158,21 @@ class ArrowShardWriter:
                 "future_attention_mask": pa.array(
                     future_attention_mask, type=pa.list_(pa.int8())
                 ),
-                "teacher_context_hidden": pa.array(
-                    teacher_context_hidden, type=pa.list_(pa.list_(self._teacher_type))
+                "teacher_context_hidden": (
+                    teacher_context_hidden
+                    if isinstance(teacher_context_hidden, pa.Array)
+                    else pa.array(
+                        teacher_context_hidden,
+                        type=pa.list_(pa.list_(self._teacher_type)),
+                    )
                 ),
-                "teacher_future_hidden": pa.array(
-                    teacher_future_hidden, type=pa.list_(pa.list_(self._teacher_type))
+                "teacher_future_hidden": (
+                    teacher_future_hidden
+                    if isinstance(teacher_future_hidden, pa.Array)
+                    else pa.array(
+                        teacher_future_hidden,
+                        type=pa.list_(pa.list_(self._teacher_type)),
+                    )
                 ),
             }
         )
@@ -283,8 +293,22 @@ def process_split(
             future_hidden = hidden[:, context_tokens:, :]
             context_hidden_cpu = context_hidden.detach().cpu()
             future_hidden_cpu = future_hidden.detach().cpu()
-            teacher_context_hidden = context_hidden_cpu.tolist()
-            teacher_future_hidden = future_hidden_cpu.tolist()
+
+            def to_fixed_size_array(
+                tensor: torch.Tensor, *, list_sizes: Sequence[int]
+            ) -> pa.Array:
+                values = pa.array(tensor.reshape(-1).numpy(), type=teacher_arrow_type)
+                array: pa.Array = values
+                for size in list_sizes:
+                    array = pa.FixedSizeListArray.from_arrays(array, size)
+                return array
+
+            teacher_context_hidden = to_fixed_size_array(
+                context_hidden_cpu, list_sizes=[teacher_hidden_size, context_tokens]
+            ).to_pylist()
+            teacher_future_hidden = to_fixed_size_array(
+                future_hidden_cpu, list_sizes=[teacher_hidden_size, horizon_tokens]
+            ).to_pylist()
         else:
             teacher_context_hidden = [[] for _ in batch_examples]
             teacher_future_hidden = [[] for _ in batch_examples]
