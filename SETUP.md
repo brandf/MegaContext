@@ -65,6 +65,13 @@ You should see:
 - Log file in `artifacts/run_logs/base_llm_demo-<timestamp>.log`.
 - (Optional) W&B run under the `megacontext-poc` project.
 
-## 9. Shut down when idle
+## 9. (Optional) GistNet training smoke
+```bash
+uv run python -m tools.train_gistnet \
+    --dataset data/sample_text/train.arrow \
+    --config configs/runs/gistnet_example.yaml
+```
+
+## 10. Shut down when idle
 - Use `nvidia-smi` to confirm utilisation during runs.
 - Stop or snapshot the instance when you’re done to avoid extra charges.

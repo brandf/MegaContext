@@ -131,6 +131,7 @@ Qwen/Qwen3-1.7B`. Both run comfortably on a single 24–48 GB GPU.
 - **Precision:** bf16 for model forward/backward; fp16 for gist snapshots if you need serialization.
 - **Configuration:** place experiment configs under `configs/` (YAML) documenting block size `K`, horizon `H`, ΔNLL sampling strategy, and thresholds (`τ_expand`, `τ_collapse`).
 - **Dataset staging:** tokenize corpora into contiguous 32-token blocks and store them as `.arrow` shards under `data/<dataset>/<split>.arrow`; provide `uv run python -m tools.prepare_dataset --config configs/data/<name>.yaml` to regenerate them.
+- **GistNet training:** invoke `uv run python -m tools.train_gistnet --dataset … --config …` (or `python -m tools.train_gistnet` inside notebooks) so the package resolves without ad-hoc path edits.
 - **Storage layout:** persist MegaContext memory as `{L0,L1,L2}.ctx` binary files with a fixed header plus packed data (see below). Fixed block sizes make byte offsets deterministic, so no external index is required.
 
 ### Binary storage layout (`{L0,L1,L2}.ctx`)
