@@ -60,6 +60,10 @@ class DatasetConfig(BaseModel):
         default="cpu",
         description="Device string for teacher model execution (e.g., cpu, cuda:0).",
     )
+    teacher_trust_remote_code: bool = Field(
+        default=False,
+        description="Whether to enable HF trust_remote_code when loading the teacher",
+    )
     splits: dict[str, SplitConfig]
 
     @field_validator("block_size")

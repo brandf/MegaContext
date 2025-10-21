@@ -280,6 +280,7 @@ def main() -> None:
         teacher_model = AutoModelForCausalLM.from_pretrained(
             config.teacher_model,
             dtype=dtype,
+            trust_remote_code=config.teacher_trust_remote_code,
         )
         teacher_model.eval()
         teacher_model.to(config.teacher_device)

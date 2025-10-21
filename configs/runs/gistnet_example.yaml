@@ -1,7 +1,7 @@
 model:
-  hidden_size: 768
+  hidden_size: 1024
   block_size: 32
-  num_heads: 12
+  num_heads: 16
   mlp_ratio: 4.0
   rope_base: 10000.0
 training:
