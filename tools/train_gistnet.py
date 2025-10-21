@@ -20,17 +20,13 @@ import yaml
 from torch import optim
 from torch.utils.data import DataLoader, Dataset
 
-try:  # pragma: no cover - runtime convenience
-    from IPython import get_ipython  # type: ignore
-except ImportError:  # pragma: no cover
-    get_ipython = None
-
 try:
     from tqdm.auto import tqdm
 except ImportError:  # pragma: no cover - optional dependency
     tqdm = None
 
 from megacontext.gistnet import GistNet, GistNetConfig
+from megacontext.utils import in_notebook_env
 
 
 def load_train_config(path: Path | None) -> dict[str, Any]:
@@ -292,51 +288,40 @@ def main() -> None:
         )
         print(f"Wrote metrics to {args.metrics_path}")
 
-    if args.save_plot is not None:
+    notebook_context = in_notebook_env()
+    want_plot = notebook_context or args.save_plot is not None
+    if want_plot:
         try:
             import matplotlib.pyplot as plt  # type: ignore
         except ImportError:  # pragma: no cover - optional dependency
-            print(
-                "matplotlib is not available; skipping loss plot.",
-                file=sys.stderr,
-            )
+            if args.save_plot is not None:
+                print(
+                    "matplotlib is not available; skipping loss plot.",
+                    file=sys.stderr,
+                )
         else:
-            args.save_plot.parent.mkdir(parents=True, exist_ok=True)
-            plt.figure(figsize=(6, 4))
-            plt.plot(range(1, len(losses) + 1), losses, label="training loss")
-            plt.xlabel("Step")
-            plt.ylabel("MSE loss")
-            plt.title(run_name)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(args.save_plot, dpi=150)
-            plt.close()
-            print(f"Saved loss plot to {args.save_plot}")
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.plot(range(1, len(losses) + 1), losses, label="training loss")
+            ax.set_xlabel("Step")
+            ax.set_ylabel("MSE loss")
+            ax.set_title(run_name)
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc="upper right")
+            fig.tight_layout()
 
-    notebook_context = False
-    if get_ipython is not None:  # pragma: no cover - interactive convenience
-        try:
-            shell = get_ipython().__class__.__name__
-            in_shell = shell in {"ZMQInteractiveShell", "Shell"}
-            notebook_context = in_shell and "google.colab" in sys.modules
-        except Exception:
-            notebook_context = False
+            if args.save_plot is not None:
+                args.save_plot.parent.mkdir(parents=True, exist_ok=True)
+                fig.savefig(args.save_plot, dpi=150)
+                print(f"Saved loss plot to {args.save_plot}")
 
-    if notebook_context:
-        try:
-            import matplotlib.pyplot as plt  # type: ignore
-            from IPython.display import display  # type: ignore
-        except ImportError:
-            pass
-        else:
-            plt.figure(figsize=(6, 4))
-            plt.plot(range(1, len(losses) + 1), losses, label="training loss")
-            plt.xlabel("Step")
-            plt.ylabel("MSE loss")
-            plt.title(run_name)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            display(plt.gcf())
+            if notebook_context:
+                try:  # pragma: no cover - requires IPython
+                    from IPython.display import display  # type: ignore
+
+                    display(fig)
+                except ImportError:
+                    plt.show()
+            plt.close(fig)
 
 
 if __name__ == "__main__":
