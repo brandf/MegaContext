@@ -25,6 +25,10 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
 - **B.3 Training LLMs from Scratch**
   - Research joint training regimes where base models learn with MegaContext from the outset, potentially using synthetic long-context curricula.
   - Investigate curriculum schedules, scaling laws, and data filtering tailored to gist-aware transformers.
+- **B.4 MegaPrediction Speculative Planning**
+  - Extend the MegaContext tree with a movable present cursor separating committed history from speculative future gists and tokens.
+  - Prototype latent CoT planners, hierarchical de-gisting, and LensNet-guided refinement loops that operate in the speculative region before committing outputs.
+  - Reuse ΔNLL and RL-style objectives to score finalized continuations while tracking compute/latency costs accrued during prediction.
 
 ## Track C — Application Showcases & Verticalization
 - **C.1 Coding Assistant Showcase**
