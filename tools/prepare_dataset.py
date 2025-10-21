@@ -59,12 +59,7 @@ def tokenize_documents(
 ) -> list[list[list[int]]]:
     doc_blocks: list[list[list[int]]] = []
     tokens_emitted = 0
-    enumerated_docs = (
-        documents
-        if isinstance(documents, tqdm)
-        else tqdm(documents, desc="Tokenizing documents", leave=False)
-    )
-    for doc in enumerated_docs:
+    for doc in documents:
         encoded = tokenizer(doc, add_special_tokens=False, return_attention_mask=False)
         token_ids = encoded["input_ids"]
         blocks: list[list[int]] = []
@@ -122,12 +117,16 @@ def compute_teacher_embeddings(
     device: torch.device,
 ) -> torch.Tensor:
     hidden_chunks: list[torch.Tensor] = []
-    batch_iter = tqdm(
-        range(0, len(examples), batch_size),
+    batch_iter = range(0, len(examples), batch_size)
+    for start in tqdm(
+        batch_iter,
         desc="Teacher batches",
         leave=False,
-    )
-    for start in batch_iter:
+        position=2,
+        dynamic_ncols=True,
+        mininterval=0.2,
+        disable=len(examples) <= batch_size,
+    ):
         batch_examples = examples[start : start + batch_size]
         input_ids = torch.tensor(
             [ex["context_tokens"] for ex in batch_examples],
@@ -207,7 +206,14 @@ def process_split(
 ) -> dict[str, Any]:
     documents = gather_documents(split_config, base_dir=base_dir)
     doc_blocks = tokenize_documents(
-        documents,
+        tqdm(
+            documents,
+            desc=f"Tokenizing {split_config.name}",
+            leave=False,
+            position=1,
+            dynamic_ncols=True,
+            mininterval=0.2,
+        ),
         tokenizer=tokenizer,
         block_size=config.block_size,
         max_tokens=split_config.max_tokens,
