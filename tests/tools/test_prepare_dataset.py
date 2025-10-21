@@ -2,11 +2,7 @@ from types import SimpleNamespace
 
 import pyarrow.ipc as pa_ipc
 import torch
-from tools.prepare_dataset import (
-    build_horizon_examples,
-    compute_teacher_embeddings,
-    process_split,
-)
+from tools.prepare_dataset import process_split
 from torch import nn
 
 from megacontext.data import DatasetConfig, SplitConfig
@@ -41,33 +37,6 @@ class DummyTeacher(nn.Module):
         offsets = torch.arange(hidden_size, dtype=torch.float32, device=base.device)
         hidden = base + offsets
         return SimpleNamespace(hidden_states=[hidden])
-
-
-def test_build_horizon_examples_basic() -> None:
-    doc_blocks = [
-        [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]],
-    ]
-    examples = build_horizon_examples(doc_blocks, block_size=4, horizon=8)
-    assert len(examples) == 2
-    assert examples[0]["tokens"] == [0, 1, 2, 3]
-    assert len(examples[0]["context_tokens"]) == 8
-
-
-def test_compute_teacher_embeddings_shape() -> None:
-    teacher = DummyTeacher(hidden_size=3)
-    examples = [
-        {"context_tokens": [0, 1, 2, 3, 4, 5, 6, 7]},
-        {"context_tokens": [1, 2, 3, 4, 5, 6, 7, 8]},
-    ]
-    hidden = compute_teacher_embeddings(
-        teacher,
-        examples,
-        block_size=4,
-        batch_size=2,
-        device=torch.device("cpu"),
-    )
-    assert hidden.shape == (2, 4, 3)
-    assert torch.allclose(hidden[0, 0], torch.tensor([0.0, 1.0, 2.0]))
 
 
 def test_process_split_writes_arrow(tmp_path) -> None:

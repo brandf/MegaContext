@@ -51,53 +51,6 @@ def chunkify(tokens: Sequence[int], block_size: int) -> Iterable[list[int]]:
             yield list(block)
 
 
-def tokenize_documents(
-    documents: Sequence[str],
-    tokenizer,
-    block_size: int,
-    max_tokens: int | None,
-) -> list[list[list[int]]]:
-    doc_blocks: list[list[list[int]]] = []
-    tokens_emitted = 0
-    for doc in documents:
-        encoded = tokenizer(doc, add_special_tokens=False, return_attention_mask=False)
-        token_ids = encoded["input_ids"]
-        blocks: list[list[int]] = []
-        for block in chunkify(token_ids, block_size):
-            blocks.append(block)
-            tokens_emitted += len(block)
-            if max_tokens is not None and tokens_emitted >= max_tokens:
-                doc_blocks.append(blocks)
-                return doc_blocks
-        doc_blocks.append(blocks)
-        if max_tokens is not None and tokens_emitted >= max_tokens:
-            break
-    return doc_blocks
-
-
-def build_horizon_examples(
-    doc_blocks: Sequence[Sequence[Sequence[int]]],
-    *,
-    block_size: int,
-    horizon: int,
-) -> list[dict[str, list[int]]]:
-    blocks_per_window = horizon // block_size
-    examples: list[dict[str, list[int]]] = []
-    for blocks in doc_blocks:
-        if len(blocks) < blocks_per_window:
-            continue
-        for start in range(0, len(blocks) - blocks_per_window + 1):
-            window = blocks[start : start + blocks_per_window]
-            context_tokens = [token for block in window for token in block]
-            examples.append(
-                {
-                    "tokens": window[0],
-                    "context_tokens": context_tokens,
-                }
-            )
-    return examples
-
-
 def resolve_torch_dtype(value: str | None) -> torch.dtype | None:
     if value is None or value == "auto":
         return None
@@ -108,71 +61,68 @@ def resolve_torch_dtype(value: str | None) -> torch.dtype | None:
     raise TypeError(f"Expected dtype string or None, received {type(value)!r}")
 
 
-def compute_teacher_embeddings(
-    teacher_model,
-    examples: Sequence[dict[str, list[int]]],
-    *,
-    block_size: int,
-    batch_size: int,
-    device: torch.device,
-) -> torch.Tensor:
-    hidden_chunks: list[torch.Tensor] = []
-    batch_iter = range(0, len(examples), batch_size)
-    for start in tqdm(
-        batch_iter,
-        desc="Teacher batches",
-        leave=False,
-        position=2,
-        dynamic_ncols=True,
-        mininterval=0.2,
-        disable=len(examples) <= batch_size,
-    ):
-        batch_examples = examples[start : start + batch_size]
-        input_ids = torch.tensor(
-            [ex["context_tokens"] for ex in batch_examples],
-            dtype=torch.long,
-            device=device,
+class ArrowShardWriter:
+    def __init__(self, output_path: Path) -> None:
+        self._path = output_path
+        self._file_handle = None
+        self._writer: pa_ipc.RecordBatchWriter | None = None
+
+    def _ensure_writer(self) -> None:
+        if self._writer is not None:
+            return
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        schema = pa.schema(
+            [
+                pa.field("input_ids", pa.list_(pa.int64())),
+                pa.field("attention_mask", pa.list_(pa.int8())),
+                pa.field("context_input_ids", pa.list_(pa.int64())),
+                pa.field("context_attention_mask", pa.list_(pa.int8())),
+                pa.field("teacher_hidden", pa.list_(pa.list_(pa.float32()))),
+                pa.field("gist_target", pa.list_(pa.float32())),
+            ]
         )
-        attention_mask = torch.ones_like(input_ids, device=device)
-        with torch.no_grad():
-            outputs = teacher_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                use_cache=False,
-            )
-        hidden = outputs.hidden_states[-1][:, :block_size, :].to(torch.float32)
-        hidden_chunks.append(hidden.cpu())
-    if not hidden_chunks:
-        return torch.empty(0, block_size, 0, dtype=torch.float32)
-    return torch.cat(hidden_chunks, dim=0)
+        self._file_handle = self._path.open("wb")
+        self._writer = pa_ipc.new_file(self._file_handle, schema)
 
+    def write_batch(
+        self,
+        *,
+        input_ids: list[list[int]],
+        attention_mask: list[list[int]],
+        context_input_ids: list[list[int]],
+        context_attention_mask: list[list[int]],
+        teacher_hidden: list[list[list[float]]],
+        gist_target: list[list[float]],
+    ) -> None:
+        if not input_ids:
+            return
+        self._ensure_writer()
+        assert self._writer is not None
+        table = pa.table(
+            {
+                "input_ids": pa.array(input_ids, type=pa.list_(pa.int64())),
+                "attention_mask": pa.array(attention_mask, type=pa.list_(pa.int8())),
+                "context_input_ids": pa.array(
+                    context_input_ids, type=pa.list_(pa.int64())
+                ),
+                "context_attention_mask": pa.array(
+                    context_attention_mask, type=pa.list_(pa.int8())
+                ),
+                "teacher_hidden": pa.array(
+                    teacher_hidden, type=pa.list_(pa.list_(pa.float32()))
+                ),
+                "gist_target": pa.array(gist_target, type=pa.list_(pa.float32())),
+            }
+        )
+        self._writer.write_table(table)
 
-def write_arrow(output_path: Path, records: dict[str, list[Any]]) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    table = pa.table(
-        {
-            "input_ids": pa.array(records["input_ids"], type=pa.list_(pa.int64())),
-            "attention_mask": pa.array(
-                records["attention_mask"], type=pa.list_(pa.int8())
-            ),
-            "context_input_ids": pa.array(
-                records["context_input_ids"], type=pa.list_(pa.int64())
-            ),
-            "context_attention_mask": pa.array(
-                records["context_attention_mask"], type=pa.list_(pa.int8())
-            ),
-            "teacher_hidden": pa.array(
-                records["teacher_hidden"],
-                type=pa.list_(pa.list_(pa.float32())),
-            ),
-            "gist_target": pa.array(
-                records["gist_target"], type=pa.list_(pa.float32())
-            ),
-        }
-    )
-    with pa_ipc.new_file(output_path.open("wb"), table.schema) as writer:
-        writer.write_table(table)
+    def close(self) -> None:
+        if self._writer is not None:
+            self._writer.close()
+            self._writer = None
+        if self._file_handle is not None:
+            self._file_handle.close()
+            self._file_handle = None
 
 
 def update_metadata(
@@ -205,69 +155,136 @@ def process_split(
     teacher_model,
 ) -> dict[str, Any]:
     documents = gather_documents(split_config, base_dir=base_dir)
-    doc_blocks = tokenize_documents(
-        tqdm(
-            documents,
-            desc=f"Tokenizing {split_config.name}",
-            leave=False,
-            position=1,
-            dynamic_ncols=True,
-            mininterval=0.2,
-        ),
-        tokenizer=tokenizer,
-        block_size=config.block_size,
-        max_tokens=split_config.max_tokens,
-    )
-
-    examples = build_horizon_examples(
-        doc_blocks,
-        block_size=config.block_size,
-        horizon=config.horizon,
-    )
-
-    teacher_hidden_size = 0
-    teacher_rows: list[list[list[float]]] = [[] for _ in examples]
-    gist_targets: list[list[float]] = [[] for _ in examples]
-    if teacher_model is not None and examples:
-        device = next(teacher_model.parameters()).device
-        hidden = compute_teacher_embeddings(
-            teacher_model,
-            examples,
-            block_size=config.block_size,
-            batch_size=config.teacher_batch_size,
-            device=device,
-        )
-        teacher_hidden_size = int(hidden.shape[-1])
-        tensor_rows = hidden.tolist()
-        teacher_rows = tensor_rows
-        gist_targets = hidden.mean(dim=1).tolist()
-
-    records = {
-        "input_ids": [],
-        "attention_mask": [],
-        "context_input_ids": [],
-        "context_attention_mask": [],
-        "teacher_hidden": [],
-        "gist_target": [],
-    }
-    for idx, example in enumerate(examples):
-        records["input_ids"].append(example["tokens"])
-        records["attention_mask"].append([1] * config.block_size)
-        records["context_input_ids"].append(example["context_tokens"])
-        records["context_attention_mask"].append([1] * len(example["context_tokens"]))
-        records["teacher_hidden"].append(teacher_rows[idx])
-        records["gist_target"].append(gist_targets[idx])
-
+    blocks_per_window = config.horizon // config.block_size
     output_path = Path(split_config.output_path)
     if not output_path.is_absolute():
         output_path = (base_dir / output_path).resolve()
-    write_arrow(output_path, records)
+    writer = ArrowShardWriter(output_path)
 
-    blocks_processed = sum(len(blocks) for blocks in doc_blocks)
-    summary: dict[str, Any] = {
-        "documents": len(documents),
+    teacher_device = None
+    if teacher_model is not None:
+        teacher_device = next(teacher_model.parameters()).device
+
+    batch_examples: list[dict[str, list[int]]] = []
+    flush_threshold = config.teacher_batch_size if teacher_model is not None else 512
+
+    blocks_processed = 0
+    examples_emitted = 0
+    teacher_hidden_size = 0
+    tokens_emitted = 0
+    documents_processed = 0
+
+    doc_iter = tqdm(
+        documents,
+        desc=f"Tokenizing {split_config.name}",
+        leave=False,
+        position=1,
+        dynamic_ncols=True,
+        mininterval=0.2,
+    )
+
+    def flush_batch() -> None:
+        nonlocal batch_examples, teacher_hidden_size, examples_emitted
+        if not batch_examples:
+            return
+        if teacher_model is not None:
+            context_tokens = [ex["context_tokens"] for ex in batch_examples]
+            input_ids = torch.tensor(
+                context_tokens, dtype=torch.long, device=teacher_device
+            )
+            attention_mask = torch.ones_like(input_ids, device=teacher_device)
+            with torch.no_grad():
+                outputs = teacher_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=True,
+                    use_cache=False,
+                )
+            hidden = outputs.hidden_states[-1][:, : config.block_size, :].to(
+                torch.float32
+            )
+            teacher_hidden_size = int(hidden.shape[-1])
+            hidden_cpu = hidden.cpu()
+            teacher_hidden = hidden_cpu.tolist()
+            gist_target = hidden_cpu.mean(dim=1).tolist()
+        else:
+            teacher_hidden = [[] for _ in batch_examples]
+            gist_target = [[] for _ in batch_examples]
+
+        attention_mask = [[1] * config.block_size for _ in batch_examples]
+        context_attention = [[1] * len(ex["context_tokens"]) for ex in batch_examples]
+        writer.write_batch(
+            input_ids=[ex["tokens"] for ex in batch_examples],
+            attention_mask=attention_mask,
+            context_input_ids=[ex["context_tokens"] for ex in batch_examples],
+            context_attention_mask=context_attention,
+            teacher_hidden=teacher_hidden,
+            gist_target=gist_target,
+        )
+        examples_emitted += len(batch_examples)
+        batch_examples = []
+
+    for doc in doc_iter:
+        encoded = tokenizer(doc, add_special_tokens=False, return_attention_mask=False)
+        token_ids = encoded["input_ids"]
+        blocks: list[list[int]] = []
+        for block in chunkify(token_ids, config.block_size):
+            blocks.append(block)
+            blocks_processed += 1
+            tokens_emitted += len(block)
+            if (
+                split_config.max_tokens is not None
+                and tokens_emitted >= split_config.max_tokens
+            ):
+                break
+        documents_processed += 1
+        if len(blocks) < blocks_per_window:
+            if (
+                split_config.max_tokens is not None
+                and tokens_emitted >= split_config.max_tokens
+            ):
+                break
+            continue
+
+        for start in range(0, len(blocks) - blocks_per_window + 1):
+            window = blocks[start : start + blocks_per_window]
+            context_tokens = [token for block in window for token in block]
+            batch_examples.append(
+                {
+                    "tokens": window[0],
+                    "context_tokens": context_tokens,
+                }
+            )
+            if (
+                split_config.max_tokens is not None
+                and tokens_emitted >= split_config.max_tokens
+            ):
+                if batch_examples:
+                    flush_batch()
+                writer.close()
+                summary = {
+                    "documents": documents_processed,
+                    "blocks": blocks_processed,
+                    "examples": examples_emitted,
+                    "teacher_hidden_size": teacher_hidden_size,
+                }
+                return summary
+            if len(batch_examples) >= flush_threshold:
+                flush_batch()
+
+        if (
+            split_config.max_tokens is not None
+            and tokens_emitted >= split_config.max_tokens
+        ):
+            break
+
+    flush_batch()
+    writer.close()
+
+    summary = {
+        "documents": documents_processed,
         "blocks": blocks_processed,
-        "examples": len(examples),
+        "examples": examples_emitted,
         "teacher_hidden_size": teacher_hidden_size,
     }
     return summary

@@ -3,7 +3,7 @@ tokenizer: HuggingFaceTB/SmolLM2-360M-Instruct
 block_size: 32
 horizon: 64
 teacher_model: HuggingFaceTB/SmolLM2-360M-Instruct
-teacher_batch_size: 400
+teacher_batch_size: 512
 teacher_dtype: float16
 teacher_device: cuda
 teacher_trust_remote_code: false
