@@ -64,7 +64,7 @@ The scaffold logs step-wise losses to stdout and keeps the code path entirely
 tensor-first so future phases can swap in larger datasets or evaluation metrics.
 
 The provided `configs/runs/gistnet_example.yaml` matches the Gutenberg shard
-defaults (`block_size=32`, hidden size 1024) and targets the MobileLLM teacher.
+defaults (`block_size=32`, hidden size 960) and targets the MobileLLM teacher.
 Throttle `max_steps`/`batch_size` if you need a faster smoke run on smaller GPUs.
 
 ### Logging & Visualisation

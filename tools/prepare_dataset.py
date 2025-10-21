@@ -59,7 +59,12 @@ def tokenize_documents(
 ) -> list[list[list[int]]]:
     doc_blocks: list[list[list[int]]] = []
     tokens_emitted = 0
-    for doc in documents:
+    enumerated_docs = (
+        documents
+        if isinstance(documents, tqdm)
+        else tqdm(documents, desc="Tokenizing documents", leave=False)
+    )
+    for doc in enumerated_docs:
         encoded = tokenizer(doc, add_special_tokens=False, return_attention_mask=False)
         token_ids = encoded["input_ids"]
         blocks: list[list[int]] = []
@@ -117,7 +122,12 @@ def compute_teacher_embeddings(
     device: torch.device,
 ) -> torch.Tensor:
     hidden_chunks: list[torch.Tensor] = []
-    for start in range(0, len(examples), batch_size):
+    batch_iter = tqdm(
+        range(0, len(examples), batch_size),
+        desc="Teacher batches",
+        leave=False,
+    )
+    for start in batch_iter:
         batch_examples = examples[start : start + batch_size]
         input_ids = torch.tensor(
             [ex["context_tokens"] for ex in batch_examples],
