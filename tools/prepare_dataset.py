@@ -272,12 +272,14 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # Allow arbitrarily long documents while chunking without warnings.
+    tokenizer.model_max_length = max(config.horizon, config.block_size) * 1024
     teacher_model = None
     if config.teacher_model is not None:
         dtype = resolve_torch_dtype(config.teacher_dtype)
         teacher_model = AutoModelForCausalLM.from_pretrained(
             config.teacher_model,
-            torch_dtype=dtype,
+            dtype=dtype,
         )
         teacher_model.eval()
         teacher_model.to(config.teacher_device)
