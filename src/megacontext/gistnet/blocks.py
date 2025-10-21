@@ -153,7 +153,7 @@ class FeedForward(nn.Module):
 
 class SlotAttention(nn.Module):
     """
-    Shared query slots attending over a block of token features to produce gists.
+    Shared query slots attending over a block of span embeddings to produce gists.
     """
 
     def __init__(
@@ -183,10 +183,10 @@ class SlotAttention(nn.Module):
 
     def forward(
         self,
-        tokens: Tensor,
+        span_embeddings: Tensor,
         attention_mask: Tensor | None = None,
     ) -> Tensor:
-        batch, seq_len, _ = tokens.shape
+        batch, seq_len, _ = span_embeddings.shape
 
         slots = self.slot_queries.unsqueeze(0).expand(
             batch, -1, -1
@@ -195,14 +195,14 @@ class SlotAttention(nn.Module):
             self.q_proj(slots), self.num_heads
         )  # [batch, heads, num_slots, head_dim]
         k = _split_heads(
-            self.k_proj(tokens), self.num_heads
+            self.k_proj(span_embeddings), self.num_heads
         )  # [batch, heads, seq_len, head_dim]
-        v = _split_heads(self.v_proj(tokens), self.num_heads)
+        v = _split_heads(self.v_proj(span_embeddings), self.num_heads)
 
         cos, sin = self.rotary(
             seq_len,
-            device=tokens.device,
-            dtype=tokens.dtype,
+            device=span_embeddings.device,
+            dtype=span_embeddings.dtype,
         )
         cos = cos.view(1, 1, seq_len, self.head_dim)  # broadcast over slots
         sin = sin.view(1, 1, seq_len, self.head_dim)
@@ -216,7 +216,7 @@ class SlotAttention(nn.Module):
         if attention_mask is not None:
             mask = attention_mask.view(batch, 1, 1, seq_len)
             attn_scores = attn_scores.masked_fill(
-                mask == 0, torch.finfo(tokens.dtype).min
+                mask == 0, torch.finfo(span_embeddings.dtype).min
             )
 
         attn_probs = torch.softmax(attn_scores, dim=-1)

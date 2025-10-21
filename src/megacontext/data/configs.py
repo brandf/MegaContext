@@ -30,7 +30,7 @@ class SplitConfig(BaseModel):
 
 
 class DatasetConfig(BaseModel):
-    """Top-level dataset config (tokenizer, block size, and split definitions)."""
+    """Top-level dataset config including teacher/cache settings."""
 
     dataset_name: str = Field(
         description="Identifier used for output metadata directories."
@@ -40,6 +40,26 @@ class DatasetConfig(BaseModel):
         default=32,
         description="Number of L0 tokens per block.",
     )
+    horizon: int = Field(
+        default=64,
+        description="Total token horizon for teacher context windows.",
+    )
+    teacher_model: str | None = Field(
+        default=None,
+        description="Optional Hugging Face model name for caching teacher embeddings.",
+    )
+    teacher_batch_size: int = Field(
+        default=4,
+        description="Batch size used when computing teacher embeddings.",
+    )
+    teacher_dtype: str | None = Field(
+        default="float32",
+        description="Torch dtype for teacher model outputs (e.g., float32, bfloat16).",
+    )
+    teacher_device: str = Field(
+        default="cpu",
+        description="Device string for teacher model execution (e.g., cpu, cuda:0).",
+    )
     splits: dict[str, SplitConfig]
 
     @field_validator("block_size")
@@ -47,6 +67,23 @@ class DatasetConfig(BaseModel):
     def block_size_positive(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("block_size must be > 0")
+        return value
+
+    @field_validator("horizon")
+    @classmethod
+    def horizon_multiple_of_block(cls, value: int, info) -> int:
+        block_size = info.data.get("block_size", 32)
+        if value <= 0:
+            raise ValueError("horizon must be > 0")
+        if value % block_size != 0:
+            raise ValueError("horizon must be a multiple of block_size")
+        return value
+
+    @field_validator("teacher_batch_size")
+    @classmethod
+    def teacher_batch_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("teacher_batch_size must be > 0")
         return value
 
     @field_validator("splits")

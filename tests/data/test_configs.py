@@ -37,11 +37,30 @@ def test_output_path_requires_arrow(tmp_path: Path) -> None:
         "dataset_name": "sample",
         "tokenizer": "gpt2",
         "block_size": 32,
+        "horizon": 64,
         "splits": {
             "train": {
                 "name": "train",
                 "source": "data.txt",
                 "output_path": "data/train.bin",
+            }
+        },
+    }
+    with pytest.raises(ValueError):
+        DatasetConfig.model_validate(payload)
+
+
+def test_horizon_must_be_multiple_of_block() -> None:
+    payload = {
+        "dataset_name": "sample",
+        "tokenizer": "gpt2",
+        "block_size": 32,
+        "horizon": 48,
+        "splits": {
+            "train": {
+                "name": "train",
+                "source": "data.txt",
+                "output_path": "data/train.arrow",
             }
         },
     }

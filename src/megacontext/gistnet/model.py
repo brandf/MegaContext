@@ -20,7 +20,6 @@ class GistNetConfig:
     block_size: int = 32
     num_heads: int = 8
     mlp_ratio: float = 4.0
-    num_slots: int = 1
     rope_base: float = 10000.0
     layer_norm_eps: float = 1e-5
 
@@ -29,8 +28,10 @@ class GistNet(nn.Module):
     """
     Compress blocks of token embeddings into a fixed set of gist vectors.
 
-    Input tensors are shaped ``[batch, num_blocks, block_size, hidden_size]`` and the
-    output tensor is ``[batch, num_blocks, num_slots, hidden_size]``.
+    Inputs are already embedded: ``blocks`` must be shaped
+    ``[batch, num_blocks, block_size, hidden_size]`` and represent contiguous spans in
+    the latent space (token embeddings or gists). The output tensor is
+    ``[batch, num_blocks, hidden_size]``.
     """
 
     def __init__(self, config: GistNetConfig) -> None:
@@ -56,7 +57,7 @@ class GistNet(nn.Module):
         self.slot_attn = SlotAttention(
             config.hidden_size,
             config.num_heads,
-            config.num_slots,
+            num_slots=1,
             rope_base=config.rope_base,
         )
 
@@ -77,8 +78,8 @@ class GistNet(nn.Module):
                 f"Expected hidden_size {self.config.hidden_size}, got {hidden}"
             )
 
-        # tokens: [batch * num_blocks, block_size, hidden_size]
-        tokens = blocks.view(batch * num_blocks, block_size, hidden)
+        # span_embeddings: [batch * num_blocks, block_size, hidden_size]
+        span_embeddings = blocks.view(batch * num_blocks, block_size, hidden)
         mask = None
         if attention_mask is not None:
             if attention_mask.shape != (batch, num_blocks, block_size):
@@ -88,19 +89,19 @@ class GistNet(nn.Module):
             # mask: [batch * num_blocks, block_size]
             mask = attention_mask.view(batch * num_blocks, block_size)
 
-        residual = tokens
-        tokens = self.attn_norm(tokens)
-        # tokens: [batch * num_blocks, block_size, hidden_size]
-        tokens = self.attn(tokens, mask) + residual
+        residual = span_embeddings
+        span_embeddings = self.attn_norm(span_embeddings)
+        # span_embeddings: [batch * num_blocks, block_size, hidden_size]
+        span_embeddings = self.attn(span_embeddings, mask) + residual
 
-        residual = tokens
-        tokens = self.mlp(self.mlp_norm(tokens)) + residual
+        residual = span_embeddings
+        span_embeddings = self.mlp(self.mlp_norm(span_embeddings)) + residual
 
-        gist_inputs = self.slot_norm(tokens)
-        # slot_attn output: [batch * num_blocks, num_slots, hidden_size]
+        gist_inputs = self.slot_norm(span_embeddings)
+        # slot_attn output: [batch * num_blocks, 1, hidden_size]
         gists = self.slot_attn(gist_inputs, mask)
-        # reshape back to [batch, num_blocks, num_slots, hidden_size]
-        gists = gists.view(batch, num_blocks, self.config.num_slots, hidden)
+        # reshape back to [batch, num_blocks, hidden_size]
+        gists = gists.view(batch, num_blocks, hidden)
         return gists
 
     def compress(
