@@ -1,0 +1,13 @@
+model:
+  hidden_size: 1024
+  block_size: 32
+  num_heads: 8
+  mlp_ratio: 4.0
+  rope_base: 10000.0
+training:
+  batch_size: 8
+  lr: 0.001
+  max_steps: 200
+  device: cpu
+  seed: 0
+  run_name: gistnet-example

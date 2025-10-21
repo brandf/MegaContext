@@ -26,6 +26,8 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 - Task 2.4: Add unit tests for determinism (seeded RNG) plus a smoke eval comparing base vs gist-replaced loss with ≤5 % degradation on the toy corpus.
 - Task 2.5: Document gist training steps and expected metrics in `docs/gistnet.md`.
 
+*Progress (current): core GistNet modules, dataset tooling with teacher caches, trainer scaffold, and docs are implemented; outstanding work covers curriculum training, ΔNLL smoke evals, and logging.*
+
 **Exit criteria:** Gist checkpoints reproduce ΔNLL targets, deterministic tests pass, and documentation explains the compression pipeline.
 
 ## Phase 3 — LensNet, Focus Allocator, and Runtime Loop

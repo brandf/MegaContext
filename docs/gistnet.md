@@ -40,21 +40,6 @@ horizon in the config to match your setup.
    target vector.
 4. Saves a checkpoint to `artifacts/gistnet/gistnet.pt`.
 
-Example config snippet (`configs/runs/gistnet_example.yaml` to be added later):
-
-```yaml
-model:
-  hidden_size: 2048
-  block_size: 32
-  num_heads: 8
-  mlp_ratio: 4.0
-training:
-  batch_size: 8
-  lr: 1.0e-3
-  max_steps: 500
-  device: cuda:0
-```
-
 Run the trainer:
 
 ```
@@ -65,3 +50,18 @@ uv run python -m tools.train_gistnet \
 
 The scaffold logs step-wise losses to stdout and keeps the code path entirely
 tensor-first so future phases can swap in larger datasets or evaluation metrics.
+
+The provided `configs/runs/gistnet_example.yaml` uses a lightweight CPU-friendly
+setup (hidden size 1024, batch size 8, 200 steps). Adjust the hyperparameters
+and device as needed once a GPU-backed teacher/model pair is available.
+
+### Logging & Visualisation
+
+- Progress defaults to a `tqdm` bar when the dependency is available (ideal for
+  Colab). Disable it with `--no-tqdm`.
+- Add `--metrics-path artifacts/gistnet/metrics.json` to dump raw losses for
+  custom plotting/notebooks.
+- Use `--save-plot artifacts/gistnet/loss.png` to emit a ready-made curve (falls
+  back gracefully if `matplotlib` is missing).
+- CLI runs on infra like Novita can pass `--use-wandb --wandb-project <name>` to
+  stream the same metrics to Weights & Biases without touching notebook code.

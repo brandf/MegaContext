@@ -1,22 +1,15 @@
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pyarrow.ipc as pa_ipc
 import torch
-from torch import nn
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from tools.prepare_dataset import (  # noqa: E402
+from tools.prepare_dataset import (
     build_horizon_examples,
     compute_teacher_embeddings,
     process_split,
 )
+from torch import nn
 
-from megacontext.data import DatasetConfig, SplitConfig  # noqa: E402
+from megacontext.data import DatasetConfig, SplitConfig
 
 
 class DummyTokenizer:

@@ -1,7 +1,7 @@
 dataset_name: sample_text
 tokenizer: gpt2
-block_size: 32
-horizon: 64
+block_size: 4
+horizon: 8
 teacher_model: sshleifer/tiny-gpt2
 teacher_batch_size: 2
 teacher_dtype: float32
