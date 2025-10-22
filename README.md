@@ -15,38 +15,45 @@ To dynamical adapt level of detail, a learned LensNet model, continuously/increm
 
 ## Documentation
 
-- Obsidian vault lives under `obsidian/`; open it as a vault in Obsidian. The entry map is [MegaContext Map](obsidian/MOC%20-%20MegaContext.md).
+Obsidian vault lives under `obsidian/`; for the best viewing experience open in Obsidian client.
 
-### [Architecture](obsidian/architecture/MOC%20-%20Architecture.md)
-- [Architecture Overview](obsidian/architecture/Architecture%20Overview.md) — lifetime vs working context, invariants, and core components.
-- [POC Architecture & Interfaces](obsidian/architecture/POC%20Architecture.md) — module responsibilities, storage layout, sample configs.
+### Getting Started
+- [MegaTexture Analogy](obsidian/getting%20started/MegaTexture%20Analogy.md) — visualizes the MegaTexture inspiration that guides the project.
+- [How MegaContext Works](obsidian/getting%20started/How%20MegaContext%20Works.md) — high-level walkthrough of the workflow and major components.
+- [Glossary](obsidian/getting%20started/Glossary.md) — quick reference for recurring terms and acronyms.
+
+### Architecture
+- [Architecture Details](obsidian/architecture/Architecture%20Details.md) — lifetime vs. working context, invariants, and core components.
+- [POC Architecture](obsidian/architecture/POC%20Architecture.md) — module responsibilities, storage layout, and sample configs.
 - [Runtime Loop](obsidian/architecture/Runtime%20Loop.md) — ingest → gist update → focus → decode pipeline.
-- [POC Scope & Constraints](obsidian/architecture/POC%20Scope.md) — guardrails for the proof-of-concept milestone.
+- [POC Scope](obsidian/architecture/POC%20Scope.md) — guardrails for the proof-of-concept milestone.
 
-### [Modules](obsidian/modules/MOC%20-%20Modules.md)
-- [GistNet — Local Gist Extraction](obsidian/modules/GistNet.md) — 32→1 hierarchical compression.
-- [LensNet — Focus Scoring](obsidian/modules/LensNet.md) — dual cross-attention controller for working-context entries.
-- [Focus Allocator — Block-Aligned Actions](obsidian/modules/Focus%20Allocator.md) — greedy expand/collapse loop that enforces budgets.
+### Modules
+- [GistNet](obsidian/architecture/components/GistNet.md) — 32→1 hierarchical compression that builds the gist tree.
+- [LensNet](obsidian/architecture/components/LensNet.md) — dual cross-attention controller for working-context entries.
+- [Focus Allocator](obsidian/architecture/components/Focus%20Allocator.md) — greedy expand/collapse loop that enforces budgets.
+- [MegaContext Tree](obsidian/architecture/components/MegaContext%20Tree.md) — disk-resident hierarchy of gists and tokens.
+- [Working Context](obsidian/architecture/components/Working%20Context.md) — GPU-resident mix of tokens and gists surfaced to the LLM.
 
-### [Operations](obsidian/ops/MOC%20-%20Ops.md)
-- [Training & Operations](obsidian/ops/Training%20%26%20Operations.md) — alternating optimization, telemetry, evaluation.
+### Ops
+- [Training & Operations](obsidian/ops/Training%20%26%20Operations.md) — alternating optimization, telemetry, and evaluation.
 - [Implementation Roadmap](obsidian/ops/Implementation%20Roadmap.md) — sequenced build order for the stack.
 - [Performance Sketch](obsidian/ops/Performance%20Sketch.md) — compute/storage envelopes and long-term retention costs.
-- [Pruning MegaContext](obsidian/ops/Pruning%20MegaContext.md) — telemetry-driven pruning strategy.
-- [Knowledge Workflow](obsidian/ops/Knowledge%20Workflow.md) — Capture → Process → Refine → Create note lifecycle.
 
-### [Plans](obsidian/plans/MOC%20-%20Plans.md)
+### Plans
 - [POC Plan](obsidian/plans/POC%20Plan.md) — proof-of-concept execution plan.
-- [Paper Plan](obsidian/plans/Paper%20Plan.md) — research milestone plan with benchmarks and packaging.
+- [Research Paper Plan](obsidian/plans/Research%20Paper%20Plan.md) — research milestone plan with benchmarks and packaging.
 - [Future Plan](obsidian/plans/Future%20Plan.md) — post-paper roadmap for platform, learning, applications, research, and DX.
 
-### [Vision](obsidian/vision/MOC%20-%20Vision.md)
+### Vision
 - [Grand Vision](obsidian/vision/Grand%20Vision.md) — long-term motivation and future directions.
 - [Cognitive Core](obsidian/vision/Cognitive%20Core.md) — roadmap for compact reasoning models backed by MegaContext.
-- [MegaPrediction — Forecasting Future Context](obsidian/vision/MegaPrediction.md) — speculative planning inside the gist tree.
+- [MegaPrediction](obsidian/vision/MegaPrediction.md) — speculative planning inside the gist tree.
+- [MegaCuration](obsidian/vision/MegaCuration.md) — learned pruning and curation anchored by focus telemetry.
+- [Realtime Scenarios](obsidian/vision/Realtime%20Scenarios.md) — near-term applications unlocked by effectively infinite context.
 
-### [Reference](obsidian/reference/MOC%20-%20Reference.md)
-- [Comparison — MegaContext vs. RAG](obsidian/reference/Comparison%20-%20MegaContext%20vs%20RAG.md) — framing against retrieval pipelines.
+### Reference
+- [MegaContext & RAG](obsidian/reference/MegaContext%20%20%26%20RAG.md) — framing against retrieval pipelines.
 - [Related Work](obsidian/reference/Related%20Work.md) — citations inspiring compression, focus, and memory design.
 
 ---
