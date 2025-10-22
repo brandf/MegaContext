@@ -14,7 +14,7 @@ MegaContext virtualizes long-context memory for frozen LLMs by mixing raw tokens
 ## Working ground rules
 - The repo’s conceptional source of truth is still `README.md`; mirror anything that affects API or architecture there in addition to these notes.
 - Store collaborative diagrams in `assets/` and reference them from here with relative paths; keep transient sketches in this vault.
-- Track roadmap adjustments in `planning/` markdown files before reflecting additional context here.
+- Track roadmap adjustments in `obsidian/plans/` notes before reflecting additional context here.
 
 ## Context snapshots
 - **MegaContext vs working context:** A persistent gist tree stores the full interaction history while a budgeted working window feeds the frozen base model (`[[Architecture Overview]]` dives deeper).

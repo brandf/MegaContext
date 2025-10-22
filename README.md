@@ -2,12 +2,11 @@
 
 *A system architecture for virtualized LLM memory. This document is both a conceptual overview and a technical design spec for an initial proof-of-concept (POC).*
 
-**Roadmaps:** Development is tracked across three plans:
-- `planning/POC_PLAN.md` — the hot-path prototype proving MegaContext end-to-end.
-- `planning/PAPER_PLAN.md` — the research milestone targeting a publishable system.
-- `planning/FUTURE_PLAN.md` — post-paper growth, adoption, and advanced research.
+**Roadmaps:** Development is tracked across three Obsidian plans:
+- `obsidian/plans/POC Plan.md` — the hot-path prototype proving MegaContext end-to-end.
+- `obsidian/plans/Paper Plan.md` — the research milestone targeting a publishable system.
+- `obsidian/plans/Future Plan.md` — post-paper growth, adoption, and advanced research.
 
-**Obsidian vault:** Shared project notes and canvases live in `obsidian/`; open that directory as a vault in Obsidian. The `.obsidian/` settings folder stays local by default so personal layouts do not churn the repo.
 
 ---
 ## TL;DR — MegaContext

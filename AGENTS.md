@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `README.md` is the architecture contract—always start a new chat by reading it fully.  Revise it alongside behavior changes. Active workstreams are tracked in `planning/POC_PLAN.md`, `planning/PAPER_PLAN.md`, and `planning/FUTURE_PLAN.md`; note progress and new follow-ups before hand-off.
+- `README.md` is the architecture contract—always start a new chat by reading it fully.  Revise it alongside behavior changes. Active workstreams are tracked in `obsidian/plans/POC Plan.md`, `obsidian/plans/Paper Plan.md`, and `obsidian/plans/Future Plan.md`; note progress and new follow-ups before hand-off.
 - Runtime code lives in `src/` (e.g., `src/focus/allocator.py`) with mirror tests in `tests/`. Keep exploratory notebooks in `research/` until they stabilize.
 - House shared diagrams under `assets/` (e.g., `assets/megacontext.png`); reference images with relative paths.
 - Store configuration schemas in `configs/` as YAML and document each field inline, preferring enums for mode switches.
@@ -28,4 +28,4 @@
 
 ## Documentation & Communication
 - Update `README.md` diagrams or references when APIs change, adding new visuals under `assets/`.
-- Record roadmap shifts in the relevant `planning/*.md` file so the next agent can resume without rediscovery.
+- Record roadmap shifts in the relevant `obsidian/plans/*.md` note so the next agent can resume without rediscovery.

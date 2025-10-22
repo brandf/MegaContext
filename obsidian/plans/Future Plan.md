@@ -1,38 +1,70 @@
 # Future Plan
 
-Source: `planning/FUTURE_PLAN.md`. Captures post-paper ambitions spanning platformization, advanced learning, applications, and developer experience.
+Canonical post-paper roadmap for MegaContext.
 
-## Track A — Platform maturation & ecosystem
-- **A.1 Multi-model support**
-  - Portability tooling for new frozen bases (Qwen, LLaMA 3, Mixtral) with automated compatibility tests (`pytest -m portability`).
-  - Scripted onboarding via `tools/port_model.py` plus pre-made configs.
-- **A.2 Production storage & deployment**
-  - Sharded, replicated storage backends with async streaming and caching.
-  - Observability dashboards (Prometheus/Grafana) with alerts for memory growth, gist variance, focus anomalies.
+This milestone captures post-paper ambitions: scaling MegaContext for production usage, expanding research directions, and supporting broader adoption. Items here may require substantial engineering, large-scale training, or additional publications.
+
+## Track A — Platform Maturation & Ecosystem
+- **A.1 Multi-Model Support**
+  - Add portability tooling for new frozen bases (Qwen family, LLaMA 3, Mixtral variants).
+  - Provide automated compatibility tests (`pytest -m portability`) covering tokenization quirks, attention masks, and precision settings.
+  - Ship pre-made configs and scripts (`tools/port_model.py`) for rapid onboarding of new LLMs/VLMs.
+- **A.2 Production Storage & Deployment**
+  - Harden MegaContext storage with sharding, replication, and cloud object-store backends.
+  - Integrate async disk streaming and caching for low-latency serving.
+  - Provide observability dashboards (Prometheus/Grafana) and alerting policies for memory growth, gist variance, and focus anomalies.
 - **A.3 API & SDK**
-  - Language-agnostic SDKs (Python, TypeScript) exposing ingestion, focus control, provenance queries.
-  - Hosted service templates (FastAPI/gRPC) including auth, rate limiting, billing hooks.
+  - Design language-agnostic SDKs (Python, TypeScript) exposing ingestion, focus control, and provenance queries.
+  - Offer hosted service templates (FastAPI/gRPC) with authentication, rate limiting, and billing hooks.
 
-## Track B — Advanced learning & co-optimization
-- **B.1 EM-style co-learning** — Alternating optimization across gists, lens, and LoRA adapters, exploring adaptive schedules and larger base models.
-- **B.2 Cognitive core & agentic reasoning** — Train compact transformers for mixed token/gist reasoning; build agentic loops with uncertainty-aware focus triggers.
-- **B.3 Training LLMs from scratch** — Jointly train base models with MegaContext-aware curricula, studying scaling laws and data filtering.
-- **B.4 MegaPrediction speculative planning** — Add future partitions to the gist tree for latent CoT, hierarchical refinement, and LensNet-guided commits scored by ΔNLL/RL objectives.
+## Track B — Advanced Learning & Co-Optimization
+- **B.1 EM-Style Co-Learning**
+  - Continue alternating optimization cycles across gist, lens, and lightweight LoRA adapters; experiment with adaptive cycle scheduling and early stopping.
+  - Extend to >8 B base models when compute becomes available; explore distributed training strategies.
+- **B.2 Cognitive Core & Agentic Reasoning**
+  - Train compact cognitive core transformers capable of mixed token/gist reasoning, seeded from POC/PAPER infrastructure.
+  - Develop agentic loops (planning, tool use) that leverage MegaContext for multi-turn tasks; integrate uncertainty estimates to trigger focus adjustments.
+- **B.3 Training LLMs from Scratch**
+  - Research joint training regimes where base models learn with MegaContext from the outset, potentially using synthetic long-context curricula.
+  - Investigate curriculum schedules, scaling laws, and data filtering tailored to gist-aware transformers.
+- **B.4 MegaPrediction Speculative Planning**
+  - Extend the MegaContext tree with a movable present cursor separating committed history from speculative future gists and tokens.
+  - Prototype latent CoT planners, hierarchical de-gisting, and LensNet-guided refinement loops that operate in the speculative region before committing outputs.
+  - Reuse ΔNLL and RL-style objectives to score finalized continuations while tracking compute/latency costs accrued during prediction.
 
-## Track C — Application showcases & verticalization
-- **C.1 Coding assistant** — Repo ingest pipeline, live watcher, CLI agent; benchmark on HumanEval/MBPP with MegaContext memory.
-- **C.2 Knowledge workflows** — Build compliance/support MegaContexts mixing docs, specs, and logs with metadata-powered retrieval + focus.
-- **C.3 Multimodal/layout use cases** — Fuse UI traces, diagrams, and optical compression insights (e.g., DeepSeek-OCR) into the hierarchy.
+## Track C — Application Showcases & Verticalization
+- **C.1 Coding Assistant Showcase**
+  - Complete the repository-ingest pipeline, live watcher service, and coding-agent CLI.
+  - Benchmark on HumanEval, MBPP, and repo-level tasks with and without MegaContext memory.
+  - Produce demos highlighting focus reallocations over large codebases.
+- **C.2 Knowledge Workflows**
+  - Build “core knowledge” MegaContexts blending documentation, specs, incident reports, and conversation logs with rich metadata.
+  - Implement retrieval + focus hybrids for question answering, compliance auditing, or customer support.
+- **C.3 Multimodal & Layout-Rich Use Cases**
+  - Explore fusing non-text signals (UI traces, diagrams) into the gist hierarchy.
+  - Leverage insights from optical compression research (e.g., DeepSeek-OCR) to capture layout metadata or render-on-demand fallbacks without full rasterization pipelines.
 
-## Track D — Research extensions
-- **D.1 Comparative studies** — Evaluate MegaContext vs RETRO, MEMGPT, etc., across new domains; publish follow-on papers on pruning, focus learning, cognitive cores.
-- **D.2 Community benchmarks** — Curate open long-context leaderboards, integrate with Helm/LongEval.
-- **D.3 Ethics, safety, governance** — Study provenance retention, audit trails, compliance policies for long-lived memory.
+## Track D — Research Extensions
+- **D.1 Comparative Studies & Additional Papers**
+  - Investigate MegaContext vs. alternative memory systems (RETRO, MEMGPT) across more domains.
+  - Publish follow-on papers focused on pruning strategies, focus allocator learning, or cognitive core performance.
+- **D.2 Community Benchmarks**
+  - Curate open long-context benchmarks and leaderboards featuring MegaContext variants.
+  - Provide evaluation harness integrations (Helm, LongEval) to encourage external replication.
+- **D.3 Ethical, Safety, and Governance**
+  - Study provenance retention, audit trails, and compliance implications of long-lived memories.
+  - Propose policy and safety guidelines for organizations adopting MegaContext at scale.
 
-## Track E — Tooling & developer experience
-- **E.1 Visualization enhancements** — Interactive explorers (web + terminal) with drill-down, playback, annotation.
-- **E.2 Automation & CI** — Scripted workflows for ingestion, training, evaluation; integrate long-context regression tests in CI.
-- **E.3 Documentation portal** — Launch a docs site (mkdocs or similar) aggregating architecture guides, API references, tutorials, research notes.
+## Track E — Tooling & Developer Experience
+- **E.1 Visualization Enhancements**
+  - Build interactive MegaContext explorers (web + terminal) with drill-down, playback, and annotation capabilities.
+- **E.2 Automation & CI**
+  - Create scripted workflows (Makefile/Invoke) covering ingestion, training, evaluation, and release packaging.
+  - Integrate long-context regression tests into CI with synthetic datasets and seeded RNG.
+- **E.3 Documentation Portal**
+  - Launch a docs site (mkdocs or similar) consolidating architecture guides, API references, tutorials, and research insights.
+
+These tracks are intentionally broad; teams should prioritize based on community demand, resource availability, and outcomes of the research paper milestone.
 
 ## Links
 - [[Grand Vision]] — conceptual framing for speculative planning and long-term goals.
