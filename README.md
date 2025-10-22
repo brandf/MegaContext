@@ -7,6 +7,8 @@
 - `planning/PAPER_PLAN.md` — the research milestone targeting a publishable system.
 - `planning/FUTURE_PLAN.md` — post-paper growth, adoption, and advanced research.
 
+**Obsidian vault:** Shared project notes and canvases live in `obsidian/`; open that directory as a vault in Obsidian. The `.obsidian/` settings folder stays local by default so personal layouts do not churn the repo.
+
 ---
 ## TL;DR — MegaContext
 MegaContext is a proposed system architecture for virtualized LLM context - inspired by a graphics concept called MegaTexture by ID software.
