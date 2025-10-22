@@ -6,8 +6,8 @@ context_stride: 512
 horizon: 32
 teacher_model: HuggingFaceTB/SmolLM2-360M-Instruct
 teacher_batch_size: 32
-teacher_dtype: auto
-teacher_device: cuda
+teacher_dtype: float32
+teacher_device: cpu
 teacher_trust_remote_code: false
 splits:
   train:
