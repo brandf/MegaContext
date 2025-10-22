@@ -904,6 +904,11 @@ Shipping LLMs with a **core MegaContext** transforms in-context learning: the mo
 ### 🔮 MegaPrediction-ready agents
 MegaPrediction extends the architecture from retrospective recall to speculative planning: predicted gists and draft tokens live alongside history in the tree, separated by a movable “present” cursor so the system can iterate on future context, then commit finalized outputs back into the past timeline.
 
+### 🧹 MegaCuration for living knowledge
+Run LensNet across large MegaContext partitions (e.g., 1 M-token shards of an uncurated corpus), aggregate focus telemetry per span, and iteratively prune only the lowest-signal leaves while retaining higher-level gists. Repeating this loop collapses noisy detail into coarser levels-of-detail, yielding a mixed-LOD “core knowledge” tree tailored to the tasks that actually use it.
+- The same focus-driven pruning applies to long-lived agent memories: LensNet logs highlight which regions of a MegaContext stream stay relevant, guiding selective downsampling without losing the summaries that keep context continuity.
+- Store focus stats alongside provenance so the process remains reversible—rare-but-critical spans can be locked, reheated, or revisited if downstream evaluations regress.
+
 ---
 
 ## The end game: a cognitive core
