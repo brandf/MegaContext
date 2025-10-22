@@ -1,6 +1,6 @@
 # Core Components
 
-## GistNet
+## [[GistNet]]
 - Compresses contiguous 32-token segments into single-vector gists using RoPE-enabled self-attention and residual MLPs.
 - Trained against cached teacher embeddings and ΔNLL targets to ensure substituted spans preserve predictive fidelity.
 - Tooling: `tools/train_gistnet.py`, `src/gistnet/blocks.py`, `src/gistnet/model.py`, and future multi-domain curricula described in [[plans/Paper Plan]].
@@ -15,12 +15,12 @@
 - Provides tensor views and legality masks so downstream code can enumerate candidate windows.
 - Lives in `src/runtime/working_context.py`; POC milestones finalize a token pass-through version before layering in focus dynamics.
 
-## LensNet
+## [[LensNet]]
 - Scores each working-context entry for expansion or collapse, conditioning on the surrounding gist cache.
 - Research roadmap includes Perceiver-style latent slots, slot-attention competition, and layout-aware features ([[plans/Paper Plan]]).
-- Training harness `tools/train_lensnet.py` will measure swap rates, regret, and ΔLoss to justify focus decisions.
+- Training harness `tools/train_lensnet.py` measures swap rates, regret, and ΔLoss to justify focus decisions.
 
-## Focus allocator
+## [[Focus Allocator]]
 - Applies LensNet scores with greedy expand/collapse while respecting contiguity, cooldowns, and hysteresis.
 - Responsible for selecting which spans upgrade to raw tokens vs summarized gists.
 - Engine integration occurs in `src/runtime/focus_allocator.py` and `src/runtime/engine.py`.

@@ -4,15 +4,28 @@ MegaContext virtualizes long-context memory for frozen LLMs by mixing raw tokens
 
 ## Quick links
 - [[Architecture Overview]]
+- [[POC Architecture|POC Architecture & Interfaces]]
+- [[POC Scope|POC Scope & Constraints]]
 - [[Core Components]]
+- [[GistNet]]
+- [[LensNet]]
+- [[Focus Allocator]]
 - [[Runtime Loop]]
+- [[Performance Sketch]]
+- [[Training & Operations]]
+- [[Implementation Roadmap]]
+- [[Comparison - MegaContext vs RAG|Comparison — MegaContext vs. RAG]]
 - [[Grand Vision]]
+- [[Cognitive Core]]
+- [[MegaPrediction]]
+- [[Pruning MegaContext]]
+- [[Related Work]]
 - [[plans/POC Plan]]
 - [[plans/Paper Plan]]
 - [[plans/Future Plan]]
 
 ## Working ground rules
-- The repo’s conceptional source of truth is still `README.md`; mirror anything that affects API or architecture there in addition to these notes.
+- The repo’s conceptional source of truth is the top-level `README.md` for high-level orientation; these notes hold detailed design narratives.
 - Store collaborative diagrams in `assets/` and reference them from here with relative paths; keep transient sketches in this vault.
 - Track roadmap adjustments in `obsidian/plans/` notes before reflecting additional context here.
 

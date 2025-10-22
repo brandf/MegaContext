@@ -1,23 +1,84 @@
 # Architecture Overview
 
-MegaContext separates a model’s lifetime memory into two coupled spaces:
+MegaContext removes the fixed-context bottleneck by separating lifetime memory from the short working window that feeds the base LLM. This note captures the full architecture narrative that previously lived in `README.md`.
 
-## MegaContext hierarchy
-- **Hierarchical gists:** Streaming text is chunked into 32-token L0 blocks; every 32 L0 blocks form an L1 gist, and so on, yielding a tree that can span millions of tokens.
-- **Persistent storage:** The gist tree lives on disk (RAM for the POC) and retains metadata so spans can be restored at higher fidelity when the task requires it.
-- **Level-of-detail control:** Each node tracks its level, offsets, and parent pointers, enabling efficient expansion/collapse without breaking contiguity.
+## How MegaContext Works
 
-## Working context window
-- **Fixed budget:** The runtime keeps a contiguous working window on GPU with an 8k–32k token-equivalent budget, blending raw tokens with gists.
-- **Swappable representation:** A span can appear as raw tokens, an L1 gist, or higher-level summaries, depending on the allocator’s focus decisions.
-- **Focus loop coupling:** LensNet scores each working entry and the focus allocator enforces budget limits while respecting cooldowns and contiguity. See [[Runtime Loop]] for execution details.
+Large language models are constrained by a fixed context window. MegaContext removes this limit by separating:
 
-## Design principles
-- **Deterministic dataflows:** Tensor-first data structures and cached teacher embeddings exist to make experiments reproducible (see `src/gistnet`, `tools/train_gistnet.py`).
-- **Progressive refinement:** The system always keeps a path back to the original tokens—compression is reversible by rehydrating lower levels as needed.
-- **Telemetry-aware:** Access counts, focus scores, and ΔNLL statistics feed future pruning and learning, ensuring the gist tree remains tractable at scale.
+- **MegaContext** — the complete interaction or document history (potentially millions or billions of tokens) stored as a *hierarchical gist tree* on disk (RAM for the POC).
+- **Working context** — a fixed 8k–32k token budget on GPU, mixing raw tokens with gists drawn from the MegaContext tree. The frozen base LLM sees only this window, which stays contiguous in “time” even as individual spans switch between token-level and gist-level representations.
 
-## Related notes
-- [[Core Components]] — module-by-module breakdown.
-- [[Runtime Loop]] — ingest, scoring, and decoding lifecycle.
-- [[plans/Paper Plan]] — research-grade extensions (robust compression, storage, benchmarking).
+### Core components
+
+- **MegaContext gist tree** — built incrementally as text streams in (every 32 tokens → L1 gist; every 32 L1 gists → L2 gist; etc.).
+- **Working context** — contiguous window over the tree; total token cost is capped by `W_max`.
+- **GistNet** — a lightweight network that compresses local spans (e.g., 32→1) into **gists** that act as substitutable stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full MegaContext history.
+- **LensNet + focus allocator** — LensNet scores each working-context entry (token embedding or gist) for expansion or collapse; a block-aligned focus allocator applies those scores, streaming finer- or coarser-grained entries in and out while respecting contiguity and the budget.
+
+### Analogy: MegaTexture → MegaContext
+This is not required to understand MegaContext, but for those that are interested in learning about the inspiration, [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
+- In graphics, **MegaTexture** streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.
+- **MegaContext** mirrors that idea for language: instead of mipmap tiles, it maintains embeddings at multiple levels of detail (token L0, gist L1, gist L2, …), yielding effectively unbounded context for a frozen LLM.
+
+### Intuitions / Motivation
+The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors efficiently.
+- "Relevant parts" is inherently non-causal - something that wasn't previously relevant can become relevant, so this implies dynamic focusing/defocusing. One-way compression/summarization schemes are fundamentally flawed.
+- RAG/tools without context maintainance is anti-productive for long running context, it's trading more context for the immediate task for more distractors on all future tasks.
+- Exciting new future LLM scenarios will be unlocked at 100M+ context lengths, and at this scale both memory and compute requirements must be sub-linear to be practical for widespread consumer applications.
+
+---
+
+### Runtime lifecycle at a glance
+
+```
+Streaming text  ──► MegaContext Gist Tree  ──►  Focus Allocator  ──►  Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
+                      ▲           | ▲              ▲                    |      ▲                                   |
+                      └─ GistNet ─┘ |              └────── LensNet ─────┘      |                                   |
+                                    └──────────────────────────────────────────┘───────── Autoregression ──────────┘
+```
+
+1. **Ingest & summarize.** Buffer incoming tokens in 32-token blocks, roll them into new or updated gist nodes, and persist the MegaContext tree (disk later, RAM for the POC).
+2. **Assemble the working context.** Lay out a contiguous-in-time sequence of tokens and gists whose combined token-equivalent cost stays within `W_max`. Every position represents exactly one interval of the MegaContext history at some level of detail.
+3. **Refocus.** LensNet reads the current working context (plus tail gists), emits signed focus scores, and the (currently greedy) focus allocator applies block-aligned expansions/collapses without breaking contiguity or budget.
+4. **Decode.** The frozen base LLM consumes the refreshed working context to predict the next token(s), feeding newly generated tokens back into step 1.
+
+**Update cadence & buffering.**
+- **MegaContext maintenance:** Both user tokens and model-generated tokens are buffered until a full 32-token block (L0) or 32 L1 children are available before rebuilding the corresponding gist nodes. This keeps gist updates block-aligned and prevents churn in the hierarchy.
+- **LensNet conditioning gists:** LensNet only refreshes its conditioning set on its own schedule (e.g., every 256 working-context entries). Those gists can be read from the MegaContext tree or recomputed lazily immediately before each LensNet call; either path observes the same block-aligned buffers.
+
+> **Diagram needed — `assets/runtime_flow.png`:** Visualize the streaming loop from incoming tokens → MegaContext gist tree → focus allocator → working context → frozen LLM, with LensNet providing feedback into the allocator.
+
+---
+
+### Key terms & invariants
+
+| Term | Meaning |
+|------|---------|
+| `MegaContext` | Full, append-only history stored as a hierarchical gist tree (disk later, RAM for the POC). |
+| `Working context` (`WC`) | Fixed-size GPU window (8k–32k token budget) that the base LLM sees; built from contiguous-in-time entries. |
+| Working-context entry | Either a block of raw tokens (`L0`) or a gist summarizing that block or its ancestors (`L1`, `L2`, …). Exactly one entry covers each moment in the MegaContext history. |
+| `L0 / L1 / L2` | Level of detail (LOD): `L0`=tokens, `L1`=32→1 gist, `L2`=gist of gists. Higher `L` means coarser detail and lower token cost. |
+| `W_max` | Token-equivalent budget for the working context (sum of entry costs ≤ `W_max`). |
+| Block size `K` | Number of new tokens processed per update (POC: `K = 32`). |
+| Horizon `H` | Lookahead range used when computing ΔNLL or task losses (defaults: 64 for narrative traces, 96 for mixed agent turns, 128 for code). |
+| ΔNLL@`H` | Change in negative log-likelihood over horizon `H` when replacing a region with its gist; used for supervision. |
+
+**Invariants**
+- Working context entries tile the MegaContext history without gaps or overlaps; switching LOD swaps entries but preserves temporal continuity.
+- GistNet outputs **gists** that reuse the base embedding dimension and can replace their source token blocks directly in the working context.
+- LensNet and the focus allocator update entries between decode steps while keeping the budget and contiguity invariants intact.
+
+These definitions appear throughout the rest of the vault; refer back here when new notation shows up later.
+
+---
+
+### Document roadmap
+
+1. **POC architecture** — see [[POC Architecture]] for module responsibilities and binary formats.
+2. **Module deep dives** — [[GistNet]], [[LensNet]], and [[Focus Allocator]] unpack each subsystem.
+3. **POC scope & performance sketch** — [[POC Scope]] and [[Performance Sketch]] capture boundaries and envelope math.
+4. **Training & operations** — [[Training & Operations]] explains alternating optimization, labeling, and instrumentation.
+5. **Roadmap & vision** — revisit [[Grand Vision]] and [[Cognitive Core]] for long-term ambitions, plus [[MegaPrediction]] and [[Pruning MegaContext]] for future extensions.
+
+For a step-by-step execution walk-through, check [[Runtime Loop]] which ties these components together at inference time.
