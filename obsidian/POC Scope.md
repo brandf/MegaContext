@@ -1,4 +1,25 @@
-# POC Scope & Constraints
+---
+title: "POC Scope & Constraints"
+type: "concept"
+status: "active"
+tags: ["scope","poc","constraints"]
+summary: "Defines the guardrails that keep the proof-of-concept focused, reproducible, and verifiable."
+links:
+  - "[[POC Architecture]]"
+  - "[[plans/POC Plan]]"
+  - "[[MOC - Knowledge Workflow]]"
+---
+
+## Layer 0 · Capture Summary
+- The POC sticks to a frozen base model, a two-level gist tree, and synchronous updates so contributors can prove end-to-end behavior quickly.
+
+## Layer 1 · Key Points
+- **Frozen base:** no fine-tuning during initial loop; LoRA is follow-up work.
+- **Hierarchy:** two-level MegaContext tree suffices for moderate contexts.
+- **Update cadence:** synchronous ingest/refocus between autoregressive steps.
+- **Linkages:** informs [[plans/POC Plan]] deliverables and [[POC Architecture]] assumptions.
+
+## Layer 2 · Detailed Notes
 
 Guardrails that keep the proof-of-concept focused and verifiable while we build out the full MegaContext loop.
 
@@ -7,3 +28,6 @@ Guardrails that keep the proof-of-concept focused and verifiable while we build 
 - **Synchronous updates:** keep the MegaContext tree resident in RAM/GPU for the POC; ingest → focus → decode happens between autoregressive steps with no background streaming yet.
 
 These constraints tie directly to the milestones in [[plans/POC Plan]] and inform the performance envelope summarized in [[Performance Sketch]].
+
+## Layer 3 · Change Log
+- 2025-10-22: Added metadata, layered summaries, and new cross-links to planning notes.

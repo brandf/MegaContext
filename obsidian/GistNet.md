@@ -1,4 +1,29 @@
-# GistNet — Local Gist Extraction
+---
+title: "GistNet — Local Gist Extraction"
+type: "concept"
+status: "active"
+tags: ["module","compression","gistnet"]
+summary: "32→1 hierarchical encoder that substitutes token spans with gists compatible with the base LLM."
+links:
+  - "[[MOC - Core Components]]"
+  - "[[LensNet]]"
+  - "[[Focus Allocator]]"
+  - "[[Training & Operations]]"
+---
+
+## Layer 0 · Capture Summary
+- GistNet compresses each 32-token span into a gist vector aligned with base embeddings, enabling reversible multi-level representations inside MegaContext.
+
+## Layer 1 · Key Points
+- **Purpose:** replace raw tokens with substitutable gists to free working-context budget.
+- **Architecture:** self-attention + cross-attention stack (32→1→32→1) with shared slot queries.
+- **Hierarchy:** two 32→1 layers deliver 1024× compression.
+- **Training:** minimize ΔNLL@H and optional contrastive losses; see [[Training & Operations]].
+- **Interfaces:** feeds the MegaContext tree consumed by [[LensNet]] and [[Focus Allocator]].
+
+## Layer 2 · Detailed Notes
+
+### Overview
 
 GistNet replaces short, fixed-length token sequences with compact **gist embeddings** ("gists") that can stand in for their original tokens inside the base LLM’s context. Each gist preserves the meaning of its 32-token span while freeing token budget for new information. Stacking two 32→1 layers provides **1024× compression** in the proof of concept (POC).
 
@@ -129,3 +154,6 @@ Runtime figures assume a single NVIDIA L4 running bf16 inference with `HuggingFa
 ## Recap
 
 GistNet is a **local encoder for token spans** whose only goal is to emit substitutable gist vectors aligned with the base model’s embedding space. It uses **self- and cross-attention refinement (32→1→32→1)** to squeeze each 32-token block into a single vector without ever decoding back to tokens. Stacked hierarchically, GistNet forms the **MegaContext gist tree** that supplies the tail gists consumed by [[LensNet]] and the allocator during the focus loop.
+
+## Layer 3 · Change Log
+- 2025-10-22: Added metadata, progressive summarization layers, and links to focus stack + training workflow.

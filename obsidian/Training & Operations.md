@@ -1,26 +1,49 @@
-# Training & Operations
+---
+title: "Training & Operations"
+type: "concept"
+status: "active"
+tags: ["training","operations","telemetry"]
+summary: "Alternating optimization, instrumentation, and validation practices for GistNet, LensNet, and runtime components."
+links:
+  - "[[GistNet]]"
+  - "[[LensNet]]"
+  - "[[Focus Allocator]]"
+  - "[[Implementation Roadmap]]"
+---
+
+## Layer 0 · Capture Summary
+- Rotate through GistNet, LensNet, and LoRA updates while collecting telemetry that keeps ΔNLL, swap rates, and latency within targets.
+
+## Layer 1 · Key Points
+- **Alternating phases:** B1 (GistNet), B2 (LensNet), B3 (LoRA).
+- **On-policy labeling:** regenerate ΔNLL utilities after each GistNet update.
+- **Telemetry:** log loss@H, swap rate, residency, latency for every block.
+- **Validation:** acceptance criteria tie to ΔNLL degradation ≤0.1 at `W_max=8k`.
+- **Tooling:** rely on `uv run pytest`, W&B logging, and artifacts directories for repeatability.
+
+## Layer 2 · Detailed Notes
 
 Guidance for alternating optimization, instrumentation, and evaluation when co-training GistNet, LensNet, and lightweight base-model adapters.
 
-## Joint training (alternating / “EM-style”)
+### Joint training (alternating / “EM-style”)
 
 **Goal:** Let all three modules co-adapt without full end-to-end backprop through the discrete focus allocator or long unrolls.
 
 **Method:** Short alternating phases where some modules are frozen while others learn from on-policy signals produced by the frozen parts. Repeat for a few cycles.
 
-### What “EM-style” means here
+#### What “EM-style” means here
 We alternate optimization across modules:
 - **E-like step:** hold policy parts fixed to produce supervision/targets (e.g., counterfactual utilities).
 - **M-like step:** update another module to better fit those targets.
 It’s not exact EM; it’s an alternating optimization schedule that stabilizes joint training.
 
-### Modules
+#### Modules
 - **GistNet** (`Gist`) — 32→1, two levels; substitutability objective.
 - **LensNet** (`LensNet`) — dual cross-attn (8k→6→8k); signed focus scores.
 - **Base-LoRA** (`LoRA`) — tiny adapters on the base LLM to improve gist compatibility.
 - **Focus allocator** remains discrete and greedy (no relaxation).
 
-### Phase B1 — Update GistNet (fix LensNet + LoRA)
+#### Phase B1 — Update GistNet (fix LensNet + LoRA)
 **Fix:** `LensNet`, `LoRA`
 **Update:** `Gist`
 
@@ -34,7 +57,7 @@ Procedure (on-policy):
 
 **Intuition:** With the current focusing policy fixed, make gists better drop-in replacements for exactly the places the policy cares about.
 
-### Phase B2 — Update LensNet (fix GistNet + LoRA)
+#### Phase B2 — Update LensNet (fix GistNet + LoRA)
 **Fix:** `Gist`, `LoRA`
 **Update:** `LensNet`
 
@@ -50,7 +73,7 @@ Procedure:
 
 **Intuition:** Given the current gists, learn a better focusing policy.
 
-### Phase B3 — Update Base-LoRA (fix GistNet + LensNet)
+#### Phase B3 — Update Base-LoRA (fix GistNet + LensNet)
 **Fix:** `Gist`, `LensNet`
 **Update:** `LoRA` (small ranks; keep it tiny)
 
@@ -111,7 +134,7 @@ Losses:
 
 ---
 
-## Instrumentation & artifact handling
+### Instrumentation & artifact handling
 
 - **Logging:** stream metrics (losses, swap rates, residency histograms) to Weights & Biases; tag runs by dataset + thresholds.
 - **Checkpoints:** save GistNet, LensNet, and LoRA weights under `artifacts/checkpoints/`. Store counterfactual utility tables under `artifacts/deltas/` (Parquet or Arrow for efficient slicing).
@@ -123,7 +146,7 @@ Losses:
 
 ---
 
-## Limitations & failure modes
+### Limitations & failure modes
 
 - **Gist drift:** substitutability degrades if GistNet overfits; monitor ΔNLL@`H` gaps and refresh ΔNLL labels after each B1 phase.
 - **Allocator oscillation:** repeated expand/collapse of the same block indicates thresholds/cooldown need adjustment; histogram residency times to catch this.
@@ -133,7 +156,7 @@ Losses:
 
 ---
 
-## Evaluation & validation checklist
+### Evaluation & validation checklist
 
 **Accuracy & compression**
 - ΔNLL vs budget: sweep `W_max` (4k → 16k) using held-out long-form tasks; target ΔNLL degradation ≤ 0.1 compared to full-context baselines at equivalent token budgets.
@@ -154,7 +177,7 @@ Losses:
 
 ---
 
-## Example walkthrough (toy coding session)
+### Example walkthrough (toy coding session)
 
 1. **Setup:** Load a small TypeScript project summary into MegaContext memory (≈4k tokens) and seed the working context with the latest user/system gists.
 2. **User turn:** “Add logging to the `fetchUser` helper.” Ingest tokens into the MegaContext tree (32-token blocks) and update L1 gists.
@@ -164,3 +187,6 @@ Losses:
 6. **Trace capture:** Log ΔNLL utilities, focus actions, and residency times to W&B for later analysis.
 
 Document a similar narrative under `docs/walkthroughs/` once the POC code path is live so future contributors can replay it end to end.
+
+## Layer 3 · Change Log
+- 2025-10-22: Added metadata, progressive summarization layers, and inline cross-links to module notes.

@@ -23,10 +23,11 @@ To dynamical adapt level of detail, a learned LensNet model, continuously/increm
 ## Obsidian Knowledge Base
 
 **Core system**
-- [MegaContext Vault Index](obsidian/MegaContext.md) — entry point linking every vault note.
+- [MegaContext Vault Index](obsidian/MOC%20-%20MegaContext.md) — entry point linking every vault note.
 - [Architecture Overview](obsidian/Architecture%20Overview.md) — conceptual walkthrough of the runtime loop and invariants.
-- [Core Components](obsidian/Core%20Components.md) — high-level summary of GistNet, LensNet, allocator, and supporting modules.
+- [Core Components](obsidian/MOC%20-%20Core%20Components.md) — high-level summary of GistNet, LensNet, allocator, and supporting modules.
 - [Runtime Loop](obsidian/Runtime%20Loop.md) — step-by-step decode flow for ingest → focus → decode.
+- [Knowledge Workflow](obsidian/MOC%20-%20Knowledge%20Workflow.md) — Capture → Process → Refine → Create map for this vault.
 
 **Engineering details**
 - [POC Architecture & Interfaces](obsidian/POC%20Architecture.md) — module map, environment assumptions, binary formats, and sample configs.

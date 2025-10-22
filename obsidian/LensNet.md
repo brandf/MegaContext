@@ -1,4 +1,28 @@
-# LensNet — Focus Scoring
+---
+title: "LensNet — Focus Scoring"
+type: "concept"
+status: "active"
+tags: ["module","focus","lensnet"]
+summary: "Dual cross-attention controller that scores working-context entries for expansion or collapse."
+links:
+  - "[[MOC - Core Components]]"
+  - "[[GistNet]]"
+  - "[[Focus Allocator]]"
+  - "[[Training & Operations]]"
+---
+
+## Layer 0 · Capture Summary
+- LensNet reads the working context plus tail gists to emit signed utilities that tell the [[Focus Allocator]] where to zoom in or back off, keeping the window relevant at constant compute.
+
+## Layer 1 · Key Points
+- **Operates on:** working-context embeddings (≈8k entries) and a tail of gists.
+- **Outputs:** signed focus scores per entry; positive to expand, negative to collapse.
+- **Architecture:** dual cross-attention blocks (`context ↔ tail gists`) followed by scalar heads.
+- **Cadence:** runs every `K` tokens (32 in POC) before allocator actions.
+- **Training:** counterfactual ΔNLL utilities, budget regularizers, legality penalties.
+- **Interfaces:** works alongside [[GistNet]] outputs and the greedy [[Focus Allocator]].
+
+## Layer 2 · Detailed Notes
 
 LensNet acts like an optical lens that dynamically **focuses** and **defocuses** regions within the MegaContext while keeping total compute constant. It predicts where to spend detail (expand gists into raw tokens) and where to blur (collapse raw tokens into gists), ensuring the **fixed-size working context** maintains maximal relevance.
 
@@ -147,4 +171,7 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 | Runtime | < 3 ms per update @ 8 k tokens |
 | Params | ≈ 100 k – 200 k total |
 
-**In short:** LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`). It runs once per block, predicts balanced signed focus scores for every entry, and guides the focus allocator to keep the working context sharp, legal, and budget-neutral.
+**In short:** LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`). It runs once per block, predicts balanced signed focus scores for every entry, and guides the [[Focus Allocator]] to keep the working context sharp, legal, and budget-neutral.
+
+## Layer 3 · Change Log
+- 2025-10-22: Added metadata, summarization layers, and denser cross-links to neighboring modules.

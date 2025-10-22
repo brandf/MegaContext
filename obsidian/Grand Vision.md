@@ -1,4 +1,28 @@
-# Grand Vision
+---
+title: "Grand Vision"
+type: "concept"
+status: "active"
+tags: ["vision","strategy","future"]
+summary: "Articulates why MegaContext matters long term and the future directions it unlocks."
+links:
+  - "[[MegaPrediction]]"
+  - "[[Pruning MegaContext]]"
+  - "[[Cognitive Core]]"
+  - "[[MOC - MegaContext]]"
+---
+
+## Layer 0 · Capture Summary
+- MegaContext virtualizes memory to enable smaller, continually updated models; this vision note outlines why that matters and where the architecture goes next.
+
+## Layer 1 · Key Themes
+- **Persistent memory:** unbounded history at constant compute.
+- **Dynamic attention:** learned focus policies via [[LensNet]] + [[Focus Allocator]].
+- **Composable tooling:** shared structures power [[MegaPrediction]] and pruning.
+- **Virtually infinite memory:** years-long conversations without retraining.
+- **Core knowledge:** treat MegaContext as an updatable system prompt.
+- **Agentic workflows:** richer coding/knowledge agents, persistent tasks.
+
+## Layer 2 · Detailed Notes
 
 MegaContext aims to virtualize sequence memory so language models can operate with effectively unbounded context at constant compute. The long-term roadmap blends technical depth with practical deployments.
 
@@ -33,3 +57,6 @@ MegaContext aims to virtualize sequence memory so language models can operate wi
 - Joint training of LLM + MegaContext from scratch.
 - Shared or federated lifetime memories between agents.
 - Adaptive pruning of MegaContext memory to keep knowledge fresh and storage bounded.
+
+## Layer 3 · Change Log
+- 2025-10-22: Added metadata, layered summaries, and expanded rationale for knowledge graph hygiene.

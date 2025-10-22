@@ -1,4 +1,28 @@
-# Runtime Loop
+---
+title: "Runtime Loop"
+type: "concept"
+status: "active"
+tags: ["runtime","megacontext","concept"]
+summary: "Streaming loop that ingests tokens, updates the gist tree, refocuses, and decodes with the frozen base model."
+links:
+  - "[[MOC - Core Components]]"
+  - "[[GistNet]]"
+  - "[[LensNet]]"
+  - "[[Focus Allocator]]"
+  - "[[POC Architecture]]"
+---
+
+## Layer 0 · Capture Summary
+- The runtime loop ingests tokens into the MegaContext tree, scores the working window via [[LensNet]], applies the [[Focus Allocator]], and decodes with the frozen base LLM while logging telemetry.
+
+## Layer 1 · Key Points
+- **Stages:** ingest → gist update → focus scoring → allocation → decode → telemetry.
+- **Budget:** working context remains within `W_max` using block-aligned actions.
+- **Demo goals:** `tools.run_poc_loop` showcases expansion/collapse within limits.
+- **Telemetry:** swap rates, ΔNLL, latency feed pruning and training loops.
+- **Links:** depends on [[POC Architecture]] for storage formats and [[Training & Operations]] for labeling cadence.
+
+## Layer 2 · Detailed Notes
 
 The streaming runtime keeps a frozen base LLM within a fixed working window while preserving the full MegaContext history.
 
@@ -14,7 +38,10 @@ The streaming runtime keeps a frozen base LLM within a fixed working window whil
 - POC goal: `tools.run_poc_loop` streams a synthetic session, showing expansion/collapse while maintaining budget invariants ([[plans/POC Plan]]).
 - Research milestone: benchmarking harnesses compare MegaContext runs against baselines and track swap rate, loss, and latency ([[plans/Paper Plan]] Phase 4).
 
-## Focus heuristics
+### Focus heuristics
 - **Greedy but bounded:** Hysteresis and cooldowns prevent thrashing when spans hover near the decision boundary.
 - **Multi-scale awareness:** Bundles of raw tokens plus their parent gists let the allocator choose hybrid representations.
 - **Telemetry-driven evolution:** Access counts and ΔNLL sensitivity inform pruning strategies explored in Track B/D of [[plans/Future Plan]].
+
+## Layer 3 · Change Log
+- 2025-10-22: Added metadata, layered summaries, and explicit links to the component notes and plans.

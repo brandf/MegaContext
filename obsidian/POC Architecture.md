@@ -1,4 +1,27 @@
-# POC Architecture & Interfaces
+---
+title: "POC Architecture & Interfaces"
+type: "concept"
+status: "active"
+tags: ["architecture","poc","interfaces"]
+summary: "Defines module boundaries, environment assumptions, and storage formats for the proof-of-concept."
+links:
+  - "[[MOC - Core Components]]"
+  - "[[POC Scope]]"
+  - "[[Runtime Loop]]"
+  - "[[Training & Operations]]"
+---
+
+## Layer 0 · Capture Summary
+- Outlines how the proof-of-concept wires modules, datasets, and storage formats so the runtime loop can execute with minimal assumptions.
+
+## Layer 1 · Key Points
+- **Module table:** clarifies responsibilities across GistNet, LensNet, allocator, and runtime engine.
+- **Environment:** PyTorch 2.2+, FlashAttention 2, `uv` for dependency management.
+- **Storage:** `{L0,L1,L2}.ctx` binary layout with deterministic offsets.
+- **Configs:** sample YAML showing run parameters and dataset wiring.
+- **Linked plans:** aligns with [[plans/POC Plan]] phases and [[POC Scope]] constraints.
+
+## Layer 2 · Detailed Notes
 
 This note captures the module map, environment assumptions, and storage layout that previously lived in `README.md`. It complements the milestone targets in [[plans/POC Plan]].
 
@@ -88,3 +111,6 @@ storage:
 ```
 
 Refer back to this configuration when wiring up the runtime loop in [[Runtime Loop]] or when validating scope boundaries in [[POC Scope]].
+
+## Layer 3 · Change Log
+- 2025-10-22: Added metadata and layered summaries after README refactor.

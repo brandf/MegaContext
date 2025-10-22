@@ -1,24 +1,46 @@
-# Comparison — MegaContext vs. RAG
+---
+title: "Comparison — MegaContext vs. RAG"
+type: "concept"
+status: "draft"
+tags: ["comparison","rag","strategy"]
+summary: "Contrasts MegaContext’s learned focus and memory substrate with retrieval-augmented generation pipelines."
+links:
+  - "[[MOC - Core Components]]"
+  - "[[Grand Vision]]"
+  - "[[Training & Operations]]"
+---
 
-MegaContext and retrieval-augmented generation (RAG) both pull relevant information into a limited context, but their mechanics and guarantees differ.
+## Layer 0 · Capture Summary
+- MegaContext integrates compression and focus as part of the runtime, whereas RAG retrieves external text; both can coexist but optimize different contracts.
 
-## High-level comparison
+## Layer 1 · Key Points
+- **Storage:** RAG stores documents externally; MegaContext stores hierarchical gists aligned with the model.
+- **Trigger:** RAG pulls at query time; MegaContext continuously refocuses via [[LensNet]].
+- **Integration:** RAG appends text; MegaContext swaps entries inside the working context.
+- **Training:** RAG separates retriever/generator; MegaContext trains substitutability and focus jointly.
+- **Collaboration:** RAG can feed MegaContext, which then manages detail internally.
+
+## Layer 2 · Detailed Notes
+
+### High-level comparison
 
 | Aspect | RAG | MegaContext |
 |---------|-----|-------------|
 | **Storage** | External documents, often text chunks in a vector DB | Hierarchical learned gists (vectors) directly aligned to the model’s lifetime |
-| **Retrieval trigger** | Query-time semantic search | Continuous, learned focus from LensNet |
+| **Retrieval trigger** | Query-time semantic search | Continuous, learned focus from [[LensNet]] |
 | **Integration** | Concatenate retrieved text to prompt | Replace/expand in working context with proper positional encoding |
 | **Training** | Separate retriever / generator | Single substitutability & focus training |
 | **Memory type** | Stateless look-up | Persistent evolving memory with reversible summarization |
 
 MegaContext treats compression and focus as an integrated learned process rather than retrieval over external text.
 
-## Roleplay conversation: “Isn’t this just RAG?”
+### Roleplay conversation: “Isn’t this just RAG?”
+
+(conversation text retained)
 
 **Alex (RAG-first engineer):** Retrieval-augmented pipelines already work. We vector-search the corpus, stick the hits onto the prompt, and keep building products. Do we really need a whole MegaContext stack when RAG can just append more context?
 
-**Sam (MegaContext advocate):** Appending grows the prompt unbounded. MegaContext keeps a *fixed* working window and focuses/defocuses inline. LensNet learns when to zoom in or out, so memories migrate inside the context instead of piling up at the tail. That’s a different contract entirely.
+**Sam (MegaContext advocate):** Appending grows the prompt unbounded. MegaContext keeps a *fixed* working window and focuses/defocuses inline. [[LensNet]] learns when to zoom in or out, so memories migrate inside the context instead of piling up at the tail. That’s a different contract entirely.
 
 **Jordan (systems architect, middle ground):** Append vs inline focus has downstream effects. Appends can accumulate distractors, but they’re easy to reason about. Learned focus promises better signal-to-noise, yet we inherit the responsibility of training that policy. It’s a trade-off, not a free lunch.
 
@@ -36,7 +58,7 @@ MegaContext treats compression and focus as an integrated learned process rather
 
 **Alex:** Summaries are another point. RAG stores text so the LLM just reads it—no special embedding logic needed.
 
-**Sam:** MegaContext upgrades the embedding space itself. GistNet emits latent vectors aligned with the base model’s embeddings, so the LLM consumes compressed semantics directly. Text summaries cost more tokens and lose nuance; gists carry richer detail per slot.
+**Sam:** MegaContext upgrades the embedding space itself. [[GistNet]] emits latent vectors aligned with the base model’s embeddings, so the LLM consumes compressed semantics directly. Text summaries cost more tokens and lose nuance; gists carry richer detail per slot.
 
 **Jordan:** That’s appealing, but means you must maintain the gist encoder alongside the base model. Text chunks are portable; latent gists tie you to the MegaContext stack.
 
@@ -51,3 +73,6 @@ MegaContext treats compression and focus as an integrated learned process rather
 **Sam:** Exactly. Use RAG or tools to find new facts, ingest them into the MegaContext tree, and let learned focus maintain a compact working set. Two layers working together rather than competing.
 
 **Jordan:** Sounds like convergence then—a pragmatic pipeline might retrieve with RAG, gist with MegaContext, and rely on LensNet to mediate detail. Understanding the division of labour helps us reuse what already works while exploring the new focus controller.
+
+## Layer 3 · Change Log
+- 2025-10-22: Added metadata, layered summaries, and inline links to focus/compression modules.
