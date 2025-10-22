@@ -1,4 +1,25 @@
-# Paper Plan
+---
+title: "Paper Plan"
+type: "plan"
+status: "active"
+tags: ["plan"]
+summary: "Milestone plan for producing a research-grade MegaContext system and publication artifacts."
+links:
+  - "[[MOC - MegaContext]]"
+  - "[[Implementation Roadmap]]"
+  - "[[plans/POC Plan]]"
+---
+
+- Research milestone advancing compression, focus modeling, storage, benchmarking, and publication packaging.
+
+## TL;DR
+- Phase 1 expands gist compression quality and multi-domain data foundations.
+- Phase 2 upgrades LensNet focus modeling with ablations and curricula.
+- Phase 3 delivers disk-backed storage, streaming, and telemetry.
+- Phase 4 runs comprehensive benchmarks, baselines, and visualizations.
+- Phase 5 packages the paper, reproducibility kit, and release artifacts.
+
+## Details
 
 Canonical plan for the research paper milestone.
 

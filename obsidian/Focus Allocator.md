@@ -2,7 +2,7 @@
 title: "Focus Allocator — Block-Aligned Actions"
 type: "concept"
 status: "active"
-tags: ["module","allocator","focus"]
+tags: ["module"]
 summary: "Greedy, hysteresis-aware planner that converts LensNet utilities into legal expand/collapse actions."
 links:
   - "[[MOC - Core Components]]"
@@ -10,17 +10,16 @@ links:
   - "[[Runtime Loop]]"
 ---
 
-## Layer 0 · Capture Summary
 - The focus allocator operationalizes [[LensNet]]’s signed utilities by expanding or collapsing block-aligned spans while keeping the working context contiguous and within `W_max`.
 
-## Layer 1 · Key Points
+## TL;DR
 - **Block alignment:** operates on 32-token blocks and their gist parents to preserve contiguity.
 - **Greedy loop:** alternating priority queues for expands/collapses bounded by thresholds and `N_diff`.
 - **Budget control:** ensures token cost stays near the working-context budget, refunding via collapses.
 - **Stability:** cooldowns and legality masks prevent oscillation or invalid moves.
 - **Future:** explore balanced mass matching, differentiable routers, and adaptive thresholds.
 
-## Layer 2 · Detailed Notes
+## Details
 
 ### POC constraints & terminology
 
@@ -67,6 +66,3 @@ links:
 - Adaptive thresholds (`τ_expand`, `τ_collapse`) based on recent utilization to keep the loop stable.
 
 For now, the greedy, block-aligned allocator keeps the POC simple while leaving room for more sophisticated controllers later.
-
-## Layer 3 · Change Log
-- 2025-10-22: Added metadata, progressive summarization layers, and new cross-links to [[LensNet]] and [[Runtime Loop]].

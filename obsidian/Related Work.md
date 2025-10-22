@@ -2,17 +2,16 @@
 title: "Related Work"
 type: "concept"
 status: "reference"
-tags: ["related-work","research"]
+tags: ["reference"]
 summary: "References that inform MegaContext’s design, including analogues for virtual memory, latent attention, and compression."
 links:
   - "[[Comparison - MegaContext vs RAG]]"
   - "[[Grand Vision]]"
 ---
 
-## Layer 0 · Capture Summary
 - Quick lookup of papers and systems that inspire MegaContext’s architecture and focus mechanisms.
 
-## Layer 1 · Key References
+## TL;DR
 - **Virtualization:** MegaTexture (2007) for streaming multi-resolution assets.
 - **Latent attention:** Perceiver / Perceiver IO for cross-attention conditioning.
 - **Slot reasoning:** Slot Attention for GistNet’s shared queries.
@@ -20,7 +19,7 @@ links:
 - **Prompt compression:** Gist tokens / LLMLingua 2.
 - **Retrieval baselines:** RAG family — see [[Comparison - MegaContext vs RAG]].
 
-## Layer 2 · Detailed Table
+## Details
 
 | Concept | Reference | Relevance |
 |----------|------------|------------|

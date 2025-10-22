@@ -2,7 +2,7 @@
 title: "MegaPrediction — Forecasting Future Context"
 type: "concept"
 status: "idea"
-tags: ["prediction","future-work","vision"]
+tags: ["vision"]
 summary: "Explores speculative planning on the MegaContext gist tree using latent reasoning and hierarchical refinement."
 links:
   - "[[Grand Vision]]"
@@ -10,17 +10,16 @@ links:
   - "[[GistNet]]"
 ---
 
-## Layer 0 · Capture Summary
 - MegaPrediction adds a speculative region to the gist tree so the system can plan future context, refine it, and commit when ready.
 
-## Layer 1 · Key Points
+## TL;DR
 - **Present cursor:** separates committed history from speculative spans.
 - **Latent planners:** operate in gist space before reifying tokens.
 - **Hierarchical refinement:** progressively decode from L2 gists to L0 tokens.
 - **LensNet role:** scores speculative spans to decide refinement order.
 - **Training:** reuse ΔNLL losses, explore RL for compute/latency trade-offs.
 
-## Layer 2 · Detailed Notes
+## Details
 
 MegaPrediction complements MegaContext by forecasting what the model will need next, operating over the same gist hierarchy but inside a speculative “future” region of the tree that sits beyond a movable present cursor.
 

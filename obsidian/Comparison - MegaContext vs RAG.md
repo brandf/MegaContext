@@ -2,7 +2,7 @@
 title: "Comparison — MegaContext vs. RAG"
 type: "concept"
 status: "draft"
-tags: ["comparison","rag","strategy"]
+tags: ["reference"]
 summary: "Contrasts MegaContext’s learned focus and memory substrate with retrieval-augmented generation pipelines."
 links:
   - "[[MOC - Core Components]]"
@@ -10,17 +10,16 @@ links:
   - "[[Training & Operations]]"
 ---
 
-## Layer 0 · Capture Summary
 - MegaContext integrates compression and focus as part of the runtime, whereas RAG retrieves external text; both can coexist but optimize different contracts.
 
-## Layer 1 · Key Points
+## TL;DR
 - **Storage:** RAG stores documents externally; MegaContext stores hierarchical gists aligned with the model.
 - **Trigger:** RAG pulls at query time; MegaContext continuously refocuses via [[LensNet]].
 - **Integration:** RAG appends text; MegaContext swaps entries inside the working context.
 - **Training:** RAG separates retriever/generator; MegaContext trains substitutability and focus jointly.
 - **Collaboration:** RAG can feed MegaContext, which then manages detail internally.
 
-## Layer 2 · Detailed Notes
+## Details
 
 ### High-level comparison
 

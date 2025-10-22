@@ -2,7 +2,7 @@
 title: "Cognitive Core"
 type: "concept"
 status: "draft"
-tags: ["vision","cognitive-core","strategy"]
+tags: ["vision"]
 summary: "Outlines how a compact reasoning model can depend on MegaContext for knowledge while focusing weights on abstraction."
 links:
   - "[[MOC - MegaContext]]"
@@ -10,16 +10,15 @@ links:
   - "[[MegaPrediction]]"
 ---
 
-## Layer 0 · Capture Summary
 - A cognitive core keeps model weights small and reasoning-focused, delegating knowledge storage and focus control to MegaContext.
 
-## Layer 1 · Key Points
+## TL;DR
 - **Components:** lightweight base model + [[GistNet]] + [[LensNet]] + MegaContext tree.
 - **Training loop:** alternating optimization (see [[Training & Operations]]) with strong teachers.
 - **Benefits:** smaller weights, continuous knowledge updates, traceability.
 - **Research:** joint training, knowledge curation, focus policy learning, safety controls.
 
-## Layer 2 · Detailed Notes
+## Details
 
 Inspired by Andrej Karpathy’s “cognitive core” concept—a compact reasoning engine whose weights specialize in abstraction while factual knowledge lives externally. MegaContext offers a pragmatic path to this separation by treating the MegaContext memory as an extensible knowledge substrate and keeping the working context small.
 

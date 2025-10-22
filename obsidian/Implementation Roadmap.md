@@ -2,7 +2,7 @@
 title: "Implementation Roadmap"
 type: "concept"
 status: "active"
-tags: ["roadmap","implementation","poc"]
+tags: ["ops"]
 summary: "Sequenced build order for MegaContext components, aligned with milestone plans."
 links:
   - "[[plans/POC Plan]]"
@@ -10,17 +10,16 @@ links:
   - "[[MOC - Core Components]]"
 ---
 
-## Layer 0 · Capture Summary
 - Quick reference for building the MegaContext stack—from compression to evaluation—mirroring milestone plans.
 
-## Layer 1 · Key Steps
+## TL;DR
 - **Compression first:** implement [[GistNet]].
 - **Memory scaffolding:** build the MegaContext tree per [[POC Architecture]].
 - **Focus stack:** launch [[LensNet]] and [[Focus Allocator]].
 - **Integration:** wire the [[Runtime Loop]] and validate with telemetry.
 - **Evaluation:** run loss-vs-budget, C1/C2, and stress tests before scaling.
 
-## Layer 2 · Detailed Notes
+## Details
 
 1. **32→1 GistNet** — implement and train substitutability (see [[GistNet]]).
 2. **MegaContext tree builder** — streaming, 2-level hierarchy in RAM (see [[POC Architecture & Interfaces]] and [[Runtime Loop]]).

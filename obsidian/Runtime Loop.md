@@ -2,7 +2,7 @@
 title: "Runtime Loop"
 type: "concept"
 status: "active"
-tags: ["runtime","megacontext","concept"]
+tags: ["architecture"]
 summary: "Streaming loop that ingests tokens, updates the gist tree, refocuses, and decodes with the frozen base model."
 links:
   - "[[MOC - Core Components]]"
@@ -12,17 +12,16 @@ links:
   - "[[POC Architecture]]"
 ---
 
-## Layer 0 · Capture Summary
 - The runtime loop ingests tokens into the MegaContext tree, scores the working window via [[LensNet]], applies the [[Focus Allocator]], and decodes with the frozen base LLM while logging telemetry.
 
-## Layer 1 · Key Points
+## TL;DR
 - **Stages:** ingest → gist update → focus scoring → allocation → decode → telemetry.
 - **Budget:** working context remains within `W_max` using block-aligned actions.
 - **Demo goals:** `tools.run_poc_loop` showcases expansion/collapse within limits.
 - **Telemetry:** swap rates, ΔNLL, latency feed pruning and training loops.
 - **Links:** depends on [[POC Architecture]] for storage formats and [[Training & Operations]] for labeling cadence.
 
-## Layer 2 · Detailed Notes
+## Details
 
 The streaming runtime keeps a frozen base LLM within a fixed working window while preserving the full MegaContext history.
 

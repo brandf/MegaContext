@@ -2,7 +2,7 @@
 title: "MegaContext Map of Content"
 type: "moc"
 status: "active"
-tags: ["moc","megacontext","knowledge-graph"]
+tags: ["moc"]
 summary: "Entry map that orients contributors across the MegaContext knowledge graph."
 links:
   - "[[Architecture Overview]]"
@@ -11,10 +11,9 @@ links:
 aliases: ["MegaContext"]
 ---
 
-## Layer 0 · Capture Summary
 - MegaContext combines a lifetime gist tree with a focused working window; use this MOC to jump to any subsystem, workflow, or roadmap detail.
 
-## Layer 1 · Key Branches
+## TL;DR
 - **Orientation:** [[Architecture Overview]], [[MOC - Knowledge Workflow]]
 - **Core modules:** [[MOC - Core Components]], [[GistNet]], [[LensNet]], [[Focus Allocator]]
 - **Runtime:** [[Runtime Loop]], [[POC Architecture]]
@@ -22,7 +21,7 @@ aliases: ["MegaContext"]
 - **Research arcs:** [[Comparison - MegaContext vs RAG]], [[Grand Vision]], [[Cognitive Core]], [[MegaPrediction]], [[Pruning MegaContext]], [[Related Work]]
 - **Milestones:** [[plans/POC Plan]], [[plans/Paper Plan]], [[plans/Future Plan]]
 
-## Layer 2 · Detailed Index
+## Details
 
 ### Orientation & Architecture
 - [[Architecture Overview]] — concept note outlining the two-context architecture and invariants.

@@ -2,7 +2,7 @@
 title: "Training & Operations"
 type: "concept"
 status: "active"
-tags: ["training","operations","telemetry"]
+tags: ["ops"]
 summary: "Alternating optimization, instrumentation, and validation practices for GistNet, LensNet, and runtime components."
 links:
   - "[[GistNet]]"
@@ -11,17 +11,16 @@ links:
   - "[[Implementation Roadmap]]"
 ---
 
-## Layer 0 · Capture Summary
 - Rotate through GistNet, LensNet, and LoRA updates while collecting telemetry that keeps ΔNLL, swap rates, and latency within targets.
 
-## Layer 1 · Key Points
+## TL;DR
 - **Alternating phases:** B1 (GistNet), B2 (LensNet), B3 (LoRA).
 - **On-policy labeling:** regenerate ΔNLL utilities after each GistNet update.
 - **Telemetry:** log loss@H, swap rate, residency, latency for every block.
 - **Validation:** acceptance criteria tie to ΔNLL degradation ≤0.1 at `W_max=8k`.
 - **Tooling:** rely on `uv run pytest`, W&B logging, and artifacts directories for repeatability.
 
-## Layer 2 · Detailed Notes
+## Details
 
 Guidance for alternating optimization, instrumentation, and evaluation when co-training GistNet, LensNet, and lightweight base-model adapters.
 

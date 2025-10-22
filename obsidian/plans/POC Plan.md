@@ -1,4 +1,25 @@
-# POC Plan
+---
+title: "POC Plan"
+type: "plan"
+status: "active"
+tags: ["plan"]
+summary: "Stepwise guide for delivering the MegaContext proof-of-concept milestone."
+links:
+  - "[[MOC - MegaContext]]"
+  - "[[POC Scope]]"
+  - "[[Implementation Roadmap]]"
+---
+
+- Proof-of-concept milestone covering repository readiness through demo documentation.
+
+## TL;DR
+- Phase 0 readies tooling and docs for reproducibility.
+- Phase 1 stands up the frozen runtime skeleton.
+- Phase 2 delivers minimal GistNet compression with evaluation.
+- Phase 3 integrates LensNet, focus allocator, and the end-to-end loop.
+- Phase 4 ships the demo benchmark and documentation artifacts.
+
+## Details
 
 Canonical plan for the MegaContext proof-of-concept milestone.
 

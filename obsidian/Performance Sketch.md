@@ -2,7 +2,7 @@
 title: "Performance Sketch"
 type: "concept"
 status: "draft"
-tags: ["performance","scaling","estimates"]
+tags: ["ops"]
 summary: "Envelope estimates for compute and storage when running MegaContext, including a decade-long retention case study."
 links:
   - "[[POC Architecture]]"
@@ -10,17 +10,16 @@ links:
   - "[[Grand Vision]]"
 ---
 
-## Layer 0 · Capture Summary
 - MegaContext keeps per-step compute close to a frozen LLM while amortizing storage through hierarchical gists, quantization, and telemetry-guided pruning.
 
-## Layer 1 · Key Points
+## TL;DR
 - **Per-step compute:** essentially base decode cost; GistNet/LensNet overhead <1%.
 - **Working budget:** ~8k active tokens in the POC, scaling toward 32k for future builds.
 - **Storage growth:** 32-ary tree adds only ~3.2% above leaves; precision and pruning dominate footprint.
 - **Case study:** 10-year, 500 Hz robotics log compresses to ~6–14 TB with pruning + entropy coding.
 - **Planning hooks:** informs cost assumptions in [[Grand Vision]] and operational budgets in [[Training & Operations]].
 
-## Layer 2 · Detailed Notes
+## Details
 
 ### Step-level comparison
 

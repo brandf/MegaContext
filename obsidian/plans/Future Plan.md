@@ -1,4 +1,25 @@
-# Future Plan
+---
+title: "Future Plan"
+type: "plan"
+status: "backlog"
+tags: ["plan"]
+summary: "Post-paper roadmap covering platform maturation, advanced learning, applications, research extensions, and developer experience."
+links:
+  - "[[MOC - MegaContext]]"
+  - "[[Grand Vision]]"
+  - "[[plans/Paper Plan]]"
+---
+
+- Long-range roadmap for scaling MegaContext beyond the research paper milestone.
+
+## TL;DR
+- Track A drives platform maturity and ecosystem tooling.
+- Track B pushes co-learning, speculative planning, and joint training.
+- Track C highlights application showcases across coding, knowledge, multimodal use cases.
+- Track D invests in comparative research, benchmarks, and governance.
+- Track E focuses on developer experience, visualization, and automation.
+
+## Details
 
 Canonical post-paper roadmap for MegaContext.
 

@@ -2,7 +2,7 @@
 title: "Architecture Overview"
 type: "concept"
 status: "active"
-tags: ["architecture","megacontext","concept"]
+tags: ["architecture"]
 summary: "Explains how MegaContext splits lifetime memory from the working window and the invariants that bind the system."
 links:
   - "[[MOC - MegaContext]]"
@@ -10,17 +10,16 @@ links:
   - "[[Runtime Loop]]"
 ---
 
-## Layer 0 · Capture Summary
 - MegaContext virtualizes context by pairing a disk-backed gist tree with a budgeted working window governed by [[GistNet]], [[LensNet]], and [[Focus Allocator]].
 
-## Layer 1 · Key Points
+## TL;DR
 - **Two spaces:** lifetime [[MegaContext]] tree vs GPU working context.
 - **Compression:** [[GistNet]] builds hierarchical gists aligned with base embeddings.
 - **Focus loop:** [[LensNet]] scores working entries; [[Focus Allocator]] adjusts detail.
 - **Invariants:** contiguity, token-cost budgets, reversible expansion from stored tokens.
 - **See also:** [[Runtime Loop]] for execution, [[POC Architecture]] for interfaces.
 
-## Layer 2 · Detailed Notes
+## Details
 
 ### High-level framing
 
@@ -106,6 +105,3 @@ These definitions appear throughout the rest of the vault; refer back here when 
 5. **Roadmap & vision** — revisit [[Grand Vision]] and [[Cognitive Core]] for long-term ambitions, plus [[MegaPrediction]] and [[Pruning MegaContext]] for future extensions.
 
 For a step-by-step execution walk-through, check [[Runtime Loop]] which ties these components together at inference time.
-
-## Layer 3 · Change Log
-- 2025-10-22: Converted to progressive summarization format; added dense links to subsystem notes.
