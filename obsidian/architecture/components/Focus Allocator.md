@@ -1,18 +1,12 @@
 ---
-title: "Focus Allocator — Block-Aligned Actions"
-type: "concept"
-status: "active"
-tags: ["module"]
-summary: "Greedy, hysteresis-aware planner that converts LensNet utilities into legal expand/collapse actions."
-links:
-  - "[[MOC - Core Components]]"
-  - "[[LensNet]]"
-  - "[[Runtime Loop]]"
+tags:
+  - module
+summary: Greedy, hysteresis-aware planner that converts LensNet utilities into legal expand/collapse actions.
 ---
-
-- The focus allocator operationalizes [[LensNet]]’s signed utilities by expanding or collapsing block-aligned spans while keeping the working context contiguous and within `W_max`.
-
 ## TL;DR
+
+The focus allocator operationalizes [[LensNet]]’s signed utilities by expanding or collapsing block-aligned spans while keeping the working context contiguous and within `W_max`.
+
 - **Block alignment:** operates on 32-token blocks and their gist parents to preserve contiguity.
 - **Greedy loop:** alternating priority queues for expands/collapses bounded by thresholds and `N_diff`.
 - **Budget control:** ensures token cost stays near the working-context budget, refunding via collapses.

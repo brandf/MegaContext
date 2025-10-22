@@ -1,24 +1,19 @@
 ---
-title: "Pruning MegaContext"
-type: "concept"
-status: "draft"
-tags: ["ops"]
-summary: "Telemetry-driven strategies for keeping the MegaContext gist tree compact without losing valuable detail."
-links:
-  - "[[Training & Operations]]"
-  - "[[Grand Vision]]"
-  - "[[LensNet]]"
+tags:
+  - ops
+summary: Telemetry-driven strategies for keeping the MegaContext gist tree compact without losing valuable detail.
+---
+Use telemetry (access, ΔNLL, query alignment) to collapse or retire low-value spans while preserving reversibility and provenance.
+
 ---
 
-- Use telemetry (access, ΔNLL, query alignment) to collapse or retire low-value spans while preserving reversibility and provenance.
-
-## TL;DR
 - **Signals:** access dwell time, ΔNLL sensitivity, semantic alignment.
 - **Strategies:** level-aware shrinkage, version compaction, temporal decay.
 - **Guardrails:** soft delete tiers, event tags, audit metadata.
 - **Automation:** asynchronous jobs, LensNet-informed utility estimates, RL/bandit approaches.
 - **Domains:** robotics, codebases, documentation each need tailored policies.
 
+---
 ## Details
 
 Even with disk-backed storage, a mature MegaContext memory will accumulate redundant, outdated, or low-value spans. Pruning keeps the gist tree healthy without sacrificing recall.
@@ -54,6 +49,3 @@ Even with disk-backed storage, a mature MegaContext memory will accumulate redun
 - **Documentation:** preserve canonical specs verbatim, but decay meeting notes or superseded plans once new revisions land.
 
 Pruning is easiest if provenance, access counts, and tagging hooks exist from day one; the POC should wire these metrics even if pruning is a future feature.
-
-## Layer 3 · Change Log
-- 2025-10-22: Added metadata, layered summaries, and cross-links to focus/telemetry notes.

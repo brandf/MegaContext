@@ -1,29 +1,21 @@
 ---
-title: "Architecture Overview"
-type: "concept"
-status: "active"
-tags: ["architecture"]
-summary: "Explains how MegaContext splits lifetime memory from the working window and the invariants that bind the system."
-links:
-  - "[[MOC - MegaContext]]"
-  - "[[MOC - Core Components]]"
-  - "[[Runtime Loop]]"
+summary: MegaContext virtualizes context by pairing a disk-backed gist tree called the MegaContext with a budgeted working context governed by GistNet, LensNet, and the Focus Allocator.
+---
+MegaContext virtualizes context by pairing a disk-backed gist tree called the [[MegaContext Tree]] with a budgeted working context governed by [[GistNet]], [[LensNet]], and the [[Focus Allocator]].
+
+It separates a model’s context into a [[MegaContext Tree]] (stored on disk) and a [[Working Context]] (on GPU). A learned [[GistNet]] model is used to build the [[MegaContext Tree]] as a hierarchy of gists. The working context compresses the [[MegaContext Tree]] into a fixed-size mix of tokens and gists that are used for inference.
+
+To dynamically adapt level of detail, a learned [[LensNet]] model, continuously/incrementally refocuses the [[MegaContext Tree]] onto the [[Working Context]], giving the model effectively infinite memory at constant compute with automatic context management.
+
 ---
 
-- MegaContext virtualizes context by pairing a disk-backed gist tree with a budgeted working window governed by [[GistNet]], [[LensNet]], and [[Focus Allocator]].
-
-## TL;DR
-- **Two spaces:** lifetime [[MegaContext]] tree vs GPU working context.
+- **Dual contexts:** [[MegaContext Tree]] tree vs. [[Working Context]].
 - **Compression:** [[GistNet]] builds hierarchical gists aligned with base embeddings.
-- **Focus loop:** [[LensNet]] scores working entries; [[Focus Allocator]] adjusts detail.
-- **Invariants:** contiguity, token-cost budgets, reversible expansion from stored tokens.
+- **Focus/Defocus:** [[LensNet]] scores working entries; [[Focus Allocator]] adjusts detail.
 - **See also:** [[Runtime Loop]] for execution, [[POC Architecture]] for interfaces.
 
+---
 ## Details
-
-### High-level framing
-
-MegaContext removes the fixed-context bottleneck by separating lifetime memory from the short working window that feeds the base LLM. This note captures the full architecture narrative that previously lived in `README.md`.
 
 ### How MegaContext Works
 
@@ -38,11 +30,6 @@ Large language models are constrained by a fixed context window. MegaContext rem
 - **Working context** — contiguous window over the tree; total token cost is capped by `W_max`.
 - **GistNet** — a lightweight network that compresses local spans (e.g., 32→1) into **gists** that act as substitutable stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full MegaContext history.
 - **LensNet + focus allocator** — LensNet scores each working-context entry (token embedding or gist) for expansion or collapse; a block-aligned focus allocator applies those scores, streaming finer- or coarser-grained entries in and out while respecting contiguity and the budget.
-
-### Analogy: MegaTexture → MegaContext
-This is not required to understand MegaContext, but for those that are interested in learning about the inspiration, [this video](https://www.youtube.com/watch?v=BiQCz2NjPR8) provides a good overview of the problems Mega Texture solves.
-- In graphics, **MegaTexture** streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.
-- **MegaContext** mirrors that idea for language: instead of mipmap tiles, it maintains embeddings at multiple levels of detail (token L0, gist L1, gist L2, …), yielding effectively unbounded context for a frozen LLM.
 
 ### Intuitions / Motivation
 The core intuition that's motivating this work is that long context is only useful if the model can focus on the relevant parts and ignore distractors efficiently.
@@ -102,6 +89,6 @@ These definitions appear throughout the rest of the vault; refer back here when 
 2. **Module deep dives** — [[GistNet]], [[LensNet]], and [[Focus Allocator]] unpack each subsystem.
 3. **POC scope & performance sketch** — [[POC Scope]] and [[Performance Sketch]] capture boundaries and envelope math.
 4. **Training & operations** — [[Training & Operations]] explains alternating optimization, labeling, and instrumentation.
-5. **Roadmap & vision** — revisit [[Grand Vision]] and [[Cognitive Core]] for long-term ambitions, plus [[MegaPrediction]] and [[Pruning MegaContext]] for future extensions.
+5. **Roadmap & vision** — revisit [[Grand Vision]] and [[Cognitive Core]] for long-term ambitions, plus [[MegaPrediction]] and [[MegaCuration]] for future extensions.
 
 For a step-by-step execution walk-through, check [[Runtime Loop]] which ties these components together at inference time.

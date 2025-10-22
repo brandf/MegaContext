@@ -1,19 +1,12 @@
 ---
-title: "LensNet — Focus Scoring"
-type: "concept"
-status: "active"
-tags: ["module"]
-summary: "Dual cross-attention controller that scores working-context entries for expansion or collapse."
-links:
-  - "[[MOC - Core Components]]"
-  - "[[GistNet]]"
-  - "[[Focus Allocator]]"
-  - "[[Training & Operations]]"
+tags:
+  - module
+summary: Dual cross-attention controller that scores working-context entries for expansion or collapse.
 ---
-
-- LensNet reads the working context plus tail gists to emit signed utilities that tell the [[Focus Allocator]] where to zoom in or back off, keeping the window relevant at constant compute.
-
 ## TL;DR
+
+LensNet reads the working context plus tail gists to emit signed utilities that tell the [[Focus Allocator]] where to zoom in or back off, keeping the window relevant at constant compute.
+
 - **Operates on:** working-context embeddings (≈8k entries) and a tail of gists.
 - **Outputs:** signed focus scores per entry; positive to expand, negative to collapse.
 - **Architecture:** dual cross-attention blocks (`context ↔ tail gists`) followed by scalar heads.
@@ -29,7 +22,7 @@ LensNet acts like an optical lens that dynamically **focuses** and **defocuses**
 
 - LensNet reads the **working context**, not the MegaContext tree. It analyzes the embeddings currently fed into the base LLM — the only state resident on GPU.
 - It outputs one **focus score** per entry (token embedding or gist).
-- The [[Architecture Overview#Key terms & invariants|contiguity invariant]] ensures each score maps to a single, non-overlapping lifetime span, so expand/collapse actions remain block-aligned.
+- The [[Architecture Details#Key terms & invariants|contiguity invariant]] ensures each score maps to a single, non-overlapping lifetime span, so expand/collapse actions remain block-aligned.
 
 ### Why non-causal is essential
 

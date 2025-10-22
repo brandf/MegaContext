@@ -1,23 +1,18 @@
 ---
-title: "Cognitive Core"
-type: "concept"
-status: "draft"
-tags: ["vision"]
-summary: "Outlines how a compact reasoning model can depend on MegaContext for knowledge while focusing weights on abstraction."
-links:
-  - "[[MOC - MegaContext]]"
-  - "[[Training & Operations]]"
-  - "[[MegaPrediction]]"
+tags:
+  - vision
+summary: Outlines how a compact reasoning model can depend on MegaContext for knowledge while focusing weights on abstraction.
+---
+A cognitive core keeps model weights small and reasoning-focused, delegating knowledge storage and focus control to MegaContext.
+
 ---
 
-- A cognitive core keeps model weights small and reasoning-focused, delegating knowledge storage and focus control to MegaContext.
-
-## TL;DR
-- **Components:** lightweight base model + [[GistNet]] + [[LensNet]] + MegaContext tree.
+- **Components:** lightweight base model + [[Glossary]] + [[GistNet]] + [[LensNet]]
 - **Training loop:** alternating optimization (see [[Training & Operations]]) with strong teachers.
 - **Benefits:** smaller weights, continuous knowledge updates, traceability.
 - **Research:** joint training, knowledge curation, focus policy learning, safety controls.
 
+---
 ## Details
 
 Inspired by Andrej Karpathy’s “cognitive core” concept—a compact reasoning engine whose weights specialize in abstraction while factual knowledge lives externally. MegaContext offers a pragmatic path to this separation by treating the MegaContext memory as an extensible knowledge substrate and keeping the working context small.
@@ -58,6 +53,3 @@ Inspired by Andrej Karpathy’s “cognitive core” concept—a compact reasoni
 - **Quality control:** deduplicate near-identical spans before gist extraction; monitor gist variance to detect noisy inputs. Track provenance IDs for every gist so hallucinations can be traced back to the original source and corrected.
 - **Incremental updates:** append new partitions instead of reprocessing the entire tree. Because offsets are deterministic, you can rebuild affected gists in place and avoid full re-ingest. Version each partition so rollbacks or audits remain manageable.
 - **Curriculum for training:** as the corpus grows, schedule tasks that encourage the base model to rely on relevant segments (e.g., code tasks sample from the “code” partition). Penalize ignoring retrieved spans by comparing ΔNLL with and without expansions during training.
-
-## Layer 3 · Change Log
-- 2025-10-22: Added metadata, layered summaries, and explicit links to training and vision notes.

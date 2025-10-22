@@ -1,36 +1,33 @@
 ---
-title: "POC Plan"
-type: "plan"
-status: "active"
-tags: ["plan"]
-summary: "Stepwise guide for delivering the MegaContext proof-of-concept milestone."
-links:
-  - "[[MOC - MegaContext]]"
-  - "[[POC Scope]]"
-  - "[[Implementation Roadmap]]"
+tags:
+  - plan
+summary: Stepwise guide for delivering the MegaContext proof-of-concept milestone.
+---
+Proof-of-concept milestone covering repository readiness through demo documentation.
+
 ---
 
-- Proof-of-concept milestone covering repository readiness through demo documentation.
-
-## TL;DR
 - Phase 0 readies tooling and docs for reproducibility.
 - Phase 1 stands up the frozen runtime skeleton.
 - Phase 2 delivers minimal GistNet compression with evaluation.
 - Phase 3 integrates LensNet, focus allocator, and the end-to-end loop.
 - Phase 4 ships the demo benchmark and documentation artifacts.
 
+---
 ## Details
 
 Canonical plan for the MegaContext proof-of-concept milestone.
 
 This milestone isolates the minimum “hot path” required to demonstrate MegaContext end-to-end on a single base model. The goal is to show that hierarchical gists plus dynamic focus can keep a frozen LLM within a fixed working window while retaining task-relevant history. We aim for clarity, determinism, and reproducibility rather than exhaustive optimization.
 
+---
 ## Phase 0 — Repository Readiness
 **Goal:** Ensure contributors can reproduce the prototype quickly.
 - Task 0.1: Verify `uv` bootstrap script provisions the environment, installs dependencies, and documents canonical commands (`uv venv`, `uv run pytest`, `uv run python -m …`).
 - Task 0.2: Refresh `README.md` to reference the POC plan, describe prerequisites (Python 3.11, GPU requirements), and outline the expected proof demo.
 - Task 0.3: Confirm smoke tests for dataset tooling and base model stubs run in CI.
 
+---
 ## Phase 1 — Base Runtime Skeleton
 **Goal:** Stand up the frozen base-model runtime and data pipelines used later in the loop.
 - Task 1.1: Finalize `tools/prepare_dataset.py` and associated configs to produce deterministic 32-token blocks from a toy corpus (e.g., project docs).
@@ -40,6 +37,7 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 
 **Exit criteria:** Dataset prep works on a sample corpus, base model forwards succeed, smoke tests pass under CI.
 
+---
 ## Phase 2 — Minimal Gist Compression
 **Goal:** Train and validate a single-level (32→1) gist model sufficient to replace segments without catastrophic degradation.
 - **Design directive:** keep gist-side components tensor-first. Prefer thin Python wrappers around PyTorch modules and persist MegaContext structures as contiguous L0/L1/L2 tensors that mirror on-disk layouts instead of dense Python object graphs.
@@ -67,6 +65,7 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 
 **Exit criteria:** Gist checkpoints reproduce ΔNLL targets, deterministic tests pass, and documentation explains the compression pipeline.
 
+---
 ## Phase 3 — LensNet, Focus Allocator, and Runtime Loop
 **Goal:** Integrate MegaContext storage with dynamic focus so a streaming run respects a fixed working budget.
 - Task 3.1: Implement `src/megacontext/memory/tree.py` with ingest/update APIs for 32-token blocks, node metadata (span id, level, offsets), and persistence to `{L0,L1,L2}.ctx`; include round-trip tests.
@@ -79,6 +78,7 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 
 **Exit criteria:** End-to-end loop runs on the demo corpus, logs focus actions, maintains budget invariants, and tests cover core behavior.
 
+---
 ## Phase 4 — Proof Demo & Documentation
 **Goal:** Capture evidence that MegaContext works and explain the prototype clearly.
 - Task 4.1: Create a minimal benchmark script comparing (a) baseline LLM, (b) MegaContext-enabled run on a single synthetic task; report loss, swap rate, and latency.
@@ -87,8 +87,3 @@ This milestone isolates the minimum “hot path” required to demonstrate MegaC
 - Task 4.4: Ensure `docs/poc_results.md` captures metrics, figures, and lessons learned leading into the next milestone.
 
 **Exit criteria:** Demo artifacts prove that MegaContext can retain context beyond the working window with manageable complexity, unlocking the PAPER milestone.
-
-## Links
-- [[Home]] — project entry point.
-- [[Core Components]] — module references for implementation phases.
-- [[Runtime Loop]] — runtime flow tied to Phases 3–4.

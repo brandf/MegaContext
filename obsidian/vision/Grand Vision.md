@@ -1,19 +1,12 @@
 ---
-title: "Grand Vision"
-type: "concept"
-status: "active"
-tags: ["vision"]
-summary: "Articulates why MegaContext matters long term and the future directions it unlocks."
-links:
-  - "[[MegaPrediction]]"
-  - "[[Pruning MegaContext]]"
-  - "[[Cognitive Core]]"
-  - "[[MOC - MegaContext]]"
+tags:
+  - vision
+summary: Articulates why MegaContext matters long term and the future directions it unlocks.
+---
+MegaContext virtualizes memory to enable smaller, continually updated models; this vision note outlines why that matters and where the architecture goes next.
+
 ---
 
-- MegaContext virtualizes memory to enable smaller, continually updated models; this vision note outlines why that matters and where the architecture goes next.
-
-## TL;DR
 - **Persistent memory:** unbounded history at constant compute.
 - **Dynamic attention:** learned focus policies via [[LensNet]] + [[Focus Allocator]].
 - **Composable tooling:** shared structures power [[MegaPrediction]] and pruning.
@@ -21,10 +14,12 @@ links:
 - **Core knowledge:** treat MegaContext as an updatable system prompt.
 - **Agentic workflows:** richer coding/knowledge agents, persistent tasks.
 
+---
 ## Details
 
 MegaContext aims to virtualize sequence memory so language models can operate with effectively unbounded context at constant compute. The long-term roadmap blends technical depth with practical deployments.
 
+---
 ## Why it matters
 
 - **Persistent memory:** retains lifelong histories without overwhelming GPU budgets by swapping between gists and raw tokens.
@@ -35,27 +30,11 @@ MegaContext aims to virtualize sequence memory so language models can operate wi
 - **Agentic coding & persistent tasks:** treating context management as a first-class component enables long-lived projects without manual summarization or brittle RAG pipelines.
 - **Core knowledge as dynamic system prompt:** a curated MegaContext becomes a massive, updatable system prompt that evolves independently of model weights.
 
+---
 ## Future-facing themes
 
 - **Speculative planning:** operate in a future partition of the gist tree with latent chain-of-thought, hierarchical refinement, and LensNet-guided commits (see [[MegaPrediction]]).
-- **Adaptive pruning:** telemetry-driven strategies collapse stale spans while protecting tagged or high-utility regions (see [[Pruning MegaContext]]).
+- **Adaptive pruning:** telemetry-driven strategies collapse stale spans while protecting tagged or high-utility regions (see [[MegaCuration]]).
 - **MegaContext + agents:** agentic workflows can use the working window as a scratchpad while gists preserve context shifts over long projects.
-- **MegaPrediction-ready agents:** predicted gists and draft tokens live alongside history in the tree, separated by a movable “present” cursor so the system can iterate on future context, then commit finalized outputs back into the past timeline.
-- **MegaCuration for living knowledge:** run LensNet across large MegaContext partitions, aggregate focus telemetry per span, and iteratively prune only the lowest-signal leaves while retaining higher-level gists to build core knowledge trees tailored to real usage.
-
-## Where to explore next
-- [[plans/Paper Plan]] Phase 3 covers disk-backed storage, telemetry, and pruning hooks.
-- [[plans/Future Plan]] Track B outlines co-learning, cognitive cores, and MegaPrediction research.
-- [[plans/Future Plan]] Track C/E dive into application showcases and developer experience tooling.
-
-## Future directions
-
-- Async disk streaming of the MegaContext tree.
-- RL-trained focus allocator optimizing accuracy × latency.
-- Multi-token gists for structured data.
-- Joint training of LLM + MegaContext from scratch.
-- Shared or federated lifetime memories between agents.
-- Adaptive pruning of MegaContext memory to keep knowledge fresh and storage bounded.
-
-## Layer 3 · Change Log
-- 2025-10-22: Added metadata, layered summaries, and expanded rationale for knowledge graph hygiene.
+- **[[MegaPrediction]]-ready agents:** predicted gists and draft tokens live alongside history in the tree, separated by a movable “present” cursor so the system can iterate on future context, then commit finalized outputs back into the past timeline.
+- **[[MegaCuration]] for living knowledge:** run LensNet across large MegaContext partitions, aggregate focus telemetry per span, and iteratively prune only the lowest-signal leaves while retaining higher-level gists to build core knowledge trees tailored to real usage.

@@ -1,30 +1,26 @@
 ---
-title: "Future Plan"
-type: "plan"
-status: "backlog"
-tags: ["plan"]
-summary: "Post-paper roadmap covering platform maturation, advanced learning, applications, research extensions, and developer experience."
-links:
-  - "[[MOC - MegaContext]]"
-  - "[[Grand Vision]]"
-  - "[[plans/Paper Plan]]"
+tags:
+  - plan
+summary: Post-paper roadmap covering platform maturation, advanced learning, applications, research extensions, and developer experience.
+---
+Long-range roadmap for scaling MegaContext beyond the research paper milestone.
+
 ---
 
-- Long-range roadmap for scaling MegaContext beyond the research paper milestone.
-
-## TL;DR
 - Track A drives platform maturity and ecosystem tooling.
 - Track B pushes co-learning, speculative planning, and joint training.
 - Track C highlights application showcases across coding, knowledge, multimodal use cases.
 - Track D invests in comparative research, benchmarks, and governance.
 - Track E focuses on developer experience, visualization, and automation.
 
+---
 ## Details
 
 Canonical post-paper roadmap for MegaContext.
 
 This milestone captures post-paper ambitions: scaling MegaContext for production usage, expanding research directions, and supporting broader adoption. Items here may require substantial engineering, large-scale training, or additional publications.
 
+---
 ## Track A — Platform Maturation & Ecosystem
 - **A.1 Multi-Model Support**
   - Add portability tooling for new frozen bases (Qwen family, LLaMA 3, Mixtral variants).
@@ -38,6 +34,7 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
   - Design language-agnostic SDKs (Python, TypeScript) exposing ingestion, focus control, and provenance queries.
   - Offer hosted service templates (FastAPI/gRPC) with authentication, rate limiting, and billing hooks.
 
+---
 ## Track B — Advanced Learning & Co-Optimization
 - **B.1 EM-Style Co-Learning**
   - Continue alternating optimization cycles across gist, lens, and lightweight LoRA adapters; experiment with adaptive cycle scheduling and early stopping.
@@ -53,6 +50,7 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
   - Prototype latent CoT planners, hierarchical de-gisting, and LensNet-guided refinement loops that operate in the speculative region before committing outputs.
   - Reuse ΔNLL and RL-style objectives to score finalized continuations while tracking compute/latency costs accrued during prediction.
 
+---
 ## Track C — Application Showcases & Verticalization
 - **C.1 Coding Assistant Showcase**
   - Complete the repository-ingest pipeline, live watcher service, and coding-agent CLI.
@@ -65,6 +63,7 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
   - Explore fusing non-text signals (UI traces, diagrams) into the gist hierarchy.
   - Leverage insights from optical compression research (e.g., DeepSeek-OCR) to capture layout metadata or render-on-demand fallbacks without full rasterization pipelines.
 
+---
 ## Track D — Research Extensions
 - **D.1 Comparative Studies & Additional Papers**
   - Investigate MegaContext vs. alternative memory systems (RETRO, MEMGPT) across more domains.
@@ -76,6 +75,7 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
   - Study provenance retention, audit trails, and compliance implications of long-lived memories.
   - Propose policy and safety guidelines for organizations adopting MegaContext at scale.
 
+---
 ## Track E — Tooling & Developer Experience
 - **E.1 Visualization Enhancements**
   - Build interactive MegaContext explorers (web + terminal) with drill-down, playback, and annotation capabilities.
@@ -86,7 +86,3 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
   - Launch a docs site (mkdocs or similar) consolidating architecture guides, API references, tutorials, and research insights.
 
 These tracks are intentionally broad; teams should prioritize based on community demand, resource availability, and outcomes of the research paper milestone.
-
-## Links
-- [[Grand Vision]] — conceptual framing for speculative planning and long-term goals.
-- [[plans/Paper Plan]] — upstream milestones feeding robust storage/telemetry and benchmarking systems.

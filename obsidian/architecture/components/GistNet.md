@@ -1,19 +1,12 @@
 ---
-title: "GistNet — Local Gist Extraction"
-type: "concept"
-status: "active"
-tags: ["module"]
-summary: "32→1 hierarchical encoder that substitutes token spans with gists compatible with the base LLM."
-links:
-  - "[[MOC - Core Components]]"
-  - "[[LensNet]]"
-  - "[[Focus Allocator]]"
-  - "[[Training & Operations]]"
+tags:
+  - module
+summary: 32→1 hierarchical encoder that substitutes token spans with gists compatible with the base LLM.
 ---
-
-- GistNet compresses each 32-token span into a gist vector aligned with base embeddings, enabling reversible multi-level representations inside MegaContext.
-
 ## TL;DR
+
+GistNet compresses each 32-token span into a gist vector aligned with base embeddings, enabling reversible multi-level representations inside MegaContext.
+
 - **Purpose:** replace raw tokens with substitutable gists to free working-context budget.
 - **Architecture:** self-attention + cross-attention stack (32→1→32→1) with shared slot queries.
 - **Hierarchy:** two 32→1 layers deliver 1024× compression.
@@ -77,7 +70,7 @@ g_final = LN(MLP(g_final))
 ### Stage 5 — Hierarchical stacking
 - Two 32→1 layers are stacked hierarchically (32² = 1024 tokens per top-level gist).
 - The lower layer runs directly on token embeddings; the upper operates on lower-layer outputs.
-- This per-block stacking preserves the [[Architecture Overview#Key terms & invariants|contiguity invariant]] noted in the glossary—each gist still maps to an exact, non-overlapping span in the MegaContext history.
+- This per-block stacking preserves the [[Architecture Details#Key terms & invariants|contiguity invariant]] noted in the glossary—each gist still maps to an exact, non-overlapping span in the MegaContext history.
 
 > **Diagram needed — `assets/gist_hierarchy.png`:** Depict an L0 token block rolling up into an L1 gist and then into an L2 gist, with pointers back to the MegaContext timeline.
 

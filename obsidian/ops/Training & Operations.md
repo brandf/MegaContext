@@ -1,25 +1,19 @@
 ---
-title: "Training & Operations"
-type: "concept"
-status: "active"
-tags: ["ops"]
-summary: "Alternating optimization, instrumentation, and validation practices for GistNet, LensNet, and runtime components."
-links:
-  - "[[GistNet]]"
-  - "[[LensNet]]"
-  - "[[Focus Allocator]]"
-  - "[[Implementation Roadmap]]"
+tags:
+  - ops
+summary: Alternating optimization, instrumentation, and validation practices for GistNet, LensNet, and runtime components.
+---
+Rotate through GistNet, LensNet, and LoRA updates while collecting telemetry that keeps ΔNLL, swap rates, and latency within targets.
+
 ---
 
-- Rotate through GistNet, LensNet, and LoRA updates while collecting telemetry that keeps ΔNLL, swap rates, and latency within targets.
-
-## TL;DR
-- **Alternating phases:** B1 (GistNet), B2 (LensNet), B3 (LoRA).
+- **Alternating phases:** JT1 (GistNet), JT2 (LensNet), JT3 (LoRA).
 - **On-policy labeling:** regenerate ΔNLL utilities after each GistNet update.
 - **Telemetry:** log loss@H, swap rate, residency, latency for every block.
 - **Validation:** acceptance criteria tie to ΔNLL degradation ≤0.1 at `W_max=8k`.
 - **Tooling:** rely on `uv run pytest`, W&B logging, and artifacts directories for repeatability.
 
+---
 ## Details
 
 Guidance for alternating optimization, instrumentation, and evaluation when co-training GistNet, LensNet, and lightweight base-model adapters.
@@ -42,7 +36,7 @@ It’s not exact EM; it’s an alternating optimization schedule that stabilizes
 - **Base-LoRA** (`LoRA`) — tiny adapters on the base LLM to improve gist compatibility.
 - **Focus allocator** remains discrete and greedy (no relaxation).
 
-#### Phase B1 — Update GistNet (fix LensNet + LoRA)
+#### Phase JT1 — Update GistNet (fix LensNet + LoRA)
 **Fix:** `LensNet`, `LoRA`
 **Update:** `Gist`
 
@@ -56,7 +50,7 @@ Procedure (on-policy):
 
 **Intuition:** With the current focusing policy fixed, make gists better drop-in replacements for exactly the places the policy cares about.
 
-#### Phase B2 — Update LensNet (fix GistNet + LoRA)
+#### Phase JT2 — Update LensNet (fix GistNet + LoRA)
 **Fix:** `Gist`, `LoRA`
 **Update:** `LensNet`
 
@@ -72,7 +66,7 @@ Procedure:
 
 **Intuition:** Given the current gists, learn a better focusing policy.
 
-#### Phase B3 — Update Base-LoRA (fix GistNet + LensNet)
+#### Phase JT3 — Update Base-LoRA (fix GistNet + LensNet)
 **Fix:** `Gist`, `LensNet`
 **Update:** `LoRA` (small ranks; keep it tiny)
 
@@ -89,11 +83,11 @@ Losses:
 
 ### Schedule & hyperparameters
 
-- **Cycle length:** B1 → B2 → B3 = one cycle. Repeat 3–5 cycles.
+- **Cycle length:** JT1 → JT2 → JT3 = one cycle. Repeat 3–5 cycles.
 - **Step counts per phase (per cycle):**
-  - B1 (GistNet): 2–4k steps.
-  - B2 (LensNet): 2–4k steps.
-  - B3 (LoRA): 1–2k steps.
+  - JT1 (GistNet): 2–4k steps.
+  - JT2 (LensNet): 2–4k steps.
+  - JT3 (LoRA): 1–2k steps.
 - **Batching:** mixed long-context tasks; block size `K=32`; horizon `H=64`.
 - **Optimizers:** AdamW (bf16), cosine LR with warmup per phase.
 - **Tokens / GPU:** target ~8k effective tokens per microbatch; use grad accumulation (e.g., 2 microbatches × 4 sequences) to fit within 24 GB GPUs.
@@ -102,24 +96,24 @@ Losses:
 
 ### Data flow per cycle (pseudo)
 
-1. **B1:**
+1. **JT1:**
    - Freeze `LensNet`, `LoRA`.
    - Decode blocks with current WC (from LensNet + focus allocator).
    - Update `Gist` using on-policy substitutability losses on the replaced spans.
-2. **B2:**
+1. **JT2:**
    - Freeze `Gist`, `LoRA`.
    - From the same blocks, compute counterfactual utilities (expand/collapse candidates).
    - Update `LensNet` with signed utilities + budget/legality losses.
-3. **B3:**
+1. **JT3:**
    - Freeze `Gist`, `LensNet`.
    - Run normal blocks (LensNet + focus allocator active) and update `LoRA` on Task NLL@`H` (+ weak substitutability keep-alive).
 
 ### Stability & efficiency tips
 
-- **Warm starts:** Do a short sequential pretrain (GistNet then LensNet) before the first B1; it reduces early oscillations.
+- **Warm starts:** Do a short sequential pretrain (GistNet then LensNet) before the first JT1; it reduces early oscillations.
 - **Small LoRA ranks:** `r=4–16`, low LR; the goal is interface alignment, not knowledge injection.
-- **Hysteresis in focus allocator:** minimum residency steps prevent expand/collapse thrash during B2/B3.
-- **On-policy labeling:** Always regenerate ΔNLL labels after the last B1 so LensNet trains on current gists.
+- **Hysteresis in focus allocator:** minimum residency steps prevent expand/collapse thrash during JT2/JT3.
+- **On-policy labeling:** Always regenerate ΔNLL labels after the last JT1 so LensNet trains on current gists.
 - **Curriculum:** start with narrative/doc tasks; add lists/tables/code once stable.
 - **Telemetry:** track (a) Loss@`H` vs budget, (b) swap rate, (c) residency time, (d) non-causal C1/C2 tests.
 
@@ -147,7 +141,7 @@ Losses:
 
 ### Limitations & failure modes
 
-- **Gist drift:** substitutability degrades if GistNet overfits; monitor ΔNLL@`H` gaps and refresh ΔNLL labels after each B1 phase.
+- **Gist drift:** substitutability degrades if GistNet overfits; monitor ΔNLL@`H` gaps and refresh ΔNLL labels after each JT1 phase.
 - **Allocator oscillation:** repeated expand/collapse of the same block indicates thresholds/cooldown need adjustment; histogram residency times to catch this.
 - **Boundary artifacts:** compressed spans that straddle critical tokens (e.g., function definitions) may cause performance cliffs; add targeted tests for boundary cases.
 - **Latency spikes:** excessive counterfactual sampling or large `N_diff` values can break constant-time promises; record per-iteration latency in telemetry.
@@ -186,6 +180,3 @@ Losses:
 6. **Trace capture:** Log ΔNLL utilities, focus actions, and residency times to W&B for later analysis.
 
 Document a similar narrative under `docs/walkthroughs/` once the POC code path is live so future contributors can replay it end to end.
-
-## Layer 3 · Change Log
-- 2025-10-22: Added metadata, progressive summarization layers, and inline cross-links to module notes.

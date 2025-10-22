@@ -1,25 +1,19 @@
 ---
-title: "POC Scope & Constraints"
-type: "concept"
-status: "active"
-tags: ["ops"]
-summary: "Defines the guardrails that keep the proof-of-concept focused, reproducible, and verifiable."
-links:
-  - "[[POC Architecture]]"
-  - "[[plans/POC Plan]]"
-  - "[[MOC - Knowledge Workflow]]"
+tags:
+  - ops
+summary: Defines the guardrails that keep the proof-of-concept focused, reproducible, and verifiable.
+---
+ The POC sticks to a frozen base model, a two-level gist tree, and synchronous updates so contributors can prove end-to-end behavior quickly.
+
 ---
 
-## Summary (L0)
-- The POC sticks to a frozen base model, a two-level gist tree, and synchronous updates so contributors can prove end-to-end behavior quickly.
-
-## Highlights (L1)
 - **Frozen base:** no fine-tuning during initial loop; LoRA is follow-up work.
 - **Hierarchy:** two-level MegaContext tree suffices for moderate contexts.
 - **Update cadence:** synchronous ingest/refocus between autoregressive steps.
 - **Linkages:** informs [[plans/POC Plan]] deliverables and [[POC Architecture]] assumptions.
 
-## Deep Dive (L2)
+---
+## Details
 
 Guardrails that keep the proof-of-concept focused and verifiable while we build out the full MegaContext loop.
 

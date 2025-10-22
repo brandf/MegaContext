@@ -1,24 +1,19 @@
 ---
-title: "Comparison — MegaContext vs. RAG"
-type: "concept"
-status: "draft"
-tags: ["reference"]
-summary: "Contrasts MegaContext’s learned focus and memory substrate with retrieval-augmented generation pipelines."
-links:
-  - "[[MOC - Core Components]]"
-  - "[[Grand Vision]]"
-  - "[[Training & Operations]]"
+tags:
+  - reference
+summary: Contrasts MegaContext’s learned focus and memory substrate with retrieval-augmented generation pipelines.
+---
+MegaContext integrates compression and focus as part of the runtime, whereas RAG retrieves external text; both can coexist but optimize different contracts.
+
 ---
 
-- MegaContext integrates compression and focus as part of the runtime, whereas RAG retrieves external text; both can coexist but optimize different contracts.
-
-## TL;DR
 - **Storage:** RAG stores documents externally; MegaContext stores hierarchical gists aligned with the model.
 - **Trigger:** RAG pulls at query time; MegaContext continuously refocuses via [[LensNet]].
 - **Integration:** RAG appends text; MegaContext swaps entries inside the working context.
 - **Training:** RAG separates retriever/generator; MegaContext trains substitutability and focus jointly.
 - **Collaboration:** RAG can feed MegaContext, which then manages detail internally.
 
+---
 ## Details
 
 ### High-level comparison
@@ -72,6 +67,3 @@ MegaContext treats compression and focus as an integrated learned process rather
 **Sam:** Exactly. Use RAG or tools to find new facts, ingest them into the MegaContext tree, and let learned focus maintain a compact working set. Two layers working together rather than competing.
 
 **Jordan:** Sounds like convergence then—a pragmatic pipeline might retrieve with RAG, gist with MegaContext, and rely on LensNet to mediate detail. Understanding the division of labour helps us reuse what already works while exploring the new focus controller.
-
-## Layer 3 · Change Log
-- 2025-10-22: Added metadata, layered summaries, and inline links to focus/compression modules.
