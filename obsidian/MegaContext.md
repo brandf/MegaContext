@@ -1,4 +1,4 @@
-# MegaContext Vault Home
+# MegaContext
 
 MegaContext virtualizes long-context memory for frozen LLMs by mixing raw tokens with hierarchical gists inside a fixed working window. Use this vault to capture design notes, experiments, and planning updates that complement the codebase.
 
