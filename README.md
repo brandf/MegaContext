@@ -1,15 +1,15 @@
 # MegaContext — Learned Context Compression & Focus for Frozen LLMs
 
-*A system architecture for virtualized LLM memory. This document is the quickstart index; detailed design notes now live in the Obsidian vault.*
+*A system architecture for virtualized LLM memory.*
 
 ---
 
 ## TL;DR — MegaContext
-MegaContext is a proposed system architecture for virtualized LLM context - inspired by a graphics concept called MegaTexture by ID software.
+MegaContext virtualizes context by pairing a disk-backed gist tree called the MegaContext Tree with a budgeted working context governed by GistNet, LensNet, and the Focus Allocator.
 
-It separates a model’s context into a "MegaContext" (stored on disk) and a "working context" (on GPU). A learned GistNets model is used to build the MegaContext as a hierarchical gist tree. The working context compresses the MegaContext into a fixed-size mix of tokens and gists that is used for inference.
+It separates a model’s context into a MegaContext Tree (stored on disk) and a Working Context (on GPU). A learned GistNet model is used to build the MegaContext Tree as a hierarchy of gists. The working context compresses the MegaContext Tree into a fixed-size mix of tokens and gists that are used for inference.
 
-To dynamical adapt level of detail, a learned LensNet model, continuously/incrementally refocuses the MegaContext onto the working context, giving the model effectively infinite memory at constant compute with automatic context management.
+To dynamically adapt level of detail, a learned LensNet model, continuously/incrementally refocuses the MegaContext Tree onto the Working Context, giving the model effectively infinite memory at constant compute with automatic context management.
 
 ---
 
