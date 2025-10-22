@@ -1,15 +1,15 @@
 ---
-title: "Core Components Map"
+title: "Modules Map"
 type: "moc"
 status: "active"
-tags: ["moc"]
-summary: "Navigation hub for MegaContext runtime components and their relationships."
+tags: ["moc","modules"]
+summary: "Navigation map for MegaContext module notes under obsidian/modules/."
 links:
   - "[[GistNet]]"
   - "[[LensNet]]"
   - "[[Focus Allocator]]"
   - "[[Runtime Loop]]"
-aliases: ["Core Components"]
+aliases: ["Modules Map"]
 ---
 
 - Use this map to traverse the runtime stack: compression ([[GistNet]]), scoring ([[LensNet]]), allocation ([[Focus Allocator]]), and orchestration ([[Runtime Loop]]).
