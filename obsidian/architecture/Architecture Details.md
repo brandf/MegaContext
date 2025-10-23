@@ -40,13 +40,10 @@ The core intuition that's motivating this work is that long context is only usef
 ---
 
 ### Runtime lifecycle at a glance
-
-```
-Streaming text  ──► MegaContext Gist Tree  ──►  Focus Allocator  ──►  Working Context  ──►  Frozen Base LLM ──► Next Token Prediction
-                      ▲           | ▲              ▲                    |      ▲                                   |
-                      └─ GistNet ─┘ |              └────── LensNet ─────┘      |                                   |
-                                    └──────────────────────────────────────────┘───────── Autoregression ──────────┘
-```
+![[ArchitectureDiagram.png]]
+![[GistNetDiagram.png]]
+![[LensNet Diagram.png]]
+![[WorkingSetUpdateDiagram.png]]
 
 1. **Ingest & summarize.** Buffer incoming tokens in 32-token blocks, roll them into new or updated gist nodes, and persist the MegaContext tree (disk later, RAM for the POC).
 2. **Assemble the working context.** Lay out a contiguous-in-time sequence of tokens and gists whose combined token-equivalent cost stays within `W_max`. Every position represents exactly one interval of the MegaContext history at some level of detail.
@@ -56,8 +53,6 @@ Streaming text  ──► MegaContext Gist Tree  ──►  Focus Allocator  ─
 **Update cadence & buffering.**
 - **MegaContext maintenance:** Both user tokens and model-generated tokens are buffered until a full 32-token block (L0) or 32 L1 children are available before rebuilding the corresponding gist nodes. This keeps gist updates block-aligned and prevents churn in the hierarchy.
 - **LensNet conditioning gists:** LensNet only refreshes its conditioning set on its own schedule (e.g., every 256 working-context entries). Those gists can be read from the MegaContext tree or recomputed lazily immediately before each LensNet call; either path observes the same block-aligned buffers.
-
-> **Diagram needed — `assets/runtime_flow.png`:** Visualize the streaming loop from incoming tokens → MegaContext gist tree → focus allocator → working context → frozen LLM, with LensNet providing feedback into the allocator.
 
 ---
 

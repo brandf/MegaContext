@@ -3,6 +3,7 @@ tags:
   - module
 summary: Greedy, hysteresis-aware planner that converts LensNet utilities into legal expand/collapse actions.
 ---
+![[Focus Allocator Diagram.png]]
 The focus allocator operationalizes [[LensNet]]’s signed utilities by expanding or collapsing block-aligned spans while keeping the working context contiguous and within `W_max`.
 
 ---
