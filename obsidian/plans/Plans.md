@@ -9,11 +9,11 @@ Collects milestone plans spanning various phases of this project.
 ---
 
 - [[POC Plan]]
-    - proof-of-concept execution.
+    - Proof-of-concept execution.
     - Repository readiness, runtime skeleton, minimal compression, focus integration, demo artifacts.
 - [[Research Paper Plan]]
-    - research-grade system and publication.
+    - Research-grade system and publication.
     - Robust compression, advanced focus modeling, storage/streaming, benchmarking, paper packaging.
 - [[Future Plan]]
-    - long-horizon platform and research initiatives.
+    - Long-horizon platform and research initiatives.
     - Platform maturation, advanced learning, application showcases, research extensions, tooling & DX.
