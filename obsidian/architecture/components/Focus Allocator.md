@@ -3,9 +3,9 @@ tags:
   - module
 summary: Greedy, hysteresis-aware planner that converts LensNet utilities into legal expand/collapse actions.
 ---
-## TL;DR
-
 The focus allocator operationalizes [[LensNet]]’s signed utilities by expanding or collapsing block-aligned spans while keeping the working context contiguous and within `W_max`.
+
+---
 
 - **Block alignment:** operates on 32-token blocks and their gist parents to preserve contiguity.
 - **Greedy loop:** alternating priority queues for expands/collapses bounded by thresholds and `N_diff`.
@@ -13,6 +13,7 @@ The focus allocator operationalizes [[LensNet]]’s signed utilities by expandin
 - **Stability:** cooldowns and legality masks prevent oscillation or invalid moves.
 - **Future:** explore balanced mass matching, differentiable routers, and adaptive thresholds.
 
+---
 ## Details
 
 ### POC constraints & terminology

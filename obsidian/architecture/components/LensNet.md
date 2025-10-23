@@ -3,8 +3,6 @@ tags:
   - module
 summary: Dual cross-attention controller that scores working-context entries for expansion or collapse.
 ---
-## TL;DR
-
 LensNet reads the working context plus tail gists to emit signed utilities that tell the [[Focus Allocator]] where to zoom in or back off, keeping the window relevant at constant compute.
 
 - **Operates on:** working-context embeddings (≈8k entries) and a tail of gists.

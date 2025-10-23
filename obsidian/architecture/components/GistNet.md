@@ -3,8 +3,6 @@ tags:
   - module
 summary: 32→1 hierarchical encoder that substitutes token spans with gists compatible with the base LLM.
 ---
-## TL;DR
-
 GistNet compresses each 32-token span into a gist vector aligned with base embeddings, enabling reversible multi-level representations inside MegaContext.
 
 - **Purpose:** replace raw tokens with substitutable gists to free working-context budget.
