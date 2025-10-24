@@ -1,4 +1,4 @@
----
+[](POC%20Scope.md)[](Ops.md)---
 tags:
   - plan
 summary: Stepwise guide for delivering the MegaContext proof-of-concept milestone.

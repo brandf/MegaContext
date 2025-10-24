@@ -1,4 +1,4 @@
----
+[](Vision.md)---
 tags:
   - plan
 summary: Post-paper roadmap covering platform maturation, advanced learning, applications, research extensions, and developer experience.

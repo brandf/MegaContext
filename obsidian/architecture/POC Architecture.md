@@ -12,12 +12,12 @@ Outlines how the proof-of-concept wires modules, datasets, and storage formats s
 - **Environment:** PyTorch 2.2+, FlashAttention 2, `uv` for dependency management.
 - **Storage:** `{L0,L1,L2}.ctx` binary layout with deterministic offsets.
 - **Configs:** sample YAML showing run parameters and dataset wiring.
-- **Linked plans:** aligns with [[plans/POC Plan]] phases and [[POC Scope]] constraints.
+- **Linked plans:** aligns with [[POC Plan]] phases and [[POC Scope]] constraints.
 
 ---
 ## Details
 
-This note captures the module map, environment assumptions, and storage layout that previously lived in `README.md`. It complements the milestone targets in [[plans/POC Plan]].
+This note captures the module map, environment assumptions, and storage layout that previously lived in `README.md`. It complements the milestone targets in [[POC Plan]].
 
 ## Module responsibilities
 

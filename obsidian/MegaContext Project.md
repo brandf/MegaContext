@@ -3,9 +3,12 @@ tags:
   - moc
 summary: MegaContext is a proposed system architecture for virtualized LLM context - inspired by a graphics concept called MegaTexture by ID software.
 ---
+## MegaContext Project
+
 MegaContext is a proposed system architecture for virtualized LLM context - inspired by a graphics concept called MegaTexture by ID software.
 
 ---
+## Next Steps
 
 * [[Getting Started]]
     * start here to learn about the MegaContext project

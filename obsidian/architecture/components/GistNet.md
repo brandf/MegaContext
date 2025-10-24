@@ -1,4 +1,4 @@
----
+[](LensNet.md)---
 tags:
   - module
 summary: 32→1 hierarchical encoder that substitutes token spans with gists compatible with the base LLM.

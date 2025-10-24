@@ -26,10 +26,10 @@ The streaming runtime keeps a frozen base LLM within a fixed working window whil
 6. **Telemetry:** Swap events, ΔNLL comparisons, and latency stats are logged for analysis and future tuning.
 
 ## Demo targets
-- POC goal: `tools.run_poc_loop` streams a synthetic session, showing expansion/collapse while maintaining budget invariants ([[plans/POC Plan]]).
+- POC goal: `tools.run_poc_loop` streams a synthetic session, showing expansion/collapse while maintaining budget invariants ([[POC Plan]]).
 - Research milestone: benchmarking harnesses compare MegaContext runs against baselines and track swap rate, loss, and latency ([[Research Paper Plan]] Phase 4).
 
 ### Focus heuristics
 - **Greedy but bounded:** Hysteresis and cooldowns prevent thrashing when spans hover near the decision boundary.
 - **Multi-scale awareness:** Bundles of raw tokens plus their parent gists let the allocator choose hybrid representations.
-- **Telemetry-driven evolution:** Access counts and ΔNLL sensitivity inform pruning strategies explored in Track B/D of [[plans/Future Plan]].
+- **Telemetry-driven evolution:** Access counts and ΔNLL sensitivity inform pruning strategies explored in Track B/D of [[Future Plan]].
