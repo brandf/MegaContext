@@ -37,7 +37,8 @@ Obsidian vault lives under `obsidian/`; for the best viewing experience open in 
 
 ### Ops
 - [Training & Operations](obsidian/ops/Training%20%26%20Operations.md) — alternating optimization, telemetry, and evaluation.
-- [Implementation Roadmap](obsidian/ops/Implementation%20Roadmap.md) — sequenced build order for the stack.
+- [Ops Map](obsidian/ops/Ops.md) — navigation hub for implementation sequencing and operational checklists.
+- [Base Runtime](obsidian/ops/Base%20Runtime.md) — decode demo runbook with commands, telemetry, and maintenance notes.
 - [Performance Sketch](obsidian/ops/Performance%20Sketch.md) — compute/storage envelopes and long-term retention costs.
 
 ### Plans

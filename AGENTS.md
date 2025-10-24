@@ -2,10 +2,11 @@
 
 ## Project Structure & Module Organization
 - `README.md` is the architecture contract—always start a new chat by reading it fully.  Revise it alongside behavior changes. Documentation notes live under `obsidian/`; the entry map is `obsidian/MOC - MegaContext.md`, with folder-level MOCs in `architecture/`, `modules/`, `ops/`, `vision/`, `reference/`, and `plans/`.
-- Active workstreams are tracked in `obsidian/plans/POC Plan.md`, `obsidian/plans/Paper Plan.md`, and `obsidian/plans/Future Plan.md`; note progress and new follow-ups before hand-off.
+- Active workstreams are tracked in `obsidian/plans/POC Plan.md`, `obsidian/plans/Research Paper Plan.md`, and `obsidian/plans/Future Plan.md`; note progress and new follow-ups before hand-off.
 - Runtime code lives in `src/` (e.g., `src/focus/allocator.py`) with mirror tests in `tests/`. Keep exploratory notebooks in `research/` until they stabilize.
 - House shared diagrams under `assets/` (e.g., `assets/megacontext.png`); reference images with relative paths.
 - Store configuration schemas in `configs/` as YAML and document each field inline, preferring enums for mode switches.
+- Operational runbooks (e.g., the base runtime decode demo) belong in `obsidian/ops/`; avoid duplicating documentation under `docs/`.
 
 ## Build, Test, and Development Commands
 - `uv venv` creates the local environment; follow with `uv sync` (or `uv pip install -r requirements.txt`) to install dependencies.
@@ -29,4 +30,5 @@
 
 ## Documentation & Communication
 - Update `README.md` diagrams or references when APIs change, adding new visuals under `assets/`.
+- Treat the Obsidian vault as the source of truth for documentation; revise the corresponding note (e.g., `obsidian/ops/Base Runtime.md`) alongside behavior changes.
 - Record roadmap shifts in the relevant `obsidian/plans/*.md` note so the next agent can resume without rediscovery.
