@@ -1,4 +1,4 @@
-[](Focus%20Allocator.md)---
+---
 tags:
   - module
 summary: Dual cross-attention controller that scores working-context entries for expansion or collapse.

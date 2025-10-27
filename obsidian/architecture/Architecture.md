@@ -1,4 +1,4 @@
-[](Components.md)[](Architecture%20Details.md)---
+---
 tags:
   - moc
   - architecture

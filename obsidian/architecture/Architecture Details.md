@@ -1,4 +1,4 @@
-[](Runtime%20Loop.md)---
+---
 summary: MegaContext virtualizes context by pairing a disk-backed gist tree called the MegaContext with a budgeted working context governed by GistNet, LensNet, and the Focus Allocator.
 ---
 MegaContext virtualizes context by pairing a disk-backed gist tree called the [[MegaContext Tree]] with a budgeted working context governed by [[GistNet]], [[LensNet]], and the [[Focus Allocator]].

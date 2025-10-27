@@ -1,1 +1,1 @@
-[](LensNet.md)![[MegaContext Tree Diagram.png]]
+![[MegaContext Tree Diagram.png]]

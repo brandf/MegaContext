@@ -1,4 +1,4 @@
-[](Future%20Plan.md)[](Research%20Paper%20Plan.md)[](POC%20Plan.md)---
+---
 tags:
   - moc
   - plan

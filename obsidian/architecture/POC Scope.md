@@ -1,4 +1,4 @@
-[](POC%20Architecture.md)---
+---
 tags:
   - ops
 summary: Defines the guardrails that keep the proof-of-concept focused, reproducible, and verifiable.

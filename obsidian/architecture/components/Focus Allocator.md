@@ -1,4 +1,4 @@
-[](Working%20Context.md)---
+---
 tags:
   - module
 summary: Greedy, hysteresis-aware planner that converts LensNet utilities into legal expand/collapse actions.
