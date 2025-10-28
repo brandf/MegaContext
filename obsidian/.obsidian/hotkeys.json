@@ -1,0 +1,24 @@
+{
+  "omnisearch:show-modal": [
+    {
+      "modifiers": [
+        "Mod"
+      ],
+      "key": " "
+    }
+  ],
+  "advanced-canvas:start-presentation": [
+    {
+      "modifiers": [],
+      "key": "F5"
+    }
+  ],
+  "advanced-canvas:continue-presentation": [
+    {
+      "modifiers": [
+        "Shift"
+      ],
+      "key": "F5"
+    }
+  ]
+}

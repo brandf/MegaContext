@@ -1,0 +1,96 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Quartz dependencies
+        run: |
+          cd node_modules/@jackyzha0/quartz
+          npm install
+
+      - name: Setup Quartz content
+        run: |
+          cd node_modules/@jackyzha0/quartz
+          rm -rf content
+          ln -s ../../../obsidian content
+
+          # Verify symlink is correct
+          echo "Content symlink created:"
+          ls -la content/
+
+      - name: Update baseUrl in config
+        run: |
+          # Extract owner and repo name from GITHUB_REPOSITORY
+          REPO_OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          BASE_URL="${REPO_OWNER}.github.io/${REPO_NAME}"
+
+          echo "Detected GitHub Pages URL: https://${BASE_URL}/"
+
+          # Update baseUrl in quartz.config.ts
+          sed -i "s|yourusername\.github\.io/your-repo-name|${BASE_URL}|g" quartz.config.ts
+
+          # Verify it was updated
+          echo "Config after update:"
+          grep "baseUrl:" quartz.config.ts
+
+      - name: Copy config to Quartz
+        run: |
+          cp quartz.config.ts node_modules/@jackyzha0/quartz/quartz.config.ts
+
+          # Verify the config in Quartz location
+          echo "Quartz config baseUrl:"
+          grep "baseUrl:" node_modules/@jackyzha0/quartz/quartz.config.ts
+
+      - name: Build site
+        run: |
+          cd node_modules/@jackyzha0/quartz
+          npx quartz build
+
+      - name: Copy output
+        run: |
+          cp -r node_modules/@jackyzha0/quartz/public ./public
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

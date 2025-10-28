@@ -8,4 +8,20 @@ build/
 *.egg-info/
 data/**/*.arrow
 wandb/
-obsidian/.obsidian/
+
+# Obsidian workspace
+obsidian/.obsidian/workspace*
+obsidian/.obsidian/plugins
+obsidian/.obsidian/community-plugins.json
+obsidian/.obsidian/plugin-data/
+obsidian/.obsidian/cache/
+obsidian/🚧 Projects/*
+
+# Node modules and build artifacts
+node_modules/
+.quartz-cache/
+public/
+
+# OS files
+.DS_Store
+Thumbs.db

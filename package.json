@@ -1,0 +1,15 @@
+{
+  "name": "obsidian-quartz-site",
+  "version": "1.0.0",
+  "description": "Obsidian vault with Quartz static site generation",
+  "scripts": {
+    "build": "pwsh -File scripts/build-site.ps1",
+    "serve": "pwsh -File scripts/serve-site.ps1"
+  },
+  "keywords": ["obsidian", "quartz", "digital-garden", "static-site"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@jackyzha0/quartz": "git+https://github.com/jackyzha0/quartz.git"
+  }
+}
