@@ -3,144 +3,116 @@ tags:
   - module
 summary: 32→1 hierarchical encoder that substitutes token spans with gists compatible with the base LLM.
 ---
-![[GistNetDiagram.png]]GistNet compresses each N-token/gist block (32 in [[POC Architecture]]) into a single latent space gist aligned with base embeddings, enabling substitutable multi-level representations inside MegaContext.
+![[GistNetDiagram.png]]
 
-- **Purpose:** replace raw tokens with substitutable gists to free [[Working Context]] budget.
-- **Architecture:** self-attention + cross-attention stack (32→1→32→1) with shared slot queries.
-- **Hierarchy:** two 32→1 layers deliver 1024× compression.
-- **Training:** minimize [[ΔNLL]]@H and optional contrastive losses; see [[Training & Operations]].
-- **Interfaces:** feeds the [[MegaContext Tree]] consumed by [[LensNet]] and [[Focus Allocator]].
+GistNet compresses each N-token/gist block (32 in [[POC Implementation]]) into a single latent space gist aligned with base embeddings, enabling substitutable multi-level representations inside MegaContext.
 
-## Details
+## What is GistNet?
 
-### Overview
+GistNet is a **local encoder for token spans** that replaces short, fixed-length token sequences with compact **gist embeddings** ("gists"). Each gist preserves the meaning of its original tokens while freeing [[Working Context]] budget for new information. The key innovation is **substitutability**: gists can stand in for their original tokens inside the base LLM's context with minimal impact on predictions.
 
-GistNet replaces short, fixed-length token sequences with compact **gist embeddings** ("gists") that can stand in for their original tokens inside the base LLM's context. Each gist preserves the meaning of its 32-token span while freeing token budget for new information. Stacking two 32→1 layers provides **1024× compression** in the proof of concept ([[POC Architecture]]).
+## Purpose
 
-## Inputs & outputs
+- **Replace raw tokens** with substitutable gists to free context budget.
+- **Enable compression** of 32 tokens → 1 gist at each layer.
+- **Hierarchical stacking** provides 1024× compression (32² with two layers).
+- **Align embeddings** with the base LLM's embedding space for seamless integration.
 
-| Symbol | Shape | Meaning |
-|---------|--------|---------|
-| `E ∈ R[32, d]` | 32 raw token embeddings (no contextualization) |
-| `Q₁, Q₂ ∈ R[1, d]` | Learned slot queries for the two compression passes |
-| `g_final ∈ R[d]` | Final gist vector aligned with the base LLM embedding dim |
+## High-Level Architecture
 
-## POC architecture (32→32→1→32→32→1)
+GistNet uses a **two-stage refinement process** to compress token spans:
 
-GistNet alternates **self-attention** and **cross-attention** to gradually compress and refine each 32-token span.
+### 32→1→32→1 Refinement Pipeline
 
-### Stage 1 — Local token self-attention (32 → 32)
-- Apply 1–2 standard self-attention + MLP blocks within the 32-token window.
-- Add RoPE or sinusoidal positional encodings for local ordering.
-- Output is `E1`, a locally contextualized version of the raw embeddings.
+1. **Local self-attention (32 → 32)**
+   - Standard self-attention + MLP blocks within 32-token windows
+   - RoPE positional encodings for local ordering
+   - Produces locally contextualized embeddings `E1`
 
-### Stage 2 — Compression (32 → 1)
-- Introduce the first learned slot query `Q₁` (shared across spans).
-- Perform cross-attention where the slot reads from the tokens:
+2. **First compression (32 → 1)**
+   - Learned slot query `Q₁` (shared across spans)
+   - Cross-attention: slot reads from tokens
+   - Produces first gist `G1`
 
-```
-G1 = CrossAttn(query=Q1, key=E1, value=E1)
-G1 = G1 + MLP(LN(G1)) # residual + feedforward
-```
+3. **Expansion for refinement (1 → 32)**
+   - Cross-attention: tokens read from gist
+   - Diffuses gist information back across token space
+   - Produces refined embeddings `E2`
 
-- `G1` is the first gist embedding for this 32-token span.
+4. **Final compression (32 → 1)**
+   - Second learned slot query `Q₂`
+   - Cross-attention: slot reads from refined tokens
+   - Produces final gist `g_final`
 
-### Stage 3 — Expansion (1 → 32)
-- Expand information back into the 32-token space for refinement:
+### Hierarchical Stacking
 
-```
-E2 = CrossAttn(query=E1, key=G1, value=G1)
-E2 = E1 + MLP(LN(E2))
-```
+- Two 32→1 layers stacked hierarchically
+- Lower layer: operates on raw token embeddings
+- Upper layer: operates on lower-layer gist outputs
+- Result: 1024 tokens compressed to 1 top-level gist (32² compression)
 
-- Optionally run one self-attention block over `E2` to diffuse the gist info across tokens.
-
-### Stage 4 — Final compression (32 → 1)
-- Run a second cross-attention with the independent learned slot query `Q₂`:
-
-```
-g_final = CrossAttn(query=Q2, key=E2, value=E2)
-g_final = LN(MLP(g_final))
-```
-
-- The result `g_final` is the final gist vector for the span and becomes a node in the [[MegaContext Tree]] gist tree.
-
-### Stage 5 — Hierarchical stacking
-- Two 32→1 layers are stacked hierarchically (32² = 1024 tokens per top-level gist).
-- The lower layer runs directly on token embeddings; the upper operates on lower-layer outputs.
-- This per-block stacking preserves the [[Architecture Details#Key terms & invariants|contiguity invariant]] noted in the glossary—each gist still maps to an exact, non-overlapping span in the [[MegaContext Tree]] history.
-
-> **Diagram needed — `assets/gist_hierarchy.png`:** Depict an L0 token block rolling up into an L1 gist and then into an L2 gist, with pointers back to the [[MegaContext Tree]] timeline.
-
-## Architectural properties
+## Key Properties
 
 | Property | Description |
-|-----------|--------------|
-| **Limited scope** | Operates strictly within 32-token windows; no long-range attention. |
-| **Parameter sharing** | Shared weights across all spans; upper and lower layers may share or specialize. |
-| **Complexity** | O(32²·d) per span — negligible compared to the base LLM. |
-| **Dimensionality** | Outputs match the base model's embedding size `d`. |
-| **Positioning** | Gist inserted at the central token index for RoPE alignment. |
-| **Precision** | bf16 or fp16; supports later quantization for storage. |
+|----------|-------------|
+| **Substitutability** | Gists can replace original tokens in LLM context with minimal prediction change |
+| **Limited scope** | Operates within fixed 32-token windows; no long-range attention |
+| **Parameter sharing** | Shared weights across all spans |
+| **Aligned embeddings** | Output dimension matches base LLM embedding size |
+| **Efficient** | O(32²·d) per span — negligible compared to base LLM |
+| **Positioned** | Gist inserted at central token index for RoPE alignment |
 
-## Training objectives
+## Training
 
-### 1. Substitutability (primary)
-Train the model so that replacing a span with its gist minimally changes the base LLM's predictions ([[substitutability]]).
+GistNet is trained to ensure **substitutability**: replacing a span with its gist should minimally change the base LLM's predictions. The primary objective minimizes [[ΔNLL]]@H between original and gist-replaced contexts.
 
-For each training example:
+For complete training details, see:
+- [[GistNet Training]] — Training objectives, loss functions, curriculum, and pipeline
+- [[POC Implementation]] — Specific parameters and settings
+
+## Architecture Specifications
+
+For detailed architectural specifications, see:
+- [[GistNet Architecture Details]] — Layer counts, dimensions, attention configurations, complexity analysis
+- [[POC Implementation]] — Complete POC parameters and implementation details
+
+## Role in System
+
+GistNet forms the foundation of MegaContext's compression hierarchy:
+
+1. **Compresses tokens** into substitutable gist embeddings
+2. **Builds gist tree** in the [[MegaContext Tree]] for hierarchical storage
+3. **Feeds gists** to [[LensNet]] for tail compression scoring
+4. **Enables focus loop** by providing compressed representations to [[Focus Allocator]]
+5. **Frees context budget** for new information in [[Working Context]]
 
 ```
-Loss_subst = KL( P_base(x_{t+1:T} | E)
-|| P_base(x_{t+1:T} | E_replaced) )
+Tokens (32) → GistNet L1 → Gists (1)
+             ↓
+Gists L1 (32) → GistNet L2 → Gists L2 (1)
+                              ↓
+                    MegaContext Tree Storage
+                              ↓
+                    LensNet + Focus Allocator
 ```
 
-or equivalently minimize the [[ΔNLL]] between the full and gist-replaced context over a short horizon (H = 32–128 tokens).
+## Inputs & Outputs
 
-### 2. Contrastive span separation (optional)
-Discourage neighboring spans from collapsing to identical gists:
+| Symbol | Shape | Meaning |
+|--------|-------|---------|
+| `E ∈ R[32, d]` | 32 raw token embeddings (no contextualization) |
+| `Q₁, Q₂ ∈ R[1, d]` | Learned slot queries for two compression passes |
+| `g_final ∈ R[d]` | Final gist vector aligned with base LLM embedding dim |
 
-```
-Loss_contrast = max(0, margin - cosine_similarity(g_i_final, g_j_final))
-```
+## Related Pages
 
-for adjacent spans (margin ≈ 0.2).
-
-Total loss:
-
-```
-Loss = Loss_subst + 0.05 * Loss_contrast
-```
-
-## Implementation details (POC)
-
-| Item | Setting |
-|------|----------|
-| Window size | 32 tokens |
-| Slots | 2 shared learned queries (`Q₁`, `Q₂`) |
-| Layers per 32→1 block | 2 self + 2 cross |
-| Refinement stack | 32→1→32→1 |
-| Embedding dim | same as base LLM (e.g., 4096) |
-| Internal hidden width | 512 |
-| Attention heads | 8 |
-| RoPE | applied to token positions only (slots omit it) |
-| Activation | GELU |
-| Norm | Pre-LayerNorm |
-| Parameters | ~0.5M per layer |
-| Output | single `g_final` vector per span |
-| Runtime | <1 ms per 32-token span on GPU |
-
-Runtime figures assume a single NVIDIA L4 running bf16 inference with `HuggingFaceTB/SmolLM3-3B`; expect faster throughput on A100-class hardware.
-
-## Training pipeline (POC)
-
-1. **Dataset:** long-form text (4k–16k tokens), chunked into 32-token spans.
-2. **Teacher:** frozen base LLM used for [[ΔNLL]]@H computation.
-3. **Objective:** minimize [[ΔNLL]]@H between original and gist-replaced contexts.
-4. **Curriculum:** start with contiguous text, then include structured data (lists, code, tables).
-5. **Optimizer:** AdamW, lr = 1e-4, cosine decay, bf16 precision.
-6. **Output:** store 32→1 and 1024→1 gists in the [[MegaContext Tree]] gist tree for later use by [[LensNet]] and the [[Focus Allocator]].
-
-## Recap
-
-GistNet is a **local encoder for token spans** whose only goal is to emit [[substitutability|substitutable]] gist vectors aligned with the base model's embedding space. It uses **self- and cross-attention refinement (32→1→32→1)** to squeeze each 32-token block into a single vector without ever decoding back to tokens. Stacked hierarchically, GistNet forms the **[[MegaContext Tree]] gist tree** that supplies the tail gists consumed by [[LensNet]] and the [[Focus Allocator]] during the focus loop.
+- [[GistNet Training]] — Training objectives, loss functions, and pipeline
+- [[GistNet Architecture Details]] — Complete architectural specifications
+- [[MegaContext Tree]] — Storage structure for gist hierarchy
+- [[LensNet]] — Scores tail gists for compression decisions
+- [[Focus Allocator]] — Selects gists for working context restoration
+- [[Working Context]] — Where gists are decompressed back to tokens
+- [[ΔNLL]] — Primary training metric for substitutability
+- [[substitutability]] — Core principle guiding GistNet design
+- [[POC Implementation]] — Proof of concept parameters and settings
+- [[Training & Operations]] — Overall training strategy

@@ -12,26 +12,15 @@ summary: MegaContext is a system architecture for virtualized LLM context - insp
 
 ## What is MegaContext?
 
-MegaContext virtualizes context by pairing a disk-backed gist tree called the [[MegaContext Tree]] with a budgeted [[Working Context]] governed by [[GistNet]], [[LensNet]], and the [[Focus Allocator]].
-
-It separates a model's context into two parts:
-- [[MegaContext Tree]] (stored on disk) — the complete interaction or document history (potentially millions or billions of tokens) stored as a hierarchical gist tree
-- [[Working Context]] (on GPU) — a fixed 8k–32k token budget mixing raw tokens with learned gists drawn from the [[MegaContext Tree]]
-
-A learned [[GistNet]] model builds the [[MegaContext Tree]] as a hierarchy of compressed representations (gists). The [[Working Context]] compresses the [[MegaContext Tree]] into a fixed-size mix of tokens and gists that are used for inference.
-
-To dynamically adapt level of detail, a learned [[LensNet]] model continuously and incrementally refocuses the [[MegaContext Tree]] onto the [[Working Context]], giving the model **effectively infinite memory at constant compute** with automatic context management.
+MegaContext virtualizes context by separating it into two parts (see [[Architecture Details]] for complete explanation): the [[MegaContext Tree]] (unbounded storage on disk) holds the complete history as a hierarchical gist tree, while the [[Working Context]] (fixed GPU window of 8k–32k tokens) holds a dynamically focused mix of raw tokens and compressed gists. [[GistNet]] compresses history into the tree, [[LensNet]] scores relevance, and the [[Focus Allocator]] streams the right level of detail into the working window, giving the model **effectively infinite memory at constant compute** with automatic context management.
 
 ---
 
-## The [[MegaTexture Analogy]]
+## The MegaTexture Analogy
 
-MegaContext is inspired by **MegaTexture**, a graphics technology from id Software that virtualized texture memory:
+MegaContext is inspired by **MegaTexture**, a graphics technology from id Software that virtualized texture memory—streaming visible portions of vast textures at appropriate resolutions. MegaContext applies this same principle to language model context.
 
-- In graphics, **MegaTexture** streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.
-- **MegaContext** mirrors that idea for language: instead of mipmap tiles, it maintains embeddings at multiple levels of detail (token L0, gist L1, gist L2, …), yielding effectively unbounded context for a frozen LLM.
-
-Just as MegaTexture lets game artists have unlimited texture detail by streaming the visible portions at appropriate resolutions, MegaContext lets language models have unlimited context by focusing detailed computation only where needed.
+See [[MegaTexture Analogy]] for the complete explanation.
 
 ---
 
@@ -56,15 +45,15 @@ MegaContext aims to enable:
 
 - **MegaContext gist tree** — built incrementally as text streams in (every 32 tokens → L1 gist; every 32 L1 gists → L2 gist; etc.)
 - **[[Working Context]]** — contiguous window over the tree; total token cost is capped by `W_max`
-- **[[GistNet]]** — a lightweight network that compresses local spans (e.g., 32→1) into **gists** that act as substitutable stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full MegaContext history
-- **[[LensNet]] + [[Focus Allocator]]** — [[LensNet]] scores each working-context entry (token embedding or gist) for expansion or collapse; a block-aligned [[Focus Allocator]] applies those scores, streaming finer- or coarser-grained entries in and out while respecting contiguity and the budget
+- **[[GistNet]]** — a lightweight network that compresses local spans (e.g., 32→1) into **[[Glossary#Gist / Gist Embedding|gists]]** that act as [[Glossary#Substitutability|substitutable]] stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full MegaContext history
+- **[[LensNet]] + [[Focus Allocator]]** — [[LensNet]] scores each working-context entry (token [[Glossary#Embedding|embedding]] or gist) for [[Glossary#Expand|expansion]] or [[Glossary#Collapse|collapse]]; a block-aligned [[Focus Allocator]] applies those scores, streaming finer- or coarser-grained entries in and out while respecting contiguity and the budget
 
 ### [[Runtime Loop|Runtime Lifecycle]]
 
 1. **Ingest & summarize.** Buffer incoming tokens in 32-token blocks, roll them into new or updated gist nodes, and persist the [[MegaContext Tree]]
 2. **Assemble the [[Working Context]].** Lay out a contiguous-in-time sequence of tokens and gists whose combined token-equivalent cost stays within `W_max`
-3. **Refocus.** [[LensNet]] reads the current [[Working Context]], emits signed focus scores, and the [[Focus Allocator]] applies block-aligned expansions/collapses without breaking contiguity or budget
-4. **Decode.** The frozen [[Base Runtime|base LLM]] consumes the refreshed [[Working Context]] to predict the next token(s), feeding newly generated tokens back into step 1
+3. **Refocus.** [[LensNet]] reads the current [[Working Context]], emits signed focus scores, and the [[Focus Allocator]] applies block-aligned [[Glossary#Expand|expansions]]/[[Glossary#Collapse|collapses]] without breaking contiguity or budget
+4. **Decode.** The [[Glossary#Frozen Base Model|frozen base LLM]] consumes the refreshed [[Working Context]] to predict the next token(s), feeding newly generated tokens back into step 1
 
 ---
 
@@ -78,24 +67,51 @@ See [[POC Plan]] for the full roadmap.
 
 ## Documentation Navigation
 
-### [[Getting Started]]
+### Core Concepts
 - [[Getting Started]] — start here to learn about the MegaContext project
 - [[MegaTexture Analogy]] — the inspiration from graphics tech
 - [[How MegaContext Works]] — overview with visual diagrams
+- **[[System Properties]]** — fundamental properties and guarantees of MegaContext
+- [[Examples]] — practical examples and use cases
 - [[Glossary]] — key terms and definitions
 
 ### [[Architecture]]
 - [[Architecture]] — system design, runtime, and [[POC Scope|POC scope]]
 - [[Architecture Details]] — two-context architecture, invariants, key terms
 - [[POC Architecture]] — module responsibilities, storage layout, sample configs
+- [[Invariants]] — system invariants and constraints
+- [[Storage Format]] — persistent storage structure and serialization
 - [[Runtime Loop]] — ingest → focus → decode pipeline
 - [[POC Scope]] — guardrails for the proof-of-concept milestone
-- [[Components]] — deep dives into [[GistNet]], [[LensNet]], [[Focus Allocator]], and more
+
+### [[Components]]
+- [[Components]] — overview of all system components
+
+#### Core Components
+- [[GistNet]] — learned compression network
+- [[LensNet]] — learned focus scoring network
+- [[Focus Allocator]] — budget-aware context management
+- [[MegaContext Tree]] — hierarchical gist tree structure
+- [[Working Context]] — fixed-size attention window
+
+#### Component Details
+- [[GistNet Architecture Details]] — detailed GistNet design
+- [[GistNet Training]] — teacher-student compression training
+- [[LensNet Scoring]] — focus scoring mechanisms
+- [[LensNet Training]] — focus learning strategies
+- [[Focus Allocator Strategies]] — expansion/collapse algorithms
+- [[Tree Operations]] — tree manipulation and maintenance
+- [[Node Metadata]] — node attributes and tracking
+- [[Working Context Assembly]] — initial context construction
+- [[Working Context Refocusing]] — dynamic context adjustment
 
 ### [[Plans]] & [[Operations|Operations]]
 - [[Plans]] — milestone plans (POC, Paper, Future)
 - [[POC Plan]] — stepwise guide for delivering the proof-of-concept
+- [[POC Implementation]] — implementation details and current status
 - [[Ops]] — training cadence, workflow, performance, pruning
+- [[Alternating Optimization]] — training GistNet and LensNet together
+- [[Telemetry]] — metrics and monitoring
 - [[Base Runtime]] — operational runtime details
 
 ### [[Vision]] & Future
@@ -108,6 +124,7 @@ See [[POC Plan]] for the full roadmap.
 ### [[Reference]]
 - [[Reference]] — comparative analyses and literature
 - [[Related Work]] — prior art and research context
+- [[Comparisons]] — detailed comparisons with other approaches
 - [[MegaContext & RAG]] — comparison with RAG approaches
 
 ---

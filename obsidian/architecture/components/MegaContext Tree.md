@@ -5,14 +5,14 @@ summary: The hierarchical gist tree that stores the complete interaction history
 ---
 ![[MegaContext Tree Diagram.png]]
 
-The MegaContext Tree is the complete, append-only history of all tokens and their hierarchical gist summaries. It separates long-term memory (potentially millions or billions of tokens) from the fixed-size [[Working Context]] that the frozen base model actually sees.
+The MegaContext Tree is the complete, append-only history of all tokens and their hierarchical gist summaries. It separates long-term memory (potentially millions or billions of tokens) from the fixed-size [[Working Context]] that the base model actually sees.
 
 ---
 
 - **Purpose:** Store unbounded context history at multiple levels of detail (L0, L1, L2, …).
 - **Structure:** 32-ary tree where each parent gist compresses 32 children (tokens or lower-level gists).
-- **Storage:** Persisted as binary files (`{L0,L1,L2}.ctx`) with deterministic offsets; RAM-resident in POC, disk-backed in future.
-- **Updates:** Incremental ingest as 32-token blocks arrive; [[GistNet]] generates new gist nodes.
+- **Storage:** Persisted as binary files (`{L0,L1,L2}.ctx`) with deterministic offsets. See [[Storage Format]].
+- **Updates:** Incremental ingest as 32-token blocks arrive. See [[Tree Operations]].
 - **Interfaces:** Feeds [[Working Context]] assembly, [[LensNet]] conditioning, and [[Focus Allocator]] decisions.
 
 ---
@@ -69,110 +69,6 @@ L2 [0:1024]
 
 ---
 
-### Node Metadata
-
-Each node stores or can compute the following metadata:
-
-| Field | Type | Meaning |
-|-------|------|---------|
-| `span_id` | `uint64` | Unique identifier for this span |
-| `level` | `uint8` | 0 (L0), 1 (L1), 2 (L2), etc. |
-| `start_token` | `uint64` | Absolute position of first token in this span |
-| `end_token` | `uint64` | Absolute position of last token (exclusive) |
-| `parent_id` | `uint64` | Span ID of parent node (null for root) |
-| `child_ids` | `uint64[32]` | Span IDs of children (null for L0 leaves) |
-| `data_offset` | `uint64` | Byte offset in storage file for this node's payload |
-| `timestamp` | `uint64` | Ingestion time (optional, for temporal decay in pruning) |
-| `access_count` | `uint32` | Number of times this span was in working context (telemetry) |
-| `gist_version` | `uint16` | Which GistNet checkpoint generated this gist (for versioning) |
-
-**Storage strategy:**
-- Lightweight metadata (IDs, offsets, pointers) lives in RAM as an in-memory index
-- Heavy payloads (token IDs, gist embeddings) live in binary `.ctx` files
-- Because block sizes are fixed, offsets can be computed deterministically without external indexes
-
----
-
-### Ingest & Update APIs
-
-#### Ingesting New Tokens
-
-The tree grows incrementally as tokens arrive:
-
-1. **Buffer tokens:** Accumulate incoming tokens until a complete 32-token L0 block is ready
-2. **Store L0 block:** Append token IDs to `L0.ctx` and create metadata entries
-3. **Generate L1 gist:** When 32 L0 blocks complete, run [[GistNet]] to produce an L1 gist; append to `L1.ctx`
-4. **Propagate upward:** When 32 L1 gists complete, generate an L2 gist; continue recursively
-5. **Update index:** Add new nodes to the in-memory tree index with parent/child pointers
-
-**Pseudocode:**
-```python
-def ingest_tokens(tree, tokens):
-    tree.l0_buffer.extend(tokens)
-
-    while len(tree.l0_buffer) >= 32:
-        block = tree.l0_buffer[:32]
-        l0_node = tree.add_l0_block(block)
-        tree.l0_buffer = tree.l0_buffer[32:]
-
-        if l0_node.parent_full():  # 32 siblings ready
-            l1_gist = gistnet.compress(l0_node.siblings())
-            l1_node = tree.add_l1_gist(l1_gist)
-
-            if l1_node.parent_full():
-                l2_gist = gistnet.compress(l1_node.siblings())
-                tree.add_l2_gist(l2_gist)
-```
-
-#### Refreshing Gists
-
-When [[GistNet]] is retrained (during alternating optimization), existing gist nodes may be updated:
-
-1. **Iterate over L1 nodes:** For each L1 node, retrieve its 32 L0 children
-2. **Recompute gist:** Run the new GistNet checkpoint to generate a fresh gist
-3. **Update in place:** Overwrite the old gist at the same offset in `L1.ctx`
-4. **Propagate upward:** Recursively refresh L2 gists whose children changed
-5. **Version tracking:** Increment `gist_version` metadata to track which checkpoint generated each gist
-
-**Important:** Gist refreshing is optional during the POC. The system can operate with gists frozen to a single GistNet checkpoint. Refreshing becomes important during joint training phases (see [[Training & Operations]]).
-
----
-
-### Storage Format
-
-The MegaContext Tree persists to disk as three binary files with deterministic layout:
-
-#### Binary Layout (`{L0,L1,L2}.ctx`)
-
-Each file begins with a 64-byte header (see [[POC Architecture#Binary storage layout]]):
-
-```
-Offset  Field            Type      Meaning
-------  -----            ----      -------
-0       magic            uint32    0x4D434354 ("MCCT")
-4       version          uint16    Format revision (start at 1)
-6       level            uint16    0 (L0), 1 (L1), or 2 (L2)
-8       block_size       uint16    K = 32
-10      embedding_dim    uint16    Base model embedding width d
-12      dtype_code       uint16    0=uint32, 1=fp16, 2=bf16
-14      model_name       char[32]  "SmolLM3-3B" etc.
-46      reserved         18 bytes  Zeroed for future use
-```
-
-**Payload layout:**
-- **L0.ctx:** Contiguous `uint32` token IDs (vocabulary indices)
-  - Offset for block `i`: `64 + i × 32 × 4` bytes
-- **L1.ctx, L2.ctx:** Contiguous `fp16` or `bf16` gist vectors
-  - Offset for gist `i`: `64 + i × embedding_dim × 2` bytes
-
-**Benefits:**
-- **Deterministic access:** Compute any node's offset via simple arithmetic
-- **Memory-mapped I/O:** Future disk-backed versions can use `mmap` for efficient random access
-- **Portability:** Self-describing headers allow cross-platform sharing
-- **Compression-ready:** Fixed-width records can be block-compressed (zstd, etc.) in future versions
-
----
-
 ### Block Alignment & Contiguity Invariants
 
 The MegaContext Tree enforces strict **block alignment** to maintain the [[Glossary#Contiguity Invariant]]:
@@ -221,27 +117,26 @@ The MegaContext Tree is the **foundational data structure** that enables everyth
 
 ---
 
-### POC Implementation Notes
+## Related Pages
 
-In the proof-of-concept:
-- **RAM-resident:** Tree index and all payloads live in RAM (no disk I/O yet)
-- **Two levels:** L0 tokens + L1 gists + single L2 root (sufficient for moderate contexts)
-- **Synchronous updates:** Gist generation happens inline during ingest (no background workers)
-- **Fixed GistNet:** Gists frozen to initial checkpoint (no retraining during demo runs)
+### Implementation Details
+- **[[Storage Format]]** - Binary file layouts, deterministic offsets, memory-mapped I/O strategies
+- **[[Tree Operations]]** - Ingest APIs, token buffering, gist generation, and refresh operations
+- **[[Node Metadata]]** - Complete metadata schema for tree nodes (span IDs, offsets, versioning)
+- **[[POC Implementation]]** - RAM-resident tree, synchronous updates, fixed GistNet checkpoint
 
-See [[POC Scope]] for detailed constraints and [[POC Architecture]] for module interfaces.
+### Integration Points
+- **[[Working Context]]** - How the tree feeds the fixed-size attention window
+- **[[GistNet]]** - Neural network that generates hierarchical gist compressions
+- **[[LensNet]]** - Conditions on tail gists from the tree for focus scoring
+- **[[Focus Allocator]]** - Navigates the tree to select spans and LOD levels
+- **[[Runtime Loop]]** - Orchestrates tree updates during inference
 
----
-
-### Future Enhancements
-
-Post-POC improvements include:
-- **Disk-backed storage:** Memory-mapped `.ctx` files with async streaming (see [[Research Paper Plan]] Phase 3)
-- **Deeper hierarchies:** L3, L4, … for billion-token contexts
-- **Incremental updates:** Rebuild only affected subtrees when files change (see [[Cognitive Core#Curating the core knowledge corpus]])
-- **Provenance tracking:** Attach source IDs, timestamps, retrieval scores per node (see [[MegaCuration]])
-- **Soft deletes:** Mark low-utility spans as inactive without removing them (pruning tier)
-- **Version management:** Handle multiple GistNet checkpoints coexisting in the tree
+### System Concepts
+- **[[Glossary#Gist / Gist Embedding|Gists]]** - Compressed embeddings stored at each tree level
+- **[[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|LOD Levels]]** - Hierarchical detail levels in the tree
+- **[[Glossary#Contiguity Invariant]]** - Block alignment guarantees for tree nodes
+- **[[MegaCuration]]** - Provenance tracking, pruning, and telemetry (future)
 
 ---
 

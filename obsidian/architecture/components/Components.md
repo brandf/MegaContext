@@ -11,7 +11,7 @@ summary: Navigation map for MegaContext module notes under obsidian/modules/.
 - **Compression:** [[GistNet]] → feeds [[MegaContext Tree]] hierarchy (see [[POC Architecture]]).
 - **Focus control:** [[LensNet]] ↔ [[Focus Allocator]] work in tandem each block.
 - **Runtime orchestration:** [[Runtime Loop]] consumes outputs from all components.
-- **Telemetry & tooling:** [[Training & Operations]], [[Implementation Roadmap]], [[Performance Sketch]]
+- **Telemetry & tooling:** [[Training & Operations]], [[Plans]], [[Performance Sketch]]
 
 ---
 ## Details

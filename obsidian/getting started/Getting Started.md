@@ -4,11 +4,14 @@ tags:
   - gettingstarted
 summary: Highlights structural notes covering MegaContext design, proof-of-concept interfaces, runtime loop, and scope constraints.
 ---
+
+# Getting Started
+
 The core insight that MegaContext builds on is that today's LLMs lack **Focus**.  They have attention, but not focus.
 
 Attention looks at a context all at the same level of detail, and has to determine what information to pay attention to, and which distractors to ignore.  It's very good at doing this, but as contexts get very long with many distractors, attention can start to break down, and get very expensive.
 
-Focus is a concept that is key to the [[Architecture]].  At a high level, focus takes a long context and compress that information into a smaller mixed-level-of-detail (LOD) shorter [[Working Context]].  From there, a normal transformer architecture/base model can operate as usual on the working context.
+Focus is a concept that is key to the [[Architecture]].  MegaContext achieves this by separating context into two parts (see [[Architecture Details]] for complete explanation): [[MegaContext Tree]] (unbounded storage) and [[Working Context]] (fixed GPU window). Focus takes a long context and compresses that information into a smaller mixed-level-of-detail (LOD) shorter [[Working Context]].  From there, a normal transformer architecture/base model can operate as usual on the working context.
 
 ![[Focus.png]]
 Importantly, with MegaContext is able to do this with sub-linear compute/memory scaling w.r.t. the long context size.
