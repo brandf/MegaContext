@@ -7,10 +7,10 @@ MegaContext keeps per-step compute close to a frozen LLM while amortizing storag
 
 ---
 
-- **Per-step compute:** essentially base decode cost; GistNet/LensNet overhead <1%.
-- **Working budget:** ~8k active tokens in the POC, scaling toward 32k for future builds.
+- **Per-step compute:** essentially base decode cost; [[GistNet]]/[[LensNet]] overhead <1%.
+- **Working budget:** ~8k active tokens in the [[POC Architecture]], scaling toward 32k for future builds.
 - **Storage growth:** 32-ary tree adds only ~3.2% above leaves; precision and pruning dominate footprint.
-- **Case study:** 10-year, 500 Hz robotics log compresses to ~6–14 TB with pruning + entropy coding.
+- **Case study:** 10-year, 500 Hz robotics log compresses to ~6–14 TB with pruning + entropy coding.
 - **Planning hooks:** informs cost assumptions in [[Grand Vision]] and operational budgets in [[Training & Operations]].
 
 ---
@@ -21,10 +21,10 @@ MegaContext keeps per-step compute close to a frozen LLM while amortizing storag
 | Setup | MegaContext tokens | Active tokens | KV-cache | Disk I/O / step | Notes |
 |-------|-----------------|----------------|-----------|-----------------|-------|
 | **Vanilla LLM** | 32 k | 32 k | ~2 GB | n/a | Context-limited |
-| **MegaContext (POC)** | ~1 M | 8 k | ~0.5 GB | few MB | Constant compute per step |
+| **MegaContext ([[POC Architecture]])** | ~1 M | 8 k | ~0.5 GB | few MB | Constant compute per step |
 | **MegaContext (Future)** | 1 B+ | 32 k | ~2 GB | 10–50 MB/s | Fully trained base model |
 
-Per-step compute ≈ base decode cost; gist extraction and LensNet overhead <1%.
+Per-step compute ≈ base decode cost; gist extraction and [[LensNet]] overhead <1%.
 
 ---
 
@@ -37,19 +37,19 @@ For a MegaContext-enabled system running on a single GPU (NVIDIA L4/A100-class):
 - **KV-cache:** ~512 MB GPU memory
 - **Throughput:** ~67 tokens/sec (includes autoregressive generation overhead)
 
-#### GistNet Overhead (32-token block → L1 gist)
+#### [[GistNet]] Overhead (32-token block → L1 gist)
 - **Compression time:** ~0.3 ms per block
 - **L1 generation (32 blocks → L2):** ~9.6 ms total
 - **Amortized per decode step:** ~0.3 ms (runs once per K=32 tokens)
 - **Overhead:** ~2% relative to base decode
 
-#### LensNet Overhead (8k working context entries)
+#### [[LensNet]] Overhead (8k working context entries)
 - **Scoring pass:** ~2.5 ms per update
 - **Frequency:** Once per K=32 tokens
 - **Amortized per token:** ~0.08 ms
 - **Overhead:** ~0.5% relative to base decode
 
-#### Focus Allocator
+#### [[Focus Allocator]]
 - **Priority queue operations:** <0.1 ms
 - **Negligible overhead:** priority queues are O(log N), N≈256 entries
 
@@ -68,7 +68,7 @@ Total:              15.383 ms/token (~2.5% overhead)
 
 ### Storage Analysis
 
-#### MegaContext Tree Storage
+#### [[MegaContext Tree]] Storage
 
 For a corpus of N L0 tokens stored as a 32-ary hierarchical gist tree:
 
@@ -111,21 +111,21 @@ For a production MegaContext system:
 ```
 ┌─────────────────────────────────────────────┐
 │ GPU (Active Inference)                      │
-│ - Working Context: 8k–32k tokens            │
+│ - [[Working Context]]: 8k–32k tokens        │
 │ - KV-cache: 0.5–2 GB                        │
 │ - Model weights: 6–24 GB (frozen)           │
-│ - GistNet/LensNet: 0.1–0.5 GB              │
+│ - [[GistNet]]/[[LensNet]]: 0.1–0.5 GB      │
 │ Cost: $$$ (high-speed HBM)                  │
 └─────────────────────────────────────────────┘
-            ↕ (streaming, ~10 MB/s)
+             ↕ (streaming, ~10 MB/s)
 ┌─────────────────────────────────────────────┐
 │ RAM (Hot Tree Index)                        │
 │ - Recent gist embeddings: 100 MB–1 GB       │
 │ - Node metadata index: 10–100 MB            │
-│ - Tail gist cache (for LensNet): 5 MB      │
+│ - Tail gist cache (for [[LensNet]]): 5 MB  │
 │ Cost: $$ (DDR4/5)                           │
 └─────────────────────────────────────────────┘
-            ↕ (memory-mapped I/O)
+             ↕ (memory-mapped I/O)
 ┌─────────────────────────────────────────────┐
 │ SSD (Persistent Tree Storage)              │
 │ - L0/L1/L2.ctx files: 10 GB–10 TB          │
@@ -133,7 +133,7 @@ For a production MegaContext system:
 │ - Telemetry logs: 1–10% of tree size       │
 │ Cost: $ (NVMe/SATA)                         │
 └─────────────────────────────────────────────┘
-            ↕ (cold archive)
+             ↕ (cold archive)
 ┌─────────────────────────────────────────────┐
 │ Object Storage (Long-term Archive)          │
 │ - Pruned/compressed trees: 1–10 TB          │
@@ -157,8 +157,8 @@ For a production MegaContext system:
 
 **Explanation:**
 - Base LLM: Quadratic attention O(N²) means 8× context → 64× compute
-- MegaContext: Working context stays fixed, compute stays constant ~O(W_max²)
-- Slight overhead growth: More gists → more LensNet conditioning, but still <5%
+- MegaContext: [[Working Context]] stays fixed, compute stays constant ~O(W_max²)
+- Slight overhead growth: More gists → more [[LensNet]] conditioning, but still <5%
 
 **GPU memory vs context:**
 
@@ -182,15 +182,15 @@ For a production MegaContext system:
 | **Compute** | O(N × log N) or O(N × W) | O(W_max²) constant |
 | **Memory** | O(N) linear | O(W_max) constant |
 | **Detail control** | Fixed patterns (global + local) | Learned dynamic focus |
-| **Training** | End-to-end joint | Alternating (GistNet, LensNet) |
+| **Training** | End-to-end joint | Alternating ([[GistNet]], [[LensNet]]) |
 
 **Verdict:** MegaContext trades sparse attention patterns for learned compression + focus.
 
-#### vs. Retrieval-Augmented Generation (RAG)
+#### vs. Retrieval-Augmented Generation ([[MegaContext & RAG]])
 
 | Metric | RAG (DPR + FiD) | MegaContext |
 |--------|-----------------|-------------|
-| **Query latency** | ~50–200 ms (retrieval + rerank) | ~2 ms (LensNet scoring) |
+| **Query latency** | ~50–200 ms (retrieval + rerank) | ~2 ms ([[LensNet]] scoring) |
 | **Context integration** | Concatenate retrieved chunks | Inline gist substitution |
 | **Memory format** | External vector DB | Hierarchical tree |
 | **Focus dynamics** | Query-time only | Continuous refocusing |
@@ -202,9 +202,9 @@ For a production MegaContext system:
 
 | Metric | Compressive Transformer | MegaContext |
 |--------|-------------------------|-------------|
-| **Compression** | Fixed functions (mean pool, attention) | Learned (GistNet) |
+| **Compression** | Fixed functions (mean pool, attention) | Learned ([[GistNet]]) |
 | **Hierarchy** | Two-level (active, compressed) | Multi-level (L0, L1, L2, …) |
-| **Focus control** | Static aging policy | Learned dynamic (LensNet) |
+| **Focus control** | Static aging policy | Learned dynamic ([[LensNet]]) |
 | **Substitutability** | Approximate | Trained for low ΔNLL@H |
 
 **Verdict:** MegaContext generalizes compressive transformers with learned, hierarchical, reversible focus.
@@ -250,17 +250,17 @@ See [[Realtime Scenarios]] for full details. Summary:
 - **MegaContext per user:** 10M tokens average (~1.3 GB each)
 - **Active tier (SSD):** 100 TB for 10% of users
 - **Archive tier (object storage):** 1 PB compressed
-- **Strategy:** Tier hot/warm/cold MegaContext trees based on access patterns
+- **Strategy:** Tier hot/warm/cold [[MegaContext Tree]]s based on access patterns
 
 ---
 
 ### Performance Optimization Opportunities
 
 #### Compute Optimizations
-1. **Batch LensNet scoring:** Score multiple working contexts in parallel
+1. **Batch [[LensNet]] scoring:** Score multiple working contexts in parallel
 2. **KV-cache reuse:** Preserve KV entries that don't change across refocus
 3. **Async gist generation:** Generate L1/L2 gists in background workers
-4. **Quantized GistNet:** Run GistNet in int8 for 2× speedup
+4. **Quantized [[GistNet]]:** Run [[GistNet]] in int8 for 2× speedup
 
 #### Storage Optimizations
 1. **Memory-mapped I/O:** Use `mmap` for zero-copy tree access
@@ -269,8 +269,8 @@ See [[Realtime Scenarios]] for full details. Summary:
 4. **Deduplication:** Share identical gists across users (e.g., common documentation)
 
 #### Focus Optimizations
-1. **Predictive prefetching:** LensNet hints at likely future expansions
-2. **Multi-resolution LensNet:** Coarse scoring pass first, fine scoring only where needed
+1. **Predictive prefetching:** [[LensNet]] hints at likely future expansions
+2. **Multi-resolution [[LensNet]]:** Coarse scoring pass first, fine scoring only where needed
 3. **Learned allocator:** Replace greedy with differentiable surrogate (future)
 
 ---
@@ -288,14 +288,14 @@ Per [[Research Paper Plan]] Phase 4, benchmark targets include:
 | **Mean residency** | ≥3 iterations/span | N/A | N/A |
 | **Context coverage** | 10M+ tokens | 32k–128k max | Unlimited (but stateless) |
 
-These targets guide POC development and paper evaluations.
+These targets guide [[POC Scope]] development and paper evaluations.
 
 ---
 
 ## Summary
 
 MegaContext achieves **constant-time decode** regardless of total context size by:
-1. Keeping active working context fixed at W_max (8k–32k tokens)
+1. Keeping active [[Working Context]] fixed at W_max (8k–32k tokens)
 2. Compressing inactive context into hierarchical gists (3.2% storage overhead)
 3. Dynamically refocusing detail levels based on learned relevance (<3% compute overhead)
 

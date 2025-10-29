@@ -4,9 +4,9 @@ tags:
 summary: Dual cross-attention controller that scores working-context entries for expansion or collapse.
 ---
 ![[LensNet Diagram.png]]
-LensNet reads the working context plus tail gists to emit signed utilities that tell the [[Focus Allocator]] where to zoom in or back off, keeping the window relevant at constant compute.
+LensNet reads the [[Working Context|working context]] plus tail gists to emit signed utilities that tell the [[Focus Allocator]] where to zoom in or back off, keeping the window relevant at constant compute.
 
-- **Operates on:** working-context embeddings (≈8k entries) and a tail of gists.
+- **Operates on:** [[Working Context|working-context]] embeddings (≈8k entries) and a tail of gists.
 - **Outputs:** signed focus scores per entry; positive to expand, negative to collapse.
 - **Architecture:** dual cross-attention blocks (`context ↔ tail gists`) followed by scalar heads.
 - **Cadence:** runs every `K` tokens (32 in POC) before allocator actions.
@@ -15,40 +15,40 @@ LensNet reads the working context plus tail gists to emit signed utilities that 
 
 ## Details
 
-LensNet acts like an optical lens that dynamically **focuses** and **defocuses** regions within the MegaContext while keeping total compute constant. It predicts where to spend detail (expand gists into raw tokens) and where to blur (collapse raw tokens into gists), ensuring the **fixed-size working context** maintains maximal relevance.
+LensNet acts like an optical lens that dynamically **focuses** and **defocuses** regions within the [[MegaContext Tree|MegaContext]] while keeping total compute constant. It predicts where to spend detail (expand gists into raw tokens) and where to blur (collapse raw tokens into gists), ensuring the **fixed-size [[Working Context|working context]]** maintains maximal relevance.
 
 ## Operating assumptions
 
-- LensNet reads the **working context**, not the MegaContext tree. It analyzes the embeddings currently fed into the base LLM — the only state resident on GPU.
+- LensNet reads the **[[Working Context|working context]]**, not the [[MegaContext Tree]]. It analyzes the embeddings currently fed into the base LLM — the only state resident on GPU.
 - It outputs one **focus score** per entry (token embedding or gist).
 - The [[Architecture Details#Key terms & invariants|contiguity invariant]] ensures each score maps to a single, non-overlapping lifetime span, so expand/collapse actions remain block-aligned.
 
 ### Why non-causal is essential
 
-LensNet must understand *future queries* to know which past facts matter. Because the base LLM is causal, hidden states for earlier tokens cannot “see” upcoming questions; LensNet compensates by operating on the full working context.
+LensNet must understand *future queries* to know which past facts matter. Because the base LLM is causal, hidden states for earlier tokens cannot "see" upcoming questions; LensNet compensates by operating on the full [[Working Context|working context]].
 
 ## Conceptual overview
 
 - LensNet runs independently of the frozen base LLM.
-- It operates directly on the **working context embeddings** (≈ 8k entries), not on live LLM hidden states.
+- It operates directly on the **[[Working Context|working context]] embeddings** (≈ 8k entries), not on live LLM hidden states.
 - It conditions on a small **gist set** (`L2 + last 5 L1` gists, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.
 - The model outputs one **signed focus score** `u_i` per entry:
   - `u_i > 0`: expand / focus (increase detail, go one level down)
   - `u_i < 0`: collapse / defocus (reduce detail, go one level up)
 
-> **Diagram needed — `assets/lensnet_focus.png`:** Show LensNet reading a tail slice of gists plus the working context, then emitting signed scores that the allocator converts into expand/collapse actions.
+> **Diagram needed — `assets/lensnet_focus.png`:** Show LensNet reading a tail slice of gists plus the [[Working Context|working context]], then emitting signed scores that the allocator converts into expand/collapse actions.
 
-At runtime, the **focus allocator** interprets these scores to expand and collapse spans while keeping the working context within its token budget.
+At runtime, the **[[Focus Allocator|focus allocator]]** interprets these scores to expand and collapse spans while keeping the [[Working Context|working context]] within its token budget.
 
 ## Architecture (POC: dual cross-attention LensNet)
 
 1. **Inputs**
-   - `context`: `torch.FloatTensor[N, d]` — embeddings of all entries in the working context (≈8 000 tokens/gists).
-   - `tail_gists`: `torch.FloatTensor[K, d]` — L2 root plus the latest `K-1` L1 gists (default `K=6`).
-   - `levels`: `torch.LongTensor[N]` — 0/1/2 markers for legality masking.
-   - `span_width`: `torch.LongTensor[N]` — number of L0 tokens represented by each entry.
-   - `distance_to_cursor`: `torch.LongTensor[N]` — block distance from the decode cursor (optional feature; treat as integer tensor).
-   - All embeddings are down-projected to a LensNet width `d_lens ≈ 512`.
+    - `context`: `torch.FloatTensor[N, d]` — embeddings of all entries in the [[Working Context|working context]] (≈8 000 tokens/gists).
+    - `tail_gists`: `torch.FloatTensor[K, d]` — L2 root plus the latest `K-1` L1 gists (default `K=6`).
+    - `levels`: `torch.LongTensor[N]` — 0/1/2 markers for legality masking.
+    - `span_width`: `torch.LongTensor[N]` — number of L0 tokens represented by each entry.
+    - `distance_to_cursor`: `torch.LongTensor[N]` — block distance from the decode cursor (optional feature; treat as integer tensor).
+    - All embeddings are down-projected to a LensNet width `d_lens ≈ 512`.
 
 2. **Stage 1 — Tail gists read the context**
 
@@ -86,7 +86,7 @@ scores = head(inputs).squeeze(-1)  # torch.FloatTensor[N]
 
 Stacking 1–3 such dual-attention blocks improves stability; parameters `(W_qg, W_kx, …)` are shared or re-initialized per block depending on capacity.
 
-**Complexity:** `O(N × K × d_lens)` per pass. With `N ≈ 8k`, `K = 6`, `d_lens = 512`, the update costs ~25 M multiply-adds—negligible relative to the base model decode.
+**Complexity:** `O(N × K × d_lens)` per pass. With `N ≈ 8k`, `K = 6`, `d_lens = 512`, the update costs ~25 M multiply-adds—negligible relative to the base model decode.
 
 ## Update cadence (block-wise refocus)
 
@@ -94,7 +94,7 @@ LensNet runs **once every K tokens** (POC: K = 32). During each block update:
 
 1. Gather the latest gists `G`.
 2. Run LensNet to produce signed scores `u_i`.
-3. The focus allocator executes expansions/collapses subject to the working-context budget.
+3. The [[Focus Allocator|focus allocator]] executes expansions/collapses subject to the [[Working Context|working-context]] budget.
 4. The updated context is frozen for the next K tokens.
 
 This matches the intended inference cadence (no per-token recompute).
@@ -116,7 +116,7 @@ L_rank = softplus(-(u_i - u_j))  # for ordered pairs
 ```
 
 ### 2️⃣ Zero-sum budget regularizer
-To maintain constant working-context size:
+To maintain constant [[Working Context|working-context]] size:
 
 ```
 P = sum_i c_i_plus * ReLU(u_i)
@@ -144,8 +144,8 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 
 ## Inference procedure
 
-1. **Mask** illegal sides (L0 can’t expand; L2 can’t collapse).
-2. **Optional rebalance:** rescale positive/negative masses to match before sending to the focus allocator.
+1. **Mask** illegal sides (L0 can't expand; L2 can't collapse).
+2. **Optional rebalance:** rescale positive/negative masses to match before sending to the [[Focus Allocator|focus allocator]].
 3. The [[Focus Allocator]] greedily applies expand/collapse actions within the token budget, honoring hysteresis rules.
 
 ## Summary of POC parameters
@@ -162,4 +162,4 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 | Runtime | < 3 ms per update @ 8 k tokens |
 | Params | ≈ 100 k – 200 k total |
 
-**In short:** LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`). It runs once per block, predicts balanced signed focus scores for every entry, and guides the [[Focus Allocator]] to keep the working context sharp, legal, and budget-neutral.
+**In short:** LensNet is a compact, non-causal controller built as a dual cross-attention network (`8k → 6 → 8k`). It runs once per block, predicts balanced signed focus scores for every entry, and guides the [[Focus Allocator]] to keep the [[Working Context|working context]] sharp, legal, and budget-neutral.

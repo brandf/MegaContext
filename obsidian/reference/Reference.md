@@ -8,10 +8,9 @@ Houses comparative analyses and literature references.
 
 ---
 
-- [[MegaContext  & RAG]]
+- [[MegaContext & RAG]]
     - contrasts runtime-integrated focus with retrieval pipelines.
     - Table and narrative roleplay covering storage, triggers, integration, training, and collaboration between approaches.
-- [[Related Work]] 
+- [[Related Work]]
     - citations informing compression, focus, and memory design.
     - Quick lookup table for MegaTexture, Perceiver, Slot Attention, Compressive Transformer, Gist tokens/LLMLingua, and other foundational references.
-

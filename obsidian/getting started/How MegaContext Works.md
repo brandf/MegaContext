@@ -39,22 +39,22 @@ MegaContext solves this by separating **long-term storage** from **active attent
 
 ### Two-Context Architecture
 
-MegaContext maintains **two separate contexts**:
+MegaContext maintains **two separate contexts** as described in [[Architecture Details]]:
 
-#### 1. MegaContext Tree (Long-term Storage)
-- **Location:** Disk (or RAM in POC)
+#### 1. [[MegaContext Tree]] (Long-term Storage)
+- **Location:** Disk (or RAM in [[POC Scope|POC]])
 - **Size:** Unbounded—can grow to millions or billions of tokens
-- **Content:** Complete interaction history stored as a hierarchical tree of gists
+- **Content:** Complete interaction history stored as a hierarchical tree of [[gist|gists]]
 - **Structure:** 32-ary tree with multiple levels of detail (L0, L1, L2, ...)
 - **Role:** The "hard drive" of memory
 
 See [[MegaContext Tree]] for details.
 
-#### 2. Working Context (Active Attention)
+#### 2. [[Working Context]] (Active Attention)
 - **Location:** GPU memory
 - **Size:** Fixed budget (W_max = 8k–32k tokens)
-- **Content:** Mixed levels of detail—raw tokens where needed, gists elsewhere
-- **Structure:** Contiguous sequence of entries drawn from the tree
+- **Content:** Mixed levels of detail—raw tokens where needed, [[gist|gists]] elsewhere
+- **Structure:** Contiguous sequence of entries drawn from the [[MegaContext Tree|tree]]
 - **Role:** The "RAM" that the base LLM actually sees
 
 See [[Working Context]] for details.
@@ -75,18 +75,18 @@ Every individual token at full detail—highest cost, highest fidelity.
 ```
 [gist: "narrative about fox movement near water"]
 ```
-32 tokens compressed into a single learned embedding by [[GistNet]]—32× compression.
+32 tokens compressed into a single learned [[embedding]] by [[GistNet]]—32× compression.
 
 ### Level 2 (L2): 32→1 Gist of Gists
 ```
 [gist: "outdoor animal scene collection"]
 ```
-32 L1 gists compressed into one L2 gist—1024× total compression.
+32 L1 [[gist|gists]] compressed into one L2 [[gist]]—1024× total compression.
 
-**Key property: Substitutability**
-- Gists are trained to be **drop-in replacements** for their tokens
-- When a gist replaces its tokens, the model's predictions barely change (low ΔNLL@H)
-- This lets the working context swap between detail levels without breaking coherence
+**Key property: [[substitutability|Substitutability]]**
+- [[gist|Gists]] are trained to be **drop-in replacements** for their tokens
+- When a [[gist]] replaces its tokens, the model's predictions barely change (low [[ΔNLL@H]])
+- This lets the [[Working Context|working context]] swap between detail levels without breaking coherence
 
 ---
 
@@ -94,22 +94,22 @@ Every individual token at full detail—highest cost, highest fidelity.
 
 ![[GistNetDiagram.png]]
 
-### 1. GistNet: The Compressor
+### 1. [[GistNet]]: The Compressor
 
-**What it does:** Learns to compress 32-token blocks into single gist embeddings
+**What it does:** Learns to compress 32-token blocks into single [[gist]] [[embedding|embeddings]]
 
 **Architecture:**
 - 32→1→32→1 refinement network
-- Self-attention + cross-attention with learned slot queries
-- Outputs live in the same embedding space as tokens
+- Self-attention + cross-attention with learned [[slot]] queries
+- Outputs live in the same [[embedding]] space as tokens
 - Tiny model (~0.5M params per layer)
 
 **Training:**
-- Minimize ΔNLL@H (prediction error after substitution)
-- Optional contrastive loss to avoid gist collapse
-- Frozen base model provides teacher signals
+- Minimize [[ΔNLL@H]] (prediction error after [[substitutability|substitution]])
+- Optional contrastive loss to avoid [[gist collapse]]
+- [[frozen base model|Frozen base model]] provides teacher signals
 
-**Result:** Hierarchical gist tree where each parent summarizes 32 children
+**Result:** Hierarchical [[gist]] tree where each parent summarizes 32 children
 
 See [[GistNet]] for architecture details.
 
@@ -117,24 +117,24 @@ See [[GistNet]] for architecture details.
 
 ![[LensNet Diagram.png]]
 
-### 2. LensNet: The Focus Controller
+### 2. [[LensNet]]: The Focus Controller
 
 **What it does:** Decides which parts of memory deserve detail vs compression
 
 **Architecture:**
-- Dual cross-attention network (working context ↔ tail gists)
+- Dual cross-attention network ([[Working Context|working context]] ↔ [[tail gists]])
 - Non-causal—can "look ahead" to understand what will matter
-- Outputs signed focus scores per working context entry:
-  - **Positive score:** Expand this to finer detail (L1→L0 or L2→L1)
-  - **Negative score:** Collapse this to coarser summary (L0→L1 or L1→L2)
+- Outputs signed [[focus score|focus scores]] per [[Working Context|working context]] entry:
+  - **Positive score:** [[expand|Expand]] this to finer detail (L1→L0 or L2→L1)
+  - **Negative score:** [[collapse|Collapse]] this to coarser summary (L0→L1 or L1→L2)
 
 **Training:**
-- Counterfactual labeling: compute ΔNLL for hypothetical expands/collapses
+- [[counterfactual labeling|Counterfactual labeling]]: compute [[ΔNLL@H|ΔNLL]] for hypothetical [[expand|expands]]/[[collapse|collapses]]
 - Budget regularizer: encourage zero-sum focus changes
 - Legality penalties: prevent impossible operations
 
 **Why non-causal?**
-Traditional LLM attention is causal (token N can't see token N+1). But to know if an old fact matters, you need to see future queries. LensNet operates on the full working context to predict relevance.
+Traditional LLM attention is causal (token N can't see token N+1). But to know if an old fact matters, you need to see future queries. [[LensNet]] operates on the full [[Working Context|working context]] to predict relevance.
 
 See [[LensNet]] for scoring details.
 
@@ -142,14 +142,14 @@ See [[LensNet]] for scoring details.
 
 ![[Focus Allocator Diagram.png]]
 
-### 3. Focus Allocator: The Action Planner
+### 3. [[Focus Allocator]]: The Action Planner
 
-**What it does:** Converts LensNet's focus scores into actual expand/collapse operations
+**What it does:** Converts [[LensNet]]'s [[focus score|focus scores]] into actual [[expand]]/[[collapse]] operations
 
-**Strategy (POC):**
+**Strategy ([[POC Scope|POC]]):**
 - Greedy algorithm with priority queues
-- Positive scores → expand queue (descending order)
-- Negative scores → collapse queue (ascending order)
+- Positive scores → [[expand]] queue (descending order)
+- Negative scores → [[collapse]] queue (ascending order)
 - Apply N_diff operations (default 4) per iteration
 - Hysteresis/cooldowns prevent ping-ponging
 
@@ -157,9 +157,9 @@ See [[LensNet]] for scoring details.
 - Maintain budget: `sum(entry_costs) ≤ W_max`
 - Preserve contiguity: no gaps or overlaps in timeline
 - Block alignment: all boundaries at 32-token multiples
-- Legality: L0 can't expand further, L2 can't collapse higher (in POC)
+- Legality: L0 can't [[expand]] further, L2 can't [[collapse]] higher (in [[POC Scope|POC]])
 
-**Result:** Working context dynamically adjusts detail level while staying within budget
+**Result:** [[Working Context]] dynamically adjusts detail level while staying within budget
 
 See [[Focus Allocator]] for algorithm details.
 
@@ -167,7 +167,7 @@ See [[Focus Allocator]] for algorithm details.
 
 ![[CompleteSystem.png]]
 
-### 4. Runtime Loop: The Orchestrator
+### 4. [[Runtime Loop]]: The Orchestrator
 
 **What it does:** Coordinates ingest → focus → decode cycle
 
@@ -175,26 +175,26 @@ See [[Focus Allocator]] for algorithm details.
 
 1. **Ingest & Summarize**
    - Buffer incoming tokens into 32-token blocks
-   - Run [[GistNet]] to create/update gist nodes
+   - Run [[GistNet]] to create/update [[gist]] nodes
    - Append to [[MegaContext Tree]] storage
 
-2. **Assemble Working Context**
-   - Select which spans from the tree to include
+2. **Assemble [[Working Context]]**
+   - Select which spans from the [[MegaContext Tree|tree]] to include
    - Choose detail level (L0/L1/L2) for each span
    - Concatenate into contiguous tensor for base model
 
 3. **Refocus**
-   - [[LensNet]] scores all working context entries
-   - [[Focus Allocator]] applies expand/collapse operations
+   - [[LensNet]] scores all [[Working Context|working context]] entries
+   - [[Focus Allocator]] applies [[expand]]/[[collapse]] operations
    - Budget invariant maintained: expansions balanced by collapses
 
 4. **Decode**
-   - Frozen base LLM sees the working context
+   - [[frozen base model|Frozen base LLM]] sees the [[Working Context|working context]]
    - Generates next token(s)
    - Feed generated tokens back to step 1
 
 5. **Telemetry**
-   - Log ΔNLL, swap rates, access counts, latency
+   - Log [[ΔNLL@H|ΔNLL]], [[swap rate|swap rates]], [[access count|access counts]], latency
    - Used for pruning decisions ([[MegaCuration]]) and training
 
 See [[Runtime Loop]] for execution flow.
@@ -275,35 +275,35 @@ Working Context (updated):
   Total: 1,800 + 90 + 20 = 1,910 tokens ✓
 ```
 
-**The magic:** Login code didn't disappear—it's still in the MegaContext Tree at L0 if needed later. It's just compressed to L1 in the working context. If the conversation returns to authentication, LensNet can re-expand it.
+**The magic:** Login code didn't disappear—it's still in the [[MegaContext Tree]] at L0 if needed later. It's just compressed to L1 in the [[Working Context|working context]]. If the conversation returns to authentication, [[LensNet]] can re-[[expand]] it.
 
 ---
 
 ## Key Properties
 
 ### 1. Constant Compute
-- Per-step cost ≈ frozen base model decode
-- GistNet overhead: <0.5%
-- LensNet overhead: <0.5%
+- Per-step cost ≈ [[frozen base model]] decode
+- [[GistNet]] overhead: <0.5%
+- [[LensNet]] overhead: <0.5%
 - Total: ~1% overhead for infinite context
 
 ### 2. Sub-linear Memory
-- MegaContext Tree: O(N) where N = total tokens
+- [[MegaContext Tree]]: O(N) where N = total tokens
 - But: compressed levels add only ~3.2% overhead (32-ary tree)
-- With pruning: can be even more compact
-- Working Context: O(W_max) = constant
+- With pruning ([[MegaCuration]]): can be even more compact
+- [[Working Context]]: O(W_max) = constant
 
 ### 3. Dynamic Focus
 - Not retrieval: continuous refocusing, not query-time search
-- Non-causal: LensNet sees full context to predict relevance
-- Reversible: compressed spans can be re-expanded if they become relevant
-- Learned: focus policy adapts to actual ΔNLL, not heuristics
+- Non-causal: [[LensNet]] sees full context to predict relevance
+- Reversible: compressed spans can be re-[[expand|expanded]] if they become relevant
+- Learned: focus policy adapts to actual [[ΔNLL@H|ΔNLL]], not heuristics
 
 ### 4. Model-Agnostic
-- Frozen base model—no fine-tuning required
-- Works with any pretrained LLM that outputs embeddings
-- GistNet & LensNet are separate, lightweight networks
-- Optional LoRA adapters for better gist integration
+- [[frozen base model|Frozen base model]]—no fine-tuning required
+- Works with any pretrained LLM that outputs [[embedding|embeddings]]
+- [[GistNet]] & [[LensNet]] are separate, lightweight networks
+- Optional [[LoRA]] adapters for better [[gist]] integration
 
 ---
 
@@ -320,12 +320,12 @@ Working Context (updated):
 ### vs. RAG (Retrieval-Augmented Generation)
 | Aspect | RAG | MegaContext |
 |--------|-----|-------------|
-| **Integration** | Append external docs | Inline gist substitution |
+| **Integration** | Append external docs | Inline [[gist]] [[substitutability|substitution]] |
 | **Focus** | Query-time retrieval | Continuous refocusing |
-| **Detail** | Text chunks (high cost) | Learned gists (low cost) |
+| **Detail** | Text chunks (high cost) | Learned [[gist|gists]] (low cost) |
 | **Memory** | Stateless | Persistent, evolving |
 
-See [[MegaContext  & RAG]] for detailed comparison.
+See [[MegaContext & RAG]] for detailed comparison.
 
 ---
 
@@ -338,26 +338,26 @@ See [[MegaContext  & RAG]] for detailed comparison.
 - **Better relevance:** Non-causal focus avoids distractors
 
 ### For Developers
-- **Any base model:** Works with frozen pretrained LLMs
+- **Any base model:** Works with [[frozen base model|frozen pretrained LLMs]]
 - **Predictable costs:** Fixed GPU budget, scaling via compression
 - **Persistent memory:** Conversations can pause/resume without state loss
 - **Telemetry-rich:** Track what the model actually attends to
 
 ### For Researchers
 - **Novel architecture:** Hierarchical learned memory, not just longer context
-- **Training opportunities:** Alternating GistNet/LensNet optimization
-- **Future directions:** Speculative planning ([[MegaPrediction]]), pruning ([[MegaCuration]]), cognitive cores
+- **Training opportunities:** Alternating [[GistNet]]/[[LensNet]] optimization (see [[Training & Operations]])
+- **Future directions:** Speculative planning ([[MegaPrediction]]), pruning ([[MegaCuration]]), [[Cognitive Core|cognitive cores]]
 
 ---
 
 ## Current Status
 
-We're implementing the **proof-of-concept (POC)** milestone:
+We're implementing the **proof-of-concept ([[POC Scope|POC]])** milestone:
 
 - ✅ Repository & tooling setup
-- ✅ Base runtime with frozen LLM
-- 🔄 GistNet training & evaluation (Phase 2 - in progress)
-- ⏳ LensNet, focus allocator, end-to-end loop (Phase 3)
+- ✅ Base runtime with [[frozen base model|frozen LLM]]
+- 🔄 [[GistNet]] training & evaluation (Phase 2 - in progress)
+- ⏳ [[LensNet]], [[Focus Allocator|focus allocator]], end-to-end [[Runtime Loop|loop]] (Phase 3)
 - ⏳ Demo & benchmarks (Phase 4)
 
 See [[POC Plan]] for full roadmap and [[POC Scope]] for constraints.
@@ -368,13 +368,13 @@ See [[POC Plan]] for full roadmap and [[POC Scope]] for constraints.
 
 ### Core Architecture
 - [[Architecture Details]] — Two-context design, invariants, key terms
-- [[MegaContext Tree]] — Hierarchical gist tree structure and storage
+- [[MegaContext Tree]] — Hierarchical [[gist]] tree structure and storage
 - [[Working Context]] — Fixed-size GPU window and refocusing
 
 ### Components
 - [[GistNet]] — 32→1 compression architecture
 - [[LensNet]] — Dynamic focus controller
-- [[Focus Allocator]] — Greedy expand/collapse planner
+- [[Focus Allocator]] — Greedy [[expand]]/[[collapse]] planner
 
 ### Operations
 - [[Runtime Loop]] — Ingest → focus → decode cycle
@@ -383,7 +383,7 @@ See [[POC Plan]] for full roadmap and [[POC Scope]] for constraints.
 
 ### Vision
 - [[Grand Vision]] — Long-term goals and research directions
-- [[MegaPrediction]] — Speculative planning in gist space
+- [[MegaPrediction]] — Speculative planning in [[gist]] space
 - [[MegaCuration]] — Learned pruning strategies
 - [[Cognitive Core]] — Reasoning models backed by MegaContext
 
@@ -395,6 +395,6 @@ MegaContext virtualizes LLM context through three key innovations:
 
 1. **Hierarchical compression** ([[GistNet]]) — Store history at multiple resolutions
 2. **Learned dynamic focus** ([[LensNet]] + [[Focus Allocator]]) — Automatically adjust detail levels
-3. **Two-context architecture** — Separate unbounded storage ([[MegaContext Tree]]) from fixed attention ([[Working Context]])
+3. **Two-context architecture** ([[Architecture Details]]) — Separate unbounded storage ([[MegaContext Tree]]) from fixed attention ([[Working Context]])
 
 The result: **effectively infinite context at constant compute**, with automatic memory management and learned relevance detection. It's not about making context windows longer—it's about making them **smarter**.

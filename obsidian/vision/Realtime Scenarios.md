@@ -31,4 +31,4 @@ summary: Estimates storage needs for a real-time MegaContext powered robot that 
 
 - A full 32-ary tree only adds ~3.2% storage over leaves when stored at the same precision (factor 32/31); precision and pruning dominate total footprint.
 - With 8-bit quantization and reasonable pruning of raw leaves (e.g., keep only salient 0.5–1%), plus straightforward entropy coding, a decade of continuous 500 Hz, 4k-dim features compresses to single-digit TBs—practical for local SSD arrays.
-- This makes a lifelong, high-bandwidth memory feasible: raw details can be recovered where preserved; elsewhere, multilevel gists maintain global context with the working context handling on-demand re-expansion.
+- This makes a lifelong, high-bandwidth memory feasible: raw details can be recovered where preserved; elsewhere, multilevel gists maintain global context with the [[Working Context]] handling on-demand re-expansion.

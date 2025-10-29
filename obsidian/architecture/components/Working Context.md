@@ -5,12 +5,12 @@ summary: The fixed-size GPU window that the frozen base LLM actually sees, assem
 ---
 ![[WorkingContext.png]]
 
-The Working Context is the **active memory** that the base LLM consumes at inference time. Unlike the unbounded [[MegaContext Tree]], the working context maintains a **fixed token budget** (W_max) by dynamically mixing raw tokens and compressed gists based on relevance.
+The Working Context is the **active memory** that the base LLM consumes at inference time. Unlike the unbounded [[MegaContext Tree]], the working context maintains a **fixed token budget** ([[Glossary#W_max (Token Budget)|W_max]]) by dynamically mixing raw tokens and compressed gists based on relevance.
 
 ---
 
 - **Purpose:** Provide the base LLM with a contiguous, budget-constrained context window.
-- **Budget:** Fixed at W_max tokens (8k–32k in POC); sum of entry costs must stay ≤ W_max.
+- **Budget:** Fixed at [[Glossary#W_max (Token Budget)|W_max]] tokens (8k–32k in [[POC Architecture|POC]]); sum of entry costs must stay ≤ [[Glossary#W_max (Token Budget)|W_max]].
 - **Content:** Mixed levels of detail—raw L0 tokens where focus is needed, L1/L2 gists elsewhere.
 - **Assembly:** Drawn from contiguous spans in the [[MegaContext Tree]], respecting temporal ordering.
 - **Dynamics:** [[LensNet]] scores entries; [[Focus Allocator]] expands/collapses to adjust detail level.
@@ -21,7 +21,7 @@ The Working Context is the **active memory** that the base LLM consumes at infer
 
 ### What is the Working Context?
 
-The Working Context is the **fixed-size attention window** that sits in GPU memory and gets fed directly into the frozen base model for inference. While the [[MegaContext Tree]] can grow unboundedly on disk (or RAM in the POC), the working context must fit within a strict token budget.
+The Working Context is the **fixed-size attention window** that sits in GPU memory and gets fed directly into the frozen base model for inference. While the [[MegaContext Tree]] can grow unboundedly on disk (or RAM in the [[POC Architecture|POC]]), the working context must fit within a strict token budget.
 
 Think of it as the **"spotlight"** that illuminates different parts of your memory at different resolutions:
 - **High resolution (L0):** Raw tokens for the most relevant parts
@@ -36,11 +36,11 @@ This spotlight is **continuously refocused** by [[LensNet]] and [[Focus Allocato
 
 #### W_max: The Token Budget
 
-The working context is governed by a **strict token budget** called W_max:
+The working context is governed by a **strict token budget** called [[Glossary#W_max (Token Budget)|W_max]]:
 
 | Parameter | POC Value | Future Targets | Meaning |
 |-----------|-----------|----------------|---------|
-| W_max | 8,192 | 16k–32k | Maximum token-equivalent cost allowed in working context |
+| [[Glossary#W_max (Token Budget)|W_max]] | 8,192 | 16k–32k | Maximum token-equivalent cost allowed in working context |
 
 **Token-equivalent costs** per entry:
 - **L0 block (32 tokens):** costs 32 tokens
@@ -75,7 +75,7 @@ Entries:
                           Total = 3,370 tokens ≤ 8,192 ✓
 ```
 
-If [[LensNet]] wants to expand one L1 gist to L0 (cost: +31 tokens), the allocator must first collapse at least one L0 block to L1 (savings: -31 tokens) to maintain the budget.
+If [[LensNet]] wants to expand one L1 gist to L0 (cost: +31 tokens), the [[Focus Allocator]] must first collapse at least one L0 block to L1 (savings: -31 tokens) to maintain the budget.
 
 ---
 
@@ -93,7 +93,7 @@ Each entry in the working context represents a **contiguous block** from the [[M
 
 #### Contiguous Tiling
 
-The working context maintains **perfect temporal contiguity**—entries tile the MegaContext history without gaps or overlaps:
+The working context maintains **perfect temporal contiguity**—entries tile the [[MegaContext Tree]] history without gaps or overlaps:
 
 ```
 Timeline: [0 ─────────────────────────────────────────────────── T]
@@ -121,9 +121,9 @@ The working context is not a separate data structure—it's a **dynamic view** i
 
 #### Assembly Process
 
-1. **Select span:** Choose which portion of the MegaContext timeline to cover (typically the most recent T tokens)
+1. **Select span:** Choose which portion of the [[MegaContext Tree]] timeline to cover (typically the most recent T tokens)
 2. **Choose LODs:** For each position in that span, decide whether to use L0 tokens, L1 gist, or L2 gist
-3. **Fetch data:** Retrieve the selected nodes from the tree's storage (`{L0,L1,L2}.ctx` files)
+3. **Fetch data:** Retrieve the selected nodes from the [[MegaContext Tree|tree]]'s storage (`{L0,L1,L2}.ctx` files)
 4. **Materialize embeddings:** Convert token IDs to embeddings (for L0) or use gist vectors directly (for L1/L2)
 5. **Concatenate:** Stack all entries into a single contiguous tensor `[N_entries, d]`
 
@@ -166,7 +166,7 @@ From the base model's perspective, the working context is **just another context
 
 1. **Dimensionality match:** Gists live in the same embedding space as tokens (dimension `d`)
 2. **RoPE compatibility:** Gists are positioned at the central token index of their span for consistent positional encoding
-3. **Substitutability:** [[GistNet]] is trained so gists produce similar hidden states to their original tokens (low ΔNLL@H)
+3. **Substitutability:** [[GistNet]] is trained so gists produce similar hidden states to their original tokens (low [[Glossary#ΔNLL@H (Perplexity Delta at Hidden Layer)|ΔNLL@H]])
 
 #### Forward Pass
 
@@ -191,12 +191,12 @@ The working context is not static—it **evolves continuously** as the conversat
 
 #### Refocus Cadence
 
-Refocusing happens **once per K tokens** (K=32 in POC):
+Refocusing happens **once per K tokens** (K=32 in [[POC Architecture|POC]]):
 
 1. **Decode K tokens:** Generate 32 new tokens using the current working context
 2. **Ingest:** Add new tokens to [[MegaContext Tree]], potentially creating new gist nodes
 3. **Score:** [[LensNet]] evaluates all working context entries and emits signed focus scores
-4. **Adjust:** [[Focus Allocator]] applies up to N_diff expand/collapse operations (default 4)
+4. **Adjust:** [[Focus Allocator]] applies up to [[Glossary#N_diff (Maximum Focus Changes per Step)|N_diff]] expand/collapse operations (default 4)
 5. **Repeat:** Use the updated working context for the next K tokens
 
 #### Example Refocus Sequence
@@ -251,14 +251,14 @@ Total token-equivalent cost never exceeds the budget.
 ```
 entry[i].end_token == entry[i+1].start_token
 ```
-No gaps or overlaps in the temporal coverage.
+No gaps or overlaps in the temporal coverage (see [[Glossary#Contiguity Invariant]]).
 
 #### 3. Block Alignment Invariant
 ```
 entry.start_token % K == 0
 entry.end_token % K == 0
 ```
-All boundaries align with K-token blocks (K=32 in POC).
+All boundaries align with K-token blocks (K=32 in [[POC Architecture|POC]]).
 
 #### 4. Level Consistency Invariant
 ```
@@ -291,12 +291,12 @@ The working context and [[MegaContext Tree]] are complementary:
 |--------|---------------------|-----------------|
 | **Storage** | Persistent (disk/RAM) | Ephemeral (GPU) |
 | **Scope** | Complete history | Recent window |
-| **Size** | Unbounded | Fixed (W_max) |
+| **Size** | Unbounded | Fixed ([[Glossary#W_max (Token Budget)|W_max]]) |
 | **Content** | All LODs stored | Selective LODs |
 | **Mutability** | Append-only | Dynamic refocus |
 | **Role** | Long-term memory | Active attention |
 
-**Analogy:** The MegaContext Tree is your brain's long-term memory (everything you've ever learned). The working context is your conscious attention right now (the small subset you're actively thinking about).
+**Analogy:** The [[MegaContext Tree]] is your brain's long-term memory (everything you've ever learned). The working context is your conscious attention right now (the small subset you're actively thinking about).
 
 ---
 
@@ -314,12 +314,12 @@ The Working Context is the **central coordination point** for all components:
 
 ### POC Implementation Notes
 
-In the proof-of-concept:
-- **Size:** W_max = 8,192 tokens (configurable via YAML)
+In the [[POC Architecture|proof-of-concept]]:
+- **Size:** [[Glossary#W_max (Token Budget)|W_max]] = 8,192 tokens (configurable via YAML)
 - **Update frequency:** Refocus every K=32 tokens
-- **Initial assembly:** Start with most recent tokens/gists from the tree
+- **Initial assembly:** Start with most recent tokens/gists from the [[MegaContext Tree|tree]]
 - **No streaming:** Entire working context resides in GPU memory (no paging yet)
-- **Simple heuristics:** Initial focus policy may use recency bias before LensNet is trained
+- **Simple heuristics:** Initial focus policy may use recency bias before [[LensNet]] is trained
 
 See [[POC Scope]] for constraints and [[POC Architecture]] for implementation details.
 
@@ -327,8 +327,8 @@ See [[POC Scope]] for constraints and [[POC Architecture]] for implementation de
 
 ### Future Enhancements
 
-Post-POC improvements:
-- **Larger budgets:** Scale to W_max = 32k–64k tokens with efficient attention (FlashAttention, ring attention)
+Post-[[POC Architecture|POC]] improvements:
+- **Larger budgets:** Scale to [[Glossary#W_max (Token Budget)|W_max]] = 32k–64k tokens with efficient attention (FlashAttention, ring attention)
 - **Streaming assembly:** Memory-map working context entries for lower GPU memory usage
 - **Multi-head contexts:** Multiple working contexts with different focus policies for diverse tasks
 - **Attention biasing:** Learn task-specific attention masks that guide the base model's focus within the working context
@@ -338,4 +338,4 @@ Post-POC improvements:
 
 ## Summary
 
-The Working Context is the **active window** that bridges MegaContext's infinite memory with the finite reality of GPU resources. By dynamically blending raw tokens (high detail) and hierarchical gists (compressed summaries) within a strict budget, it gives the frozen base model effectively infinite context while keeping per-step compute constant. Every K tokens, [[LensNet]] re-evaluates relevance and the [[Focus Allocator]] adjusts the spotlight—ensuring the most important information always appears at the right level of detail. The working context is not merely a view into the [[MegaContext Tree]]—it's the **lens** through which the model perceives its unbounded memory.
+The Working Context is the **active window** that bridges [[MegaContext Tree|MegaContext]]'s infinite memory with the finite reality of GPU resources. By dynamically blending raw tokens (high detail) and hierarchical gists (compressed summaries) within a strict budget, it gives the frozen base model effectively infinite context while keeping per-step compute constant. Every K tokens, [[LensNet]] re-evaluates relevance and the [[Focus Allocator]] adjusts the spotlight—ensuring the most important information always appears at the right level of detail. The working context is not merely a view into the [[MegaContext Tree]]—it's the **lens** through which the model perceives its unbounded memory.

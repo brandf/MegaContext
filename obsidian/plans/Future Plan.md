@@ -38,16 +38,16 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
 ## Track B — Advanced Learning & Co-Optimization
 - **B.1 EM-Style Co-Learning**
   - Continue alternating optimization cycles across gist, lens, and lightweight LoRA adapters; experiment with adaptive cycle scheduling and early stopping.
-  - Extend to >8 B base models when compute becomes available; explore distributed training strategies.
-- **B.2 Cognitive Core & Agentic Reasoning**
-  - Train compact cognitive core transformers capable of mixed token/gist reasoning, seeded from POC/PAPER infrastructure.
+  - Extend to >8 B base models when compute becomes available; explore distributed training strategies.
+- **B.2 [[Cognitive Core]] & Agentic Reasoning**
+  - Train compact [[Cognitive Core]] transformers capable of mixed token/gist reasoning, seeded from [[POC Plan]]/PAPER infrastructure.
   - Develop agentic loops (planning, tool use) that leverage MegaContext for multi-turn tasks; integrate uncertainty estimates to trigger focus adjustments.
-- **B.3 Training LLMs from Scratch**
+- **B.3 [[Training & Operations|Training]] LLMs from Scratch**
   - Research joint training regimes where base models learn with MegaContext from the outset, potentially using synthetic long-context curricula.
   - Investigate curriculum schedules, scaling laws, and data filtering tailored to gist-aware transformers.
-- **B.4 MegaPrediction Speculative Planning**
-  - Extend the MegaContext tree with a movable present cursor separating committed history from speculative future gists and tokens.
-  - Prototype latent CoT planners, hierarchical de-gisting, and LensNet-guided refinement loops that operate in the speculative region before committing outputs.
+- **B.4 [[MegaPrediction]] Speculative Planning**
+  - Extend the [[MegaContext Tree]] with a movable present cursor separating committed history from speculative future gists and tokens.
+  - Prototype latent CoT planners, hierarchical de-gisting, and [[LensNet]]-guided refinement loops that operate in the speculative region before committing outputs.
   - Reuse ΔNLL and RL-style objectives to score finalized continuations while tracking compute/latency costs accrued during prediction.
 
 ---
@@ -57,7 +57,7 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
   - Benchmark on HumanEval, MBPP, and repo-level tasks with and without MegaContext memory.
   - Produce demos highlighting focus reallocations over large codebases.
 - **C.2 Knowledge Workflows**
-  - Build “core knowledge” MegaContexts blending documentation, specs, incident reports, and conversation logs with rich metadata.
+  - Build "core knowledge" MegaContexts blending documentation, specs, incident reports, and conversation logs with rich metadata.
   - Implement retrieval + focus hybrids for question answering, compliance auditing, or customer support.
 - **C.3 Multimodal & Layout-Rich Use Cases**
   - Explore fusing non-text signals (UI traces, diagrams) into the gist hierarchy.
@@ -67,7 +67,7 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
 ## Track D — Research Extensions
 - **D.1 Comparative Studies & Additional Papers**
   - Investigate MegaContext vs. alternative memory systems (RETRO, MEMGPT) across more domains.
-  - Publish follow-on papers focused on pruning strategies, focus allocator learning, or cognitive core performance.
+  - Publish follow-on papers focused on pruning strategies, [[Focus Allocator]] learning, or [[Cognitive Core]] performance.
 - **D.2 Community Benchmarks**
   - Curate open long-context benchmarks and leaderboards featuring MegaContext variants.
   - Provide evaluation harness integrations (Helm, LongEval) to encourage external replication.
@@ -85,4 +85,4 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
 - **E.3 Documentation Portal**
   - Launch a docs site (mkdocs or similar) consolidating architecture guides, API references, tutorials, and research insights.
 
-These tracks are intentionally broad; teams should prioritize based on community demand, resource availability, and outcomes of the research paper milestone.
+These tracks are intentionally broad; teams should prioritize based on community demand, resource availability, and outcomes of the [[Research Paper Plan|research paper]] milestone.

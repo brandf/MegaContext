@@ -10,17 +10,17 @@ Use telemetry (access, ΔNLL, query alignment) to collapse or retire low-value s
 - **Signals:** access dwell time, ΔNLL sensitivity, semantic alignment.
 - **Strategies:** level-aware shrinkage, version compaction, temporal decay.
 - **Guardrails:** soft delete tiers, event tags, audit metadata.
-- **Automation:** asynchronous jobs, LensNet-informed utility estimates, RL/bandit approaches.
+- **Automation:** asynchronous jobs, [[LensNet]]-informed utility estimates, RL/bandit approaches.
 - **Domains:** robotics, codebases, documentation each need tailored policies.
 
 ---
 ## Details
 
-Even with disk-backed storage, a mature MegaContext memory will accumulate redundant, outdated, or low-value spans. Pruning keeps the gist tree healthy without sacrificing recall.
+Even with disk-backed storage, a mature [[MegaContext Tree]] memory will accumulate redundant, outdated, or low-value spans. Pruning keeps the gist tree healthy without sacrificing recall.
 
 ### Signals to collect
 
-- **Access telemetry:** track each span’s dwell time, expansion count, and last access step. Branches that never surface in the working context become pruning candidates.
+- **Access telemetry:** track each span's dwell time, expansion count, and last access step. Branches that never surface in the [[Working Context]] become pruning candidates.
 - **ΔNLL sensitivity:** periodically replace spans (or whole subtrees) with coarser ancestors and measure ΔNLL@`H`. Low sensitivity indicates the detail can be safely collapsed or removed.
 - **Query alignment:** maintain lightweight embeddings or tags for recent tasks; spans that never semantically align with active queries can be deprioritized.
 
@@ -32,8 +32,8 @@ Even with disk-backed storage, a mature MegaContext memory will accumulate redun
 
 ### Guardrails & recovery
 
-- **Soft delete tier:** move candidates to a cold or “inactive” partition before permanent removal. If future telemetry indicates renewed interest, restore the branch.
-- **Event tagging:** allow the runtime or humans to tag spans (“bugfix”, “incident”, “reward spike”). Tagged spans bypass automated pruning.
+- **Soft delete tier:** move candidates to a cold or "inactive" partition before permanent removal. If future telemetry indicates renewed interest, restore the branch.
+- **Event tagging:** allow the [[Runtime Loop]] or humans to tag spans ("bugfix", "incident", "reward spike"). Tagged spans bypass automated pruning.
 - **Audit metadata:** retain compact descriptors (timestamp, checksum, parent ID) so pruned content remains discoverable in logs, even if embeddings are gone.
 
 ### Automation considerations

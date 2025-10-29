@@ -8,7 +8,7 @@ Research milestone advancing compression, focus modeling, storage, benchmarking,
 ---
 
 - Phase 1 expands gist compression quality and multi-domain data foundations.
-- Phase 2 upgrades LensNet focus modeling with ablations and curricula.
+- Phase 2 upgrades [[LensNet]] focus modeling with ablations and curricula.
 - Phase 3 delivers disk-backed storage, streaming, and telemetry.
 - Phase 4 runs comprehensive benchmarks, baselines, and visualizations.
 - Phase 5 packages the paper, reproducibility kit, and release artifacts.
@@ -18,7 +18,7 @@ Research milestone advancing compression, focus modeling, storage, benchmarking,
 
 Canonical plan for the research paper milestone.
 
-This milestone produces a polished, reproducible MegaContext system suitable for an academic paper. The deliverable includes rigorous evaluations against baselines, ablations, and thorough documentation, while remaining within manageable compute (<8 B frozen base models).
+This milestone produces a polished, reproducible MegaContext system suitable for an academic paper. The deliverable includes rigorous evaluations against baselines, ablations, and thorough documentation, while remaining within manageable compute (<8 B frozen base models).
 
 ---
 ## Phase 1 — Robust Gist Compression & Data Foundations
@@ -35,13 +35,13 @@ This milestone produces a polished, reproducible MegaContext system suitable for
 ---
 ## Phase 2 — Advanced LensNet & Focus Allocation
 **Goal:** Upgrade focus modeling for research-grade analyses and ablations.
-- Task 2.1: Prototype Perceiver-inspired latent slots within LensNet; compare against baseline encoders using counterfactual utility metrics.
+- Task 2.1: Prototype Perceiver-inspired latent slots within [[LensNet]]; compare against baseline encoders using counterfactual utility metrics.
 - Task 2.2: Incorporate Slot-Attention-style competition plus multi-scale expansion bundles (fine spans + coarse summaries) informed by compression bands.
 - Task 2.3: Add layout/context-type features (headings, tables, formulas) to working entries using structured-doc metadata captured during ingestion.
 - Task 2.4: Implement `tools/train_lensnet.py` with ranking + budget losses, curriculum scheduling, and evaluation scripts measuring swap rates, regret, and ΔLoss.
 - Task 2.5: Produce ablation suites toggling components (latent slots, layout features, competition, multi-scale bundles) with statistical significance reporting.
 
-**Exit criteria:** LensNet achieves reliable focus allocation improvements, with ablation evidence explaining contributions of each enhancement.
+**Exit criteria:** [[LensNet]] achieves reliable focus allocation improvements, with ablation evidence explaining contributions of each enhancement.
 
 ---
 ## Phase 3 — Storage, Streaming, and Telemetry
@@ -61,8 +61,8 @@ This milestone produces a polished, reproducible MegaContext system suitable for
 - Task 4.1: Build `tools/run_benchmarks.py` orchestrating evaluations on narrative QA (Natural Questions, TriviaQA), code reasoning (HumanEval-lite), and structured documents (Fox, OmniDocBench text).
 - Task 4.2: Implement baselines: vanilla LLM, RAG (DPR/FiD), LLMLingua-2 compression, and ablated MegaContext variants.
 - Task 4.3: Integrate metrics: Loss@H, accuracy, swap rate, latency, memory overhead, provenance fidelity.
-- Task 4.4: Extend the visualization app (Phase 4 of POC) with timeline playback, MegaContext tree exploration, and overlays for focus scores and provenance.
-- Task 4.5: Generate ablation plots and tables (gist compression bands, LensNet variants, pruning strategies) ready for paper figures.
+- Task 4.4: Extend the visualization app (Phase 4 of [[POC Plan]]) with timeline playback, [[MegaContext Tree]] exploration, and overlays for focus scores and provenance.
+- Task 4.5: Generate ablation plots and tables (gist compression bands, [[LensNet]] variants, pruning strategies) ready for paper figures.
 - Task 4.6: Store benchmark artefacts under `artifacts/evals/<date>` with metadata, commit hashes, and environment fingerprints.
 
 **Exit criteria:** Benchmark suite runs reproducibly, baselines are competitive, plots/tables meet publication quality, and visualizations illustrate the system clearly.

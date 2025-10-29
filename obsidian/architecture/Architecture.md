@@ -8,13 +8,13 @@ Highlights structural notes covering MegaContext design, proof-of-concept interf
 
 - [[Architecture Details]]
     - Two-context architecture, invariants, key terms.
-    - Explains MegaContext vs working context, core components, update cadence, and invariants.
+    - Explains [[MegaContext Tree]] vs [[Working Context]], core [[Components]], update cadence, and invariants.
 - [[POC Architecture]]
     - Module responsibilities, storage layout, sample configs.
     - Module table, environment assumptions, binary formats, run configs.
 - [[Runtime Loop]]
     - Ingest → focus → decode pipeline.
-    - Step-by-step flow (ingest, gist updates, LensNet scoring, allocator actions, decode, telemetry).
+    - Step-by-step flow (ingest, gist updates, [[LensNet]] scoring, [[Focus Allocator]] actions, decode, telemetry).
 - [[POC Scope]]
     - guardrails for the proof-of-concept milestone.
-    - Frozen base model, two-level gist tree, synchronous updates; ties directly to plan exit criteria.
+    - Frozen base model, two-level gist tree, synchronous updates; ties directly to [[POC Plan]] exit criteria.

@@ -20,12 +20,12 @@ The MegaContext Tree is the complete, append-only history of all tokens and thei
 
 ### What is the MegaContext Tree?
 
-The MegaContext Tree is a **hierarchical data structure** that stores the complete interaction or document history as a tree of gists. Unlike traditional LLM context windows that are limited to a fixed size, the MegaContext Tree can grow unboundedly while providing different levels of detail on demand.
+The MegaContext Tree is a **hierarchical data structure** that stores the complete interaction or document history as a tree of [[Glossary#Gist / Gist Embedding|gists]]. Unlike traditional LLM context windows that are limited to a fixed size, the MegaContext Tree can grow unboundedly while providing different [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|levels of detail]] on demand.
 
 Think of it like a pyramid:
-- **Base layer (L0):** Every raw token ever seen
-- **Level 1 (L1):** Each group of 32 L0 tokens compressed into a single gist
-- **Level 2 (L2):** Each group of 32 L1 gists compressed into a single gist (representing 1,024 L0 tokens)
+- **Base layer ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0]]):** Every raw token ever seen
+- **Level 1 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]]):** Each group of 32 L0 tokens compressed into a single [[Glossary#Gist / Gist Embedding|gist]]
+- **Level 2 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L2]]):** Each group of 32 L1 gists compressed into a single gist (representing 1,024 L0 tokens)
 - **Level 3+ (future):** Additional layers for even coarser summaries
 
 At any moment, the [[Working Context]] draws from this tree, selecting which parts to show as raw tokens and which as compressed gists based on [[LensNet]]'s focus scores.
