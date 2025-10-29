@@ -1,10 +1,8 @@
 ---
 tags:
-  - technical-detail
-  - scoring
+  - components
 summary: Deep dive into LensNet's focus scoring mechanism—how scores are computed, interpreted, and used to guide working context refocusing.
 ---
-
 # LensNet Scoring
 
 [[LensNet]] produces **signed focus scores** that tell the [[Focus Allocator]] where to expand (zoom in) or collapse (zoom out) within the [[Working Context]]. This document explains how these scores are computed, what they mean, and how they guide focus decisions.

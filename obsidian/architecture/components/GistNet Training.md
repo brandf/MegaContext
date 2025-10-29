@@ -1,17 +1,8 @@
 ---
 tags:
-  - training
-  - loss-functions
-  - optimization
+  - components
 summary: Complete training methodology for GistNet including loss functions, teacher-student distillation, curriculum strategies, and optimization details.
-related:
-  - "[[GistNet]]"
-  - "[[ΔNLL]]"
-  - "[[substitutability]]"
-  - "[[MegaContext Tree]]"
-  - "[[Training & Operations]]"
 ---
-
 # GistNet Training
 
 Training [[GistNet]] to produce [[substitutability|substitutable]] gist embeddings that preserve the [[LLM]] prediction quality when replacing token spans. The training process uses a frozen teacher model to minimize [[ΔNLL]]@H and optional contrastive losses to ensure distinct gist representations.

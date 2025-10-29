@@ -1,10 +1,9 @@
 ---
 tags:
   - index
-summary: MegaContext is a system architecture for virtualized LLM context - inspired by graphics tech called MegaTexture by id Software. It enables effectively infinite context at constant compute through hierarchical compression and learned dynamic focus.
+summary: A system architecture for virtualized LLM context that enables effectively infinite memory at constant compute through hierarchical compression and learned dynamic focus.
 ---
-
-# MegaContext — Learned Context Compression & Focus for Frozen LLMs
+# MegaContext
 
 *A system architecture for virtualized LLM memory.*
 

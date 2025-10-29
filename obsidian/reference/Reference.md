@@ -1,6 +1,5 @@
 ---
 tags:
-  - moc
   - reference
 summary: Navigation map for reference notes under obsidian/reference/.
 ---

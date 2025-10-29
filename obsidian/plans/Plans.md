@@ -1,8 +1,7 @@
 ---
 tags:
-  - moc
-  - plan
-summary: Navigation map for milestone plans under obsidian/plans/.
+  - plans
+summary: Navigation map for milestone plans spanning POC, research paper, and future platform development.
 ---
 Collects milestone plans spanning various phases of this project.
 

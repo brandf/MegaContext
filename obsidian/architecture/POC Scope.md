@@ -1,9 +1,9 @@
 ---
 tags:
-  - ops
+  - architecture
 summary: Defines the guardrails that keep the proof-of-concept focused, reproducible, and verifiable.
 ---
- The POC sticks to a frozen base model, a two-level gist tree, and synchronous updates so contributors can prove end-to-end behavior quickly.
+The POC sticks to a frozen base model, a two-level gist tree, and synchronous updates so contributors can prove end-to-end behavior quickly.
 
 ---
 

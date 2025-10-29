@@ -1,10 +1,8 @@
 ---
 tags:
-  - moc
-  - gettingstarted
-summary: Highlights structural notes covering MegaContext design, proof-of-concept interfaces, runtime loop, and scope constraints.
+  - getting-started
+summary: Introduction to MegaContext's core concept of Focus, which compresses long contexts into smaller mixed-level-of-detail working contexts for efficient processing.
 ---
-
 # Getting Started
 
 The core insight that MegaContext builds on is that today's LLMs lack **Focus**.  They have attention, but not focus.

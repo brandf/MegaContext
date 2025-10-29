@@ -1,6 +1,6 @@
 ---
 tags:
-  - module
+  - components
 summary: The hierarchical gist tree that stores the complete interaction history on disk, built incrementally through GistNet compression with block-aligned ingest and deterministic storage layout.
 ---
 ![[MegaContext Tree Diagram.png]]
@@ -71,7 +71,7 @@ L2 [0:1024]
 
 ### Block Alignment & Contiguity Invariants
 
-The MegaContext Tree enforces strict **block alignment** to maintain the [[Glossary#Contiguity Invariant]]:
+The MegaContext Tree enforces strict **block alignment** to maintain the [[Glossary#Contiguity Invariant|Contiguity Invariant]]:
 
 1. **Block boundaries:** All nodes start and end at multiples of K=32 tokens
 2. **No partial spans:** A node never covers 17 or 48 tokens—always exact multiples of 32
@@ -80,7 +80,7 @@ The MegaContext Tree enforces strict **block alignment** to maintain the [[Gloss
 
 **Why this matters:**
 - [[Focus Allocator]] can swap LOD levels (expand/collapse) without breaking continuity
-- [[RoPE]] positional encodings remain consistent when gists replace tokens
+- [[Glossary#RoPE (Rotary Position Embedding)|RoPE]] positional encodings remain consistent when gists replace tokens
 - [[Working Context]] assembly is simplified—just concatenate contiguous node ranges
 
 ---

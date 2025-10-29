@@ -1,6 +1,6 @@
 ---
 tags:
-  - module
+  - components
 summary: 32→1 hierarchical encoder that substitutes token spans with gists compatible with the base LLM.
 ---
 ![[GistNetDiagram.png]]

@@ -1,7 +1,7 @@
 ---
 tags:
-  - gettingstarted
-summary: MegaContext is inspire by graphics tech called MegaTexture
+  - getting-started
+summary: Explains how MegaContext is inspired by id Software's MegaTexture graphics technology that virtualized texture memory by streaming visible portions at appropriate resolutions.
 ---
 ## Analogy: MegaTexture → MegaContext
 

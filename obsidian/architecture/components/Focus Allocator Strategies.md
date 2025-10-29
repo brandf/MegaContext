@@ -1,10 +1,8 @@
 ---
 tags:
-  - algorithms
-  - strategies
+  - components
 summary: Comparison of allocation strategies for the Focus Allocator, from greedy POC to learned differentiable approaches.
 ---
-
 The [[Focus Allocator]] transforms [[LensNet]] utilities into concrete expand/collapse actions. This document compares the **greedy strategy** used in the current [[POC]] against future **learned policies** and explores trade-offs between approaches.
 
 ---

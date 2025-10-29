@@ -1,17 +1,8 @@
 ---
 tags:
-  - architecture
-  - technical-spec
-  - neural-network
+  - components
 summary: Comprehensive technical specification of GistNet's 32→1→32→1 refinement architecture with layer-by-layer breakdowns, attention mechanisms, and implementation details.
-related:
-  - "[[GistNet]]"
-  - "[[POC Architecture]]"
-  - "[[MegaContext Tree]]"
-  - "[[LensNet]]"
-  - "[[substitutability]]"
 ---
-
 # GistNet Architecture Details
 
 This document provides a comprehensive technical specification of **GistNet**, the hierarchical encoder that compresses 32-token spans into single gist embeddings aligned with the base LLM's embedding space.

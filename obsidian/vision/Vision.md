@@ -1,6 +1,5 @@
 ---
 tags:
-  - moc
   - vision
 summary: Navigation map for long-range MegaContext vision
 ---

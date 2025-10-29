@@ -1,7 +1,7 @@
 ---
 tags:
-  - plan
-summary: Stepwise guide for delivering the MegaContext proof-of-concept milestone.
+  - plans
+summary: Stepwise guide for delivering the MegaContext proof-of-concept milestone through five phases.
 ---
 Proof-of-concept milestone covering repository readiness through demo documentation.
 

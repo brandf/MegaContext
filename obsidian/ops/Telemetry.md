@@ -1,8 +1,6 @@
 ---
 tags:
   - ops
-  - telemetry
-  - monitoring
 summary: Comprehensive telemetry infrastructure for MegaContext training, runtime monitoring, and performance profiling.
 ---
 Instrumentation and telemetry system tracking compression quality, focus behavior, resource utilization, and performance metrics across [[Training & Operations]] and [[POC Plan]] phases.

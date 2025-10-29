@@ -1,7 +1,7 @@
 ---
 tags:
   - ops
-summary: Runbook for the base runtime decode demo and its expected telemetry outputs.
+summary: Runbook for the base runtime decode demo covering command execution, telemetry outputs, and expected behavior.
 ---
 Baseline decode demo for the frozen LLM runtime. Run this after provisioning assets via `uv run python tools/bootstrap_env.py`.
 

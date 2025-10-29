@@ -1,10 +1,8 @@
 ---
 tags:
   - architecture
-  - properties
 summary: Core system properties that distinguish MegaContext - constant compute, constant memory, dynamic focus, reversibility, and learned optimization.
 ---
-
 # MegaContext System Properties
 
 This document defines the fundamental properties that characterize MegaContext as a system and distinguish it from alternative approaches.

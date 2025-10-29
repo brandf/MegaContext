@@ -1,6 +1,6 @@
 ---
 tags:
-  - module
+  - components
 summary: Dual cross-attention controller that scores working-context entries for expansion or collapse.
 ---
 ![[LensNet Diagram.png]]

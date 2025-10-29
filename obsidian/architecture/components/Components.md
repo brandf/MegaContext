@@ -1,10 +1,8 @@
 ---
 tags:
-  - moc
-  - modules
-summary: Navigation map for MegaContext module notes under obsidian/modules/.
+  - components
+summary: Navigation map for MegaContext component notes under obsidian/architecture/components/.
 ---
-
 ![[ArchitectureDiagram.png]]
 ---
 

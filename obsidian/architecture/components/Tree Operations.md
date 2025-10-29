@@ -1,10 +1,8 @@
 ---
 tags:
-  - operations
-  - incremental-updates
+  - components
 summary: Complete procedures for ingesting tokens, generating gists, updating the tree structure, and refreshing gists when GistNet is retrained—the operational heart of the MegaContext Tree.
 ---
-
 Tree Operations defines the complete operational lifecycle of the [[MegaContext Tree]]: how raw tokens flow into [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0]] blocks, how [[GistNet]] compresses them into hierarchical [[Glossary#Gist / Gist Embedding|gists]], how the tree structure grows incrementally, and how gists are refreshed when [[GistNet]] is retrained during [[Training & Operations#Alternating optimization|alternating optimization]].
 
 ---

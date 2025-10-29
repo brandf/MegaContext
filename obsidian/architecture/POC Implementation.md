@@ -1,11 +1,8 @@
 ---
 tags:
-  - poc
-  - implementation
-  - technical
+  - architecture
 summary: Comprehensive POC implementation guide consolidating all parameters, configurations, constraints, and module-specific settings from across the project.
 ---
-
 # POC Implementation Guide
 
 This document consolidates ALL POC-specific implementation details, parameters, configurations, and constraints. When implementing POC components, this is the **single source of truth** for:

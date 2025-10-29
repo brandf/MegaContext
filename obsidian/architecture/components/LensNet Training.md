@@ -1,11 +1,8 @@
 ---
 tags:
-  - training
-  - loss-function
-  - optimization
+  - components
 summary: Complete training methodology for LensNet including counterfactual labeling, multi-component loss functions, data generation, and optimization procedures.
 ---
-
 # LensNet Training
 
 [[LensNet]] learns to predict signed focus scores that guide the [[Focus Allocator]] to expand or collapse regions within the [[Working Context]], maintaining relevance while keeping compute constant. Training relies on **counterfactual supervision** derived from NLL deltas and multi-objective loss functions that balance accuracy, budget constraints, and legal actions.

@@ -1,10 +1,8 @@
 ---
 tags:
-  - architecture
-  - technical
+  - components
 summary: How the Working Context dynamically refocuses over time - the continuous process of expanding and collapsing LODs based on LensNet predictions to adapt to changing relevance.
 ---
-
 # Working Context Refocusing
 
 This document explains how the [[Working Context]] **continuously adapts** its level of detail as conversations progress and relevance shifts.

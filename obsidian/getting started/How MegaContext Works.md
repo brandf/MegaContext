@@ -1,9 +1,8 @@
 ---
 tags:
-  - gettingstarted
-summary: A streamlined narrative walkthrough of how MegaContext virtualizes LLM context memory through hierarchical compression and learned dynamic focus.
+  - getting-started
+summary: A complete narrative walkthrough explaining how MegaContext virtualizes LLM context memory through hierarchical compression and learned dynamic focus.
 ---
-
 # How MegaContext Works
 
 MegaContext virtualizes sequence memory for language models—enabling effectively infinite context at constant compute. This note provides a narrative walkthrough of the complete system.

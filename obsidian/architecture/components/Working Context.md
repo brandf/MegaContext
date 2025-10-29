@@ -1,6 +1,6 @@
 ---
 tags:
-  - module
+  - components
 summary: The fixed-size GPU window that the frozen base LLM actually sees, assembled dynamically from the MegaContext Tree with mixed-LOD entries that are refocused continuously to maintain relevance within a strict token budget.
 ---
 ![[WorkingContext.png]]

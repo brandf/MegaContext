@@ -1,10 +1,8 @@
 ---
 tags:
-  - architecture
-  - technical
+  - components
 summary: How the Working Context is assembled from the MegaContext Tree - selecting spans, choosing LODs, fetching data, materializing embeddings, and concatenating into the contiguous tensor the base model sees.
 ---
-
 # Working Context Assembly
 
 This document details how the [[Working Context]] is dynamically assembled from the [[MegaContext Tree]] as a contiguous tensor that the frozen base model consumes.

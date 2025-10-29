@@ -1,15 +1,8 @@
 ---
 tags:
-  - technical
-  - data-structure
+  - components
 summary: Complete metadata schema for MegaContext Tree nodes, including field definitions, storage strategies, usage patterns, and versioning information.
-related:
-  - "[[MegaContext Tree]]"
-  - "[[Storage Format]]"
-  - "[[Working Context]]"
-  - "[[Focus Allocator]]"
 ---
-
 Node metadata is the lightweight structural information that defines each span in the [[MegaContext Tree]]. While the heavy payloads (token embeddings, [[GistNet|gist]] embeddings) live in binary `.ctx` files, metadata lives in a RAM-resident index that enables O(1) navigation, parent-child traversal, and deterministic offset computation.
 
 This document details the complete metadata schema, storage strategies, and how metadata is used throughout the system.

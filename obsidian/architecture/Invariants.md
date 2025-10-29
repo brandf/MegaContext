@@ -1,10 +1,8 @@
 ---
 tags:
   - architecture
-  - technical
 summary: System-wide invariants that MegaContext maintains across all operations, including budget constraints, contiguity requirements, block alignment, and positional encoding consistency.
 ---
-
 # MegaContext System Invariants
 
 This document defines the fundamental invariants that must hold throughout MegaContext's operation. These constraints ensure correctness, predictability, and maintain the [[substitutability]] property that allows [[gist|gists]] to replace tokens seamlessly.

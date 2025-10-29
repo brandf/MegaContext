@@ -1,10 +1,8 @@
 ---
 tags:
-  - moc
   - architecture
 summary: Highlights structural notes covering MegaContext design, proof-of-concept interfaces, runtime loop, and scope constraints.
 ---
-
 # Architecture
 
 MegaContext separates context into two parts (see [[Architecture Details]] for complete explanation): [[MegaContext Tree]] (unbounded storage) and [[Working Context]] (fixed GPU window). The tree stores complete history as hierarchical [[Glossary#Gist / Gist Embedding|gists]] on disk, while the working context holds a dynamically focused token+gist mix within a fixed budget for inference.

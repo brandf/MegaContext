@@ -1,7 +1,7 @@
 ---
 tags:
-  - plan
-summary: Milestone plan for producing a research-grade MegaContext system and publication artifacts.
+  - plans
+summary: Milestone plan for producing a research-grade MegaContext system and publication through five development phases.
 ---
 Research milestone advancing compression, focus modeling, storage, benchmarking, and publication packaging.
 
@@ -41,39 +41,4 @@ This milestone produces a polished, reproducible MegaContext system suitable for
 - Task 2.4: Implement `tools/train_lensnet.py` with ranking + budget losses, curriculum scheduling, and evaluation scripts measuring swap rates, regret, and ΔLoss.
 - Task 2.5: Produce ablation suites toggling components (latent slots, layout features, competition, multi-scale bundles) with statistical significance reporting.
 
-**Exit criteria:** [[LensNet]] achieves reliable focus allocation improvements, with ablation evidence explaining contributions of each enhancement.
-
----
-## Phase 3 — Storage, Streaming, and Telemetry
-**Goal:** Deliver a fully persistent MegaContext system with disk-backed streaming and observability.
-- Task 3.1: Extend the gist tree to support append-only disk partitions, versioning, and efficient random access (memory-mapped or chunked binary blobs).
-- Task 3.2: Implement incremental update pipelines that rebuild affected subtrees on edits without reprocessing the entire corpus.
-- Task 3.3: Capture provenance metadata (source IDs, timestamps, retrieval scores) and layout tags alongside gist nodes.
-- Task 3.4: Add telemetry hooks logging access counts, ΔNLL sensitivity, gist variance, and slot utilisation for later pruning analysis.
-- Task 3.5: Provide pruning scripts (soft delete tier) gated by utility signals and ability to restore on demand.
-- Task 3.6: Document operational guidelines (`docs/storage.md`) covering ingestion, streaming, recovery, and telemetry interpretation.
-
-**Exit criteria:** Disk-backed MegaContext runs continuously, survives restarts, streams data on demand, and records rich telemetry for research analysis.
-
----
-## Phase 4 — Benchmarking, Baselines, and Visualization
-**Goal:** Produce comprehensive evaluations, comparisons, and visual aids for the paper.
-- Task 4.1: Build `tools/run_benchmarks.py` orchestrating evaluations on narrative QA (Natural Questions, TriviaQA), code reasoning (HumanEval-lite), and structured documents (Fox, OmniDocBench text).
-- Task 4.2: Implement baselines: vanilla LLM, RAG (DPR/FiD), LLMLingua-2 compression, and ablated MegaContext variants.
-- Task 4.3: Integrate metrics: Loss@H, accuracy, swap rate, latency, memory overhead, provenance fidelity.
-- Task 4.4: Extend the visualization app (Phase 4 of [[POC Plan]]) with timeline playback, [[MegaContext Tree]] exploration, and overlays for focus scores and provenance.
-- Task 4.5: Generate ablation plots and tables (gist compression bands, [[LensNet]] variants, pruning strategies) ready for paper figures.
-- Task 4.6: Store benchmark artefacts under `artifacts/evals/<date>` with metadata, commit hashes, and environment fingerprints.
-
-**Exit criteria:** Benchmark suite runs reproducibly, baselines are competitive, plots/tables meet publication quality, and visualizations illustrate the system clearly.
-
----
-## Phase 5 — Paper Packaging & Release
-**Goal:** Assemble the research paper, reproducibility kit, and supporting documentation.
-- Task 5.1: Draft the paper (motivation, architecture, methodology, experiments, limitations) incorporating citations (Gist Tokens, LLMLingua-2, Perceiver, RAG, Slot Attention, DeepSeek-OCR insights).
-- Task 5.2: Create `docs/paper_repro.md` detailing environment setup, dataset acquisition instructions, training schedules, benchmark commands, and expected metrics.
-- Task 5.3: Bundle checkpoints (gist, lens, MegaContext storage snapshots), configs, and evaluation logs under `artifacts/paper_release/<tag>/`.
-- Task 5.4: Align `README.md` and `POC_PLAN.md` references with the paper milestone; ensure instructions distinguish prototype vs research builds.
-- Task 5.5: Run an external-style reproducibility audit (fresh clone, clean environment) and document results.
-
-**Exit criteria:** Paper draft complete with supporting artefacts, reproducibility package passes audit, and repository clearly differentiates POC vs research-grade workflows.
+**Exit criteria:** [[LensNet]] achieves reliable focus allocation improvements, with abl

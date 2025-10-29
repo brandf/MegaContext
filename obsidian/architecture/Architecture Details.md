@@ -1,7 +1,8 @@
 ---
+tags:
+  - architecture
 summary: MegaContext virtualizes context by pairing a disk-backed gist tree called the MegaContext with a budgeted working context governed by GistNet, LensNet, and the Focus Allocator.
 ---
-
 # Architecture Details: The Two-Context System
 
 MegaContext virtualizes context by pairing a disk-backed gist tree called the [[MegaContext Tree]] with a budgeted working context governed by [[GistNet]], [[LensNet]], and the [[Focus Allocator]].

@@ -1,10 +1,8 @@
 ---
 tags:
   - ops
-  - training
 summary: Alternating optimization strategy for co-training GistNet, LensNet, and LoRA adapters through EM-style phase cycling.
 ---
-
 Alternating optimization enables co-training of [[GistNet]], [[LensNet]], and base-model adapters without full end-to-end backpropagation through the discrete [[Focus Allocator]]. By cycling through phases where different components are frozen and updated, the system learns stable policies while maintaining computational efficiency.
 
 ---

@@ -1,3 +1,8 @@
+---
+tags:
+  - getting-started
+summary: A comprehensive reference defining all key terms and concepts used throughout the MegaContext system.
+---
 # Glossary
 
 A comprehensive reference of key terms used throughout the MegaContext system.

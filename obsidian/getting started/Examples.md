@@ -1,10 +1,8 @@
 ---
 tags:
-  - gettingstarted
-  - examples
-summary: Practical walkthroughs demonstrating MegaContext's dynamic focus in realistic scenarios like coding sessions, showing how the system automatically adjusts detail levels based on relevance.
+  - getting-started
+summary: Practical walkthroughs demonstrating MegaContext's dynamic focus in realistic scenarios like coding sessions with automatic detail level adjustment.
 ---
-
 # MegaContext Examples
 
 This page provides detailed walkthroughs of how MegaContext works in realistic scenarios. These examples show the [[Working Context]], [[MegaContext Tree]], [[LensNet]], and [[Focus Allocator]] working together to maintain relevant detail while compressing irrelevant context.

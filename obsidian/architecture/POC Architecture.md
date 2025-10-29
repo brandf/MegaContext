@@ -3,7 +3,6 @@ tags:
   - architecture
 summary: Defines module boundaries, environment assumptions, and storage formats for the proof-of-concept.
 ---
-
 Outlines how the proof-of-concept wires modules, datasets, and storage formats so the [[Runtime Loop]] can execute with minimal assumptions.
 
 ---

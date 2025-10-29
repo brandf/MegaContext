@@ -1,8 +1,7 @@
 ---
 tags:
-  - moc
   - ops
-summary: Navigation map for operational notes under obsidian/ops/.
+summary: Navigation map for operational notes covering training loops, execution checklists, performance envelopes, and documentation workflow.
 ---
 Covers training loops, execution checklists, performance envelopes, pruning strategy, and documentation workflow.
 

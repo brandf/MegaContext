@@ -1,6 +1,6 @@
 ---
 tags:
-  - module
+  - components
 summary: Greedy, hysteresis-aware planner that converts LensNet utilities into legal expand/collapse actions.
 ---
 ![[Focus Allocator Diagram.png]]

@@ -1,6 +1,6 @@
 ---
 tags:
-  - ops
+  - vision
 summary: Telemetry-driven strategies for keeping the MegaContext gist tree compact without losing valuable detail.
 ---
 Use telemetry (access, ΔNLL, query alignment) to collapse or retire low-value spans while preserving reversibility and provenance.

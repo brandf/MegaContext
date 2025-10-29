@@ -1,10 +1,8 @@
 ---
 tags:
   - reference
-  - comparison
 summary: Comparative analysis of MegaContext against alternative approaches including standard LLMs, RAG systems, compressive transformers, and sparse attention methods.
 ---
-
 # MegaContext Comparisons
 
 This document provides detailed comparisons between MegaContext and alternative approaches to handling long-context in language models.
