@@ -40,10 +40,10 @@ The core intuition that's motivating this work is that long context is only usef
 ---
 
 ### Runtime lifecycle at a glance
-![[ArchitectureDiagram.png]]
+
 ![[GistNetDiagram.png]]
 ![[LensNet Diagram.png]]
-![[WorkingSetUpdateDiagram.png]]
+![[CompleteSystem.png]]
 
 1. **Ingest & summarize.** Buffer incoming tokens in 32-token blocks, roll them into new or updated gist nodes, and persist the MegaContext tree (disk later, RAM for the POC).
 2. **Assemble the working context.** Lay out a contiguous-in-time sequence of tokens and gists whose combined token-equivalent cost stays within `W_max`. Every position represents exactly one interval of the MegaContext history at some level of detail.

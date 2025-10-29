@@ -4,8 +4,8 @@ tags:
   - modules
 summary: Navigation map for MegaContext module notes under obsidian/modules/.
 ---
-Use this map to traverse the runtime stack: compression ([[GistNet]]), scoring ([[LensNet]]), allocation ([[Focus Allocator]]), and orchestration ([[Runtime Loop]]).
 
+![[ArchitectureDiagram.png]]
 ---
 
 - **Compression:** [[GistNet]] → feeds [[MegaContext Tree]] hierarchy (see [[POC Architecture]]).
