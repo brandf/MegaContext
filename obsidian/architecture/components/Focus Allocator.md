@@ -99,6 +99,7 @@ The Focus Allocator is the **final execution stage** in the attention management
 - **Output**: Produces list of expand/collapse operations
 - **Feedback**: [[Working Context]] changes flow back to [[LensNet]] on next iteration
 - **Timing**: Runs every `K` tokens (default: 32) in sync with [[LensNet]]
+- **Advanced variants**: In multi-head setups (see [[Focus Architectures]]), the allocator runs per head with shared invariants while telemetry enforces diversity across windows.
 
 ### Invariants Enforced
 - Maintains [[Working Context]] contiguity

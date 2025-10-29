@@ -11,7 +11,7 @@ summary: A system architecture for virtualized LLM context that enables effectiv
 
 ## What is MegaContext?
 
-MegaContext virtualizes context by separating it into two parts (see [[Architecture Details]] for complete explanation): the [[MegaContext Tree]] (unbounded storage on disk) holds the complete history as a hierarchical gist tree, while the [[Working Context]] (fixed GPU window of 8k–32k tokens) holds a dynamically focused mix of raw tokens and compressed gists. [[GistNet]] compresses history into the tree, [[LensNet]] scores relevance, and the [[Focus Allocator]] streams the right level of detail into the working window, giving the model **effectively infinite memory at constant compute** with automatic context management.
+MegaContext virtualizes context by separating it into two parts (see [[Architecture Details]] for complete explanation): the [[MegaContext Tree]] (unbounded storage on disk) holds the complete history as a hierarchical gist tree, while the [[Working Context]] (fixed GPU window of 8k–32k tokens) holds a dynamically focused mix of raw tokens and compressed gists. [[GistNet]] compresses history into the tree, [[LensNet]] scores relevance, and the [[Focus Allocator]] streams the right level of detail into the working window, giving the model **effectively infinite memory at constant compute** with automatic context management. Emerging designs like [[Focus Architectures]] explore multi-headed and staged focus to deepen this core principle.
 
 ---
 
@@ -101,6 +101,9 @@ See [[POC Plan]] for the full roadmap.
 - [[Focus Allocator Strategies]] — expansion/collapse algorithms
 - [[Tree Operations]] — tree manipulation and maintenance
 - [[Node Metadata]] — node attributes and tracking
+- [[Positional Encoding]] — global indexing and LOD-aware positional schemes
+- [[Multimodal MegaContext]] — visual gist hierarchies and multimodal context integration
+- [[Focus Architectures]] — multi-head and staging-focused extensions to the baseline loop
 - [[Working Context Assembly]] — initial context construction
 - [[Working Context Refocusing]] — dynamic context adjustment
 

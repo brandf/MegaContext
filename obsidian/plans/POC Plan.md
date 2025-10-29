@@ -34,6 +34,7 @@ This milestone isolates the minimum "hot path" required to demonstrate MegaConte
 - Task 1.2: Implement `src/runtime/base_model.py` targeting `HuggingFaceTB/SmolLM3-3B` (bf16) with forward helpers used across the prototype.
 - Task 1.3: Provide `src/runtime/working_context.py` (token pass-through version) and unit tests covering tensor shapes, legality masks, and budget calculations.
 - Task 1.4: Add a CLI demo (`uv run python -m tools.decode_demo --config configs/runs/base_llm.yaml`) that streams a short prompt to confirm logits generation.
+- Task 1.5: Define a modality-tagging schema (text vs image placeholder) in dataset outputs and `WorkingContext` metadata, mirroring the expectations in [[Multimodal MegaContext]] even if Phase 1 only exercises text.
 
 **Exit criteria:** Dataset prep works on a sample corpus, base model forwards succeed, smoke tests pass under CI.
 
@@ -75,6 +76,8 @@ This milestone isolates the minimum "hot path" required to demonstrate MegaConte
 - Task 3.5: Assemble `src/runtime/engine.py` that ingests streams, updates the gist tree, queries [[LensNet]], applies focus adjustments, and decodes via the base model.
 - Task 3.6: Provide unit tests across [[components]] (tree ingest, allocator edge cases, [[LensNet]] mask handling) plus an integration test with a deterministic synthetic stream.
 - Task 3.7: Ship `uv run python -m tools.run_poc_loop --config configs/runs/poc_smollm3.yaml` demonstrating a short session that expands/collapses spans while respecting the budget.
+- Task 3.8: Add the positional adapter described in [[Positional Encoding]]—NTK-scaled RoPE, LOD-aware Gaussian damping, and lightweight ALiBi LoRA—along with regression tests that verify ΔNLL stability for long-range, teleported spans.
+- Task 3.9: Stub an image-ingest path that converts ViT patch embeddings into no-op gists and flows modality metadata through the runtime (consume-only); align interfaces with [[Multimodal MegaContext]] while keeping the demo text-only.
 
 **Exit criteria:** End-to-end loop runs on the demo corpus, logs focus actions, maintains budget invariants, and tests cover core behavior.
 
@@ -85,5 +88,6 @@ This milestone isolates the minimum "hot path" required to demonstrate MegaConte
 - Task 4.2: Record a short walkthrough (structured log or screenshots) showing focus reallocations in the demo run.
 - Task 4.3: Update `README.md` with a [[POC Architecture]] summary: [[Architecture Details]] sketch, command sequence, expected outcomes, troubleshooting.
 - Task 4.4: Ensure `docs/poc_results.md` captures metrics, figures, and lessons learned leading into the next milestone per the [[Research Paper Plan]] and [[Future Plan]].
+- Task 4.5: Document multimodal readiness: summarize the placeholder ingest path, positional expectations, and next-step gaps referencing [[Multimodal MegaContext]] and [[Positional Encoding]].
 
 **Exit criteria:** Demo artifacts prove that MegaContext can retain context beyond the [[Working Context]] window with manageable complexity per the [[POC Scope]], unlocking the [[Training & Operations]] and [[Performance Sketch]] goals for the PAPER milestone.

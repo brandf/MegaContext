@@ -49,6 +49,12 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
   - Extend the [[MegaContext Tree]] with a movable present cursor separating committed history from speculative future gists and tokens.
   - Prototype latent CoT planners, hierarchical de-gisting, and [[LensNet]]-guided refinement loops that operate in the speculative region before committing outputs.
   - Reuse ΔNLL and RL-style objectives to score finalized continuations while tracking compute/latency costs accrued during prediction.
+- **B.5 Gaussian RoPE & Global Position Learning**
+  - Train base models with the Gaussian positional scheme outlined in [[Positional Encoding]] so LOD-aware uncertainty is native rather than adapter driven.
+  - Explore auxiliary losses for reconstructing absolute MegaContext indices and calibrating σ estimates against [[Telemetry]] signals.
+- **B.6 Multi-Head Focus & Staging Contexts**
+  - Implement the multi-headed working-context strategy from [[Focus Architectures]], including adaptive focus routing and hidden-state mergers.
+  - Evaluate staging contexts as a high-resolution reservoir feeding the heads, comparing throughput and accuracy against single-window baselines.
 
 ---
 ## Track C — Application Showcases & Verticalization
@@ -62,6 +68,7 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
 - **C.3 Multimodal & Layout-Rich Use Cases**
   - Explore fusing non-text signals (UI traces, diagrams) into the gist hierarchy.
   - Leverage insights from optical compression research (e.g., DeepSeek-OCR) to capture layout metadata or render-on-demand fallbacks without full rasterization pipelines.
+  - Prototype the image-focused MegaContext pipeline in [[Multimodal MegaContext]]: ingest tiled megapixel frames, learn visual gists, and validate multimodal positional encodings on captioning/grounding benchmarks.
 
 ---
 ## Track D — Research Extensions

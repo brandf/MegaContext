@@ -29,6 +29,7 @@ This milestone produces a polished, reproducible MegaContext system suitable for
 - Task 1.4: Implement contrastive / auxiliary losses in `src/gistnet/trainer.py` to encourage gist diversity and faithfulness.
 - Task 1.5: Automate quality checks (LLMLingua faithfulness metrics, repetition detectors) gating checkpoint promotion.
 - Task 1.6: Publish reproducible configs (`configs/runs/gistnet_pretrain.yaml`) and W&B dashboards summarizing ΔNLL, compression bands, and failure modes.
+- Task 1.7: Incorporate multimodal corpora (e.g., LAION captions, DocVQA renderings) by exporting tiled image patch datasets aligned with [[Multimodal MegaContext]]; surface modality metadata to downstream trainers.
 
 **Exit criteria:** Multi-domain gist models meet target losses across compression bands with validated quality gates and reproducible training scripts.
 
@@ -40,5 +41,7 @@ This milestone produces a polished, reproducible MegaContext system suitable for
 - Task 2.3: Add layout/context-type features (headings, tables, formulas) to working entries using structured-doc metadata captured during ingestion.
 - Task 2.4: Implement `tools/train_lensnet.py` with ranking + budget losses, curriculum scheduling, and evaluation scripts measuring swap rates, regret, and ΔLoss.
 - Task 2.5: Produce ablation suites toggling components (latent slots, layout features, competition, multi-scale bundles) with statistical significance reporting.
+- Task 2.6: Extend focus scoring to multimodal entries by conditioning on image patch summaries and cross-modal attention maps, ensuring alignment with positional cues from [[Multimodal MegaContext]] and [[Positional Encoding]].
+- Task 2.7: Explore [[Focus Architectures]]—multi-headed working contexts and staging contexts—as optional ablations, instrumenting ΔNLL vs. wall-clock comparisons against single-window baselines.
 
-**Exit criteria:** [[LensNet]] achieves reliable focus allocation improvements, with abl
+**Exit criteria:** [[LensNet]] achieves reliable focus allocation improvements, with ablations quantifying the contribution of each modeling enhancement across text and multimodal settings.

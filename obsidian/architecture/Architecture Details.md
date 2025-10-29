@@ -15,7 +15,7 @@ To dynamically adapt level of detail, a learned [[LensNet]] model, continuously/
 
 - **Dual contexts:** [[MegaContext Tree]] tree vs. [[Working Context]].
 - **Compression:** [[GistNet]] builds hierarchical gists aligned with base embeddings.
-- **Focus/Defocus:** [[LensNet]] scores working entries; [[Focus Allocator]] adjusts detail.
+- **Focus/Defocus:** [[LensNet]] scores working entries; [[Focus Allocator]] adjusts detail. Advanced focus layouts (multi-head, staging) are outlined in [[Focus Architectures]].
 - **See also:** [[Runtime Loop]] for execution, [[POC Architecture]] for interfaces.
 
 ---

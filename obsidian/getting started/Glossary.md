@@ -9,6 +9,19 @@ A comprehensive reference of key terms used throughout the MegaContext system.
 
 ---
 
+## A
+
+### ALiBi (Attention with Linear Biases)
+Position-aware attention tweak that adds per-head linear biases `m_h (j - i)` to attention logits. Provides unbounded monotonic distance priors when paired with [[Glossary#RoPE (Rotary Position Embedding)|RoPE]] and is useful in MegaContext for preserving global ordering across billion-scale offsets. See [[Positional Encoding]] and [[Base Runtime]].
+
+### Absolute Position Index
+Global index assigned to each L0 token inside the [[MegaContext Tree]]. Used to disambiguate teleported spans when materializing the [[Working Context]] and to compute Gaussian positional variance. See [[Working Context Assembly]].
+
+### Adaptive Focus Router
+Planned gating module that selects which [[Focus Architectures#Multi-Head Focus (MHF)|multi-head working contexts]] to evaluate for the current query. Trained using LensNet utility statistics and downstream ΔNLL signals to balance accuracy against compute. See [[Focus Architectures]].
+
+---
+
 ## B
 
 ### Block Alignment
@@ -88,6 +101,9 @@ See [[GistNet]].
 ### GistNet
 A lightweight neural network (32→1→32→1 architecture) that compresses fixed-length token spans into single gist embeddings aligned with the base model's embedding space. Uses alternating self-attention and cross-attention with learned slot queries. Trained to minimize ΔNLL@H, ensuring gists can substitute for their source tokens without degrading prediction quality. Forms the backbone of the [[MegaContext Tree]]. See [[GistNet]].
 
+### Gaussian RoPE
+Generalization of rotary embeddings where each span outputs a positional distribution `N(μ, σ²)`. High-frequency bands attenuate by `exp(-0.5 (ω σ)^2)`, letting coarse gists express temporal uncertainty while L0 tokens retain sharp indices. Planned for end-to-end MegaContext models. See [[Positional Encoding]] and [[Future Plan#Track B — Advanced Learning & Co-Optimization]].
+
 ---
 
 ## H
@@ -99,6 +115,9 @@ The lookahead range (in tokens) used when computing ΔNLL or task losses during 
 - 128 tokens for code
 
 See [[Architecture Details#Key terms & invariants]].
+
+### NTK Scaling
+Technique for stretching rotary positional embeddings by scaling input indices prior to the sine/cosine transform. Extends usable context lengths (e.g., 8× stretch → ~250k tokens) without modifying learned weights, making it the first step in MegaContext’s positional retrofit. See [[Positional Encoding]].
 
 ---
 
@@ -114,6 +133,9 @@ Higher levels provide coarser detail at lower token cost. The working context mi
 
 ### LensNet
 A dual cross-attention controller that scores working-context entries for expansion or collapse. Operates non-causally on the full working context plus a small tail of conditioning gists. Emits signed focus scores that the [[Focus Allocator]] uses to adjust level of detail. Trained with counterfactual ΔNLL utilities, budget regularizers, and legality penalties. Runs once per K tokens (32 in POC). See [[LensNet]].
+
+### Multi-Head Focus (MHF)
+Strategy where multiple working contexts (e.g., 2k-token windows) receive distinct focus layouts before the base model runs. Each head reuses a shared [[LensNet]] backbone with specialised conditioning, allowing the system to view the same MegaContext history from different perspectives. Outputs merge at the hidden-state level to avoid repeated disembedding. See [[Focus Architectures]].
 
 ---
 
@@ -162,6 +184,9 @@ The [[Focus Allocator]] ensures `sum(entry_costs) ≤ W_max` by balancing expans
 
 ### Working Context (WC)
 A fixed-size GPU window (budgeted at W_max tokens) that the frozen base LLM actually sees. Assembled from a contiguous-in-time sequence of entries drawn from the [[MegaContext Tree]], mixing raw tokens (L0) and gists (L1, L2) at varying levels of detail. Dynamically refocused by [[LensNet]] and [[Focus Allocator]] to keep relevant content detailed while compressing less-relevant regions. See [[Architecture Details]].
+
+### Staging Context
+Large intermediate context (e.g., ~100k entries) that lives between the disk-backed MegaContext and the small [[Working Context]] heads. It carries higher temporal resolution than any single working context but is not fed to the base model directly. LensNet-G refreshes the staging view periodically, seeding downstream heads with richer candidates. See [[Focus Architectures]].
 
 ---
 
