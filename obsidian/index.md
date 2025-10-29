@@ -107,7 +107,7 @@ See [[POC Plan]] for the full roadmap.
 - [[Working Context Assembly]] — initial context construction
 - [[Working Context Refocusing]] — dynamic context adjustment
 
-### [[Plans]] & [[Operations|Operations]]
+### [[Plans]]
 - [[Plans]] — milestone plans (POC, Paper, Future)
 - [[POC Plan]] — stepwise guide for delivering the proof-of-concept
 - [[POC Implementation]] — implementation details and current status
@@ -116,7 +116,7 @@ See [[POC Plan]] for the full roadmap.
 - [[Telemetry]] — metrics and monitoring
 - [[Base Runtime]] — operational runtime details
 
-### [[Vision]] & Future
+### Future
 - [[Vision]] — long-range research and product direction
 - [[Grand Vision]] — why MegaContext matters long term and future directions
 - [[Cognitive Core]] — advanced cognitive architectures
@@ -133,7 +133,7 @@ See [[POC Plan]] for the full roadmap.
 
 ## Contributing
 
-This is an open research project. We welcome contributions that advance the proof-of-concept and the broader [[Vision|vision]].
+This is an open research project. We welcome contributions that advance the proof-of-concept and the broader vision.
 
 - Follow conventions in `AGENTS.md` for directory layout, testing, linting, and communication
 - Bootstrap: `uv venv`, `uv sync`, then `uv run pytest --maxfail=1 --disable-warnings` for smoke tests

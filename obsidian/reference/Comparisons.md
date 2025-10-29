@@ -344,4 +344,4 @@ MegaContext differentiates through:
 
 While each alternative has strengths in specific scenarios, MegaContext uniquely addresses the challenge of **unbounded persistent memory with learned dynamic focus at constant compute**.
 
-See [[MegaContext  & RAG]] for deeper RAG comparison and [[How MegaContext Works]] for system overview.
+See [[MegaContext & RAG]] for deeper RAG comparison and [[How MegaContext Works]] for system overview.

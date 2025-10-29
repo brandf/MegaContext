@@ -84,8 +84,8 @@ A signed scalar value emitted by [[LensNet]] for each working-context entry:
 
 The [[Focus Allocator]] converts these scores into actual expand/collapse operations. See [[LensNet]].
 
-### Frozen Base Model
-The underlying large language model (e.g., SmolLM3-3B in the POC) whose parameters remain fixed during MegaContext training and operation. Only [[GistNet]] and [[LensNet]] are trained; the base model is used as-is for both prediction and teacher signal generation. This allows MegaContext to work with any pretrained LLM without fine-tuning. See [[Architecture Details]].
+### Base Model
+The underlying large language model (e.g., SmolLM3-3B in the POC) whose parameters remain fixed during MegaContext training and operation.  Only [[GistNet]], [[LensNet]], and a small LoRA for base model adaptation are trained; the base model is used as-is for both prediction and teacher signal generation. This allows MegaContext to work with any pretrained LLM without fine-tuning. See [[Architecture Details]].
 
 ---
 
