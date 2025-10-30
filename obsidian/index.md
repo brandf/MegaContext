@@ -17,7 +17,7 @@ MegaContext virtualizes context by separating it into two parts (see [[Architect
 
 ## The MegaTexture Analogy
 
-MegaContext is inspired by **MegaTexture**, a graphics technology from id Software that virtualized texture memory—streaming visible portions of vast textures at appropriate resolutions. MegaContext applies this same principle to language model context.
+MegaContext is inspired by **MegaTexture** [1], a graphics technology from id Software that virtualized texture memory—streaming visible portions of vast textures at appropriate resolutions. MegaContext applies this same principle to language model context.
 
 See [[MegaTexture Analogy]] for the complete explanation.
 
@@ -141,6 +141,14 @@ This is an open research project. We welcome contributions that advance the proo
 - Update progress in the Obsidian plan notes before hand-off so the next contributor has full context
 
 See the [GitHub repository](https://github.com/brandf/MegaContext) for more details.
+
+---
+
+## References
+
+1. **MegaTexture** (Carmack, 2007) — [[papers/MegaTexture|Analysis]] — Virtual texturing system that inspired the core hierarchical streaming architecture
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.
 
 ---
 

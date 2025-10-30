@@ -3,7 +3,7 @@ tags:
   - ops
 summary: Alternating optimization, instrumentation, and validation practices for GistNet, LensNet, and runtime components.
 ---
-Rotate through [[GistNet]], [[LensNet]], and LoRA updates while collecting telemetry that keeps ΔNLL, swap rates, and latency within targets.
+Rotate through [[GistNet]], [[LensNet]], and LoRA [1] updates while collecting telemetry that keeps ΔNLL, swap rates, and latency within targets.
 
 ---
 
@@ -16,7 +16,7 @@ Rotate through [[GistNet]], [[LensNet]], and LoRA updates while collecting telem
 ---
 ## Overview
 
-MegaContext uses **alternating optimization** ("EM-style") to co-train [[GistNet]], [[LensNet]], and lightweight base-model adapters without full end-to-end backprop through the discrete [[Focus Allocator]].
+MegaContext uses **alternating optimization** [similar to GAN training] to co-train [[GistNet]], [[LensNet]], and lightweight base-model adapters without full end-to-end backprop through the discrete [[Focus Allocator]].
 
 ### Why Alternating Optimization?
 
@@ -35,9 +35,9 @@ MegaContext uses **alternating optimization** ("EM-style") to co-train [[GistNet
 
 ### Training Modules
 
-- **[[GistNet]]** (`Gist`) — 32→1 compression, two levels; substitutability objective.
+- **[[GistNet]]** (`Gist`) — 32→1 compression, two levels; substitutability objective [2].
 - **[[LensNet]]** (`LensNet`) — dual cross-attn (8k→6→8k); signed focus scores.
-- **Base-LoRA** (`LoRA`) — tiny adapters on the base LLM to improve gist compatibility.
+- **Base-LoRA** (`LoRA`) [1] — tiny adapters on the base LLM to improve gist compatibility.
 - **[[Focus Allocator]]** — remains discrete and greedy (no relaxation).
 
 ---
@@ -131,3 +131,12 @@ Slightly adapt the base to work well with gist tokens and current working-contex
 - **[[Focus Allocator]]** — Discrete greedy allocation policy
 - **[[MegaContext Tree]]** — Hierarchical storage structure
 - **[[Working Context]]** — Active token buffer assembly
+
+## References
+
+1. **LoRA** (Hu et al., 2021) — [[papers/LoRA|Analysis]] — Low-rank adaptation used in GistNet/LensNet training
+2. **Knowledge Distillation** (Hinton et al., 2015) — [[papers/Knowledge Distillation|Analysis]] — Teacher-student framework for GistNet training
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.
+
+**Note on alternating optimization:** This training approach is similar to techniques used in GAN training (Goodfellow et al., 2014), where generators and discriminators are trained alternately. In MegaContext, we alternate between updating compression (GistNet), focusing (LensNet), and adaptation (LoRA) modules, allowing them to co-evolve without expensive end-to-end gradients through discrete allocation decisions.

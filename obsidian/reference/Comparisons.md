@@ -49,11 +49,17 @@ Coverage: All 1M tokens accessible at appropriate detail
 ```
 **Result:** Can answer about any part—[[LensNet]] dynamically expands relevant sections
 
+**Note:** Sparse attention methods [1, 2] and long context approaches like Transformer-XL [3] and LongLoRA [4] extend context lengths but still face quadratic or linear growth, unlike MegaContext's constant compute.
+
 ---
 
 ## vs. Retrieval-Augmented Generation (RAG)
 
+RAG systems [5] retrieve relevant documents from external vector databases to augment generation.
+
 ### Architecture Comparison
+
+Systems like RETRO [6] and Memorizing Transformers [7] provide variants of retrieval-augmented approaches.
 
 | Aspect | RAG (DPR + FiD) | MegaContext |
 |--------|-----------------|-------------|
@@ -144,6 +150,8 @@ Frozen base LLM:  No retraining needed
 
 ## vs. Compressive Transformers
 
+Compressive Transformers [8] use fixed compression functions to store old context in a compressed memory.
+
 | Metric | Compressive Transformer (Rae et al. 2019) | MegaContext |
 |--------|-------------------------------------------|-------------|
 | **Compression** | Fixed functions (mean pool, attention) | Learned ([[GistNet]]) |
@@ -172,6 +180,8 @@ Frozen base LLM:  No retraining needed
 ---
 
 ## vs. Full-Context Sparse Attention
+
+Sparse Transformers [1] and Reformer [2] use factorized or LSH-based attention patterns to reduce computational complexity.
 
 | Metric | Sparse Attention (Longformer, BigBird) | MegaContext |
 |--------|---------------------------------------|-------------|
@@ -205,6 +215,8 @@ Position 1000 in Working Context might be:
 ---
 
 ## vs. Memorizing Transformers
+
+Memorizing Transformers [7] use kNN-augmented retrieval over past keys/values.
 
 | Metric | Memorizing Transformers (Wu et al. 2022) | MegaContext |
 |--------|------------------------------------------|-------------|
@@ -345,3 +357,18 @@ MegaContext differentiates through:
 While each alternative has strengths in specific scenarios, MegaContext uniquely addresses the challenge of **unbounded persistent memory with learned dynamic focus at constant compute**.
 
 See [[MegaContext & RAG]] for deeper RAG comparison and [[How MegaContext Works]] for system overview.
+
+---
+
+## References
+
+1. **Sparse Transformers** (Child et al., 2019) — [[papers/Sparse Transformers|Analysis]] — Factorized sparse attention patterns
+2. **Reformer** (Kitaev et al., 2020) — [[papers/Reformer|Analysis]] — LSH attention and reversible layers
+3. **Transformer-XL** (Dai et al., 2019) — [[papers/Transformer-XL|Analysis]] — Segment-level recurrence and relative positional encoding
+4. **LongLoRA** (Chen et al., 2023) — [[papers/LongLoRA|Analysis]] — Efficient finetuning for extended context windows
+5. **RAG** (Lewis et al., 2020) — [[papers/RAG - 2005.11401v4|Analysis]] — Retrieval-augmented generation baseline
+6. **RETRO** (Borgeaud et al., 2022) — [[papers/RETRO|Analysis]] — Retrieval-enhanced autoregressive transformers
+7. **Memorizing Transformers** (Wu et al., 2022) — [[papers/Memorizing Transformers|Analysis]] — kNN-augmented approximate retrieval
+8. **Compressive Transformer** (Rae et al., 2019) — [[papers/Compressive Transformer|Analysis]] — Long-term compressed memory for transformers
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.

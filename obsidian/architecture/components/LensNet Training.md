@@ -9,7 +9,7 @@ summary: Complete training methodology for LensNet including counterfactual labe
 
 ## Overview
 
-The training process teaches [[LensNet]] to:
+The training process teaches [[LensNet]] [1,2] to:
 - **Regress** signed utility values `u_i` that quantify the benefit of expanding/collapsing each entry
 - **Rank** entries correctly (higher-value expansions should score higher than lower-value ones)
 - **Maintain budget neutrality** (total expansion cost ≈ total collapse refund)
@@ -523,7 +523,7 @@ def augment_training_data(traces):
 ### POC Training Configuration
 
 ```python
-# Model architecture
+# Model architecture (Perceiver-inspired [1,2])
 model_config = {
     'd_model': 1024,          # Base model embedding dim
     'd_lens': 512,            # LensNet projection dim
@@ -532,7 +532,7 @@ model_config = {
     'dropout': 0.1
 }
 
-# Optimization
+# Optimization (LoRA adapters [3])
 optimizer_config = {
     'optimizer': 'AdamW',
     'learning_rate': 1e-4,
@@ -919,3 +919,11 @@ def evaluate_model(model, test_loader):
 - [[Telemetry]] — Metrics collection including ranking accuracy and budget balance
 - [[Storage Format]] — Where trace logs and training checkpoints are persisted
 - [[Invariants]] — Constraints that loss functions enforce (budget, legality, contiguity)
+
+## References
+
+1. **Perceiver** (Jaegle et al., 2021) — [[papers/Perceiver - 2103.03206v2|Analysis]] — Latent cross-attention bottleneck architecture
+2. **Perceiver IO** (Jaegle et al., 2021) — [[papers/Perceiver IO - 2107.14795v3|Analysis]] — Query-based decoding for arbitrary structured outputs
+3. **LoRA** (Hu et al., 2021) — [[papers/LoRA|Analysis]] — Low-rank adaptation used in GistNet/LensNet training
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.

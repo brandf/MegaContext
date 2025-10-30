@@ -5,7 +5,7 @@ summary: Complete training methodology for GistNet including loss functions, tea
 ---
 # GistNet Training
 
-Training [[GistNet]] to produce [[substitutability|substitutable]] gist embeddings that preserve the [[LLM]] prediction quality when replacing token spans. The training process uses a frozen teacher model to minimize [[ΔNLL]]@H and optional contrastive losses to ensure distinct gist representations.
+Training [[GistNet]] to produce [[substitutability|substitutable]] gist embeddings [1] that preserve the [[LLM]] prediction quality when replacing token spans. The training process uses a frozen teacher model to minimize [[ΔNLL]]@H and optional contrastive losses to ensure distinct gist representations.
 
 ## Training Objectives
 
@@ -78,7 +78,7 @@ where `λ_contrast = 0.05` in the POC.
 
 ## Teacher-Student Training Architecture
 
-[[GistNet]] training follows a **distillation** paradigm: a frozen teacher [[LLM]] provides supervision signals, and the student [[GistNet]] learns to compress spans while preserving teacher predictions.
+[[GistNet]] training follows a **knowledge distillation** paradigm [2]: a frozen teacher [[LLM]] provides supervision signals, and the student [[GistNet]] learns to compress spans while preserving teacher predictions.
 
 ### Teacher Model Setup
 
@@ -115,7 +115,7 @@ Loss_subst = KL(probs_original || probs_replaced)
 
 **Architecture:** 32→32→1→32→32→1 refinement stack (see [[GistNet#POC architecture]])
 
-**Trainable parameters:**
+**Trainable parameters (LoRA adapters [3]):**
 - ~0.5M per compression layer
 - 2 shared slot queries (`Q₁`, `Q₂`)
 - Self-attention and cross-attention weights
@@ -573,8 +573,8 @@ These gists are later consumed by [[LensNet]] and [[Focus Allocator]] during the
 
 ## Key Takeaways
 
-1. **Teacher-student distillation:** [[GistNet]] learns by minimizing [[ΔNLL]]@H, not by reconstructing tokens.
-2. **Substitutability is primary:** Gists must preserve the frozen teacher's predictions, not match human intuition.
+1. **Teacher-student distillation [2]:** [[GistNet]] learns by minimizing [[ΔNLL]]@H, not by reconstructing tokens.
+2. **Substitutability is primary [1]:** Gists must preserve the frozen teacher's predictions, not match human intuition.
 3. **Contrastive loss prevents collapse:** Small weight (0.05) suffices to maintain gist diversity.
 4. **Curriculum matters:** Start simple (narrative), then generalize (code, structure).
 5. **Validation is critical:** Monitor ΔNLL, substitutability rate, and gist diversity on held-out data.
@@ -619,6 +619,16 @@ These gists are later consumed by [[LensNet]] and [[Focus Allocator]] during the
 - [[Getting Started]] – Initial setup including GistNet training pipeline
 - [[Examples]] – Example training runs and validation metrics
 - [[How MegaContext Works]] – High-level explanation including training overview
+
+---
+
+## References
+
+1. **Gist Tokens** (Mu et al., 2023) — [[papers/Gist Tokens - 2304.08467v3|Analysis]] — Learned prompt compression via attention masking
+2. **Knowledge Distillation** (Hinton et al., 2015) — [[papers/Knowledge Distillation|Analysis]] — Teacher-student framework for GistNet training
+3. **LoRA** (Hu et al., 2021) — [[papers/LoRA|Analysis]] — Low-rank adaptation used in GistNet/LensNet training
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.
 
 ---
 

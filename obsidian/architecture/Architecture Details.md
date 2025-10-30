@@ -5,11 +5,11 @@ summary: MegaContext virtualizes context by pairing a disk-backed gist tree call
 ---
 # Architecture Details: The Two-Context System
 
-MegaContext virtualizes context by pairing a disk-backed gist tree called the [[MegaContext Tree]] with a budgeted working context governed by [[GistNet]], [[LensNet]], and the [[Focus Allocator]].
+MegaContext virtualizes context by pairing a disk-backed gist tree called the [[MegaContext Tree]] with a budgeted working context governed by [[GistNet]], [[LensNet]], and the [[Focus Allocator]]. This two-context architecture (1) separates concerns between long-term storage and active processing.
 
-It separates a model's context into a [[MegaContext Tree]] (stored on disk) and a [[Working Context]] (on GPU). A learned [[GistNet]] model is used to build the [[MegaContext Tree]] as a hierarchy of [[Glossary#Gist / Gist Embedding|gists]]. The [[Working Context]] compresses the [[MegaContext Tree]] into a fixed-size mix of tokens and [[Glossary#Gist / Gist Embedding|gists]] that are used for inference.
+It separates a model's context into a [[MegaContext Tree]] (stored on disk) and a [[Working Context]] (on GPU). A learned [[GistNet]] model is used to build the [[MegaContext Tree]] as a hierarchy of [[Glossary#Gist / Gist Embedding|gists]] [5, 7]. The [[Working Context]] compresses the [[MegaContext Tree]] into a fixed-size mix of tokens and [[Glossary#Gist / Gist Embedding|gists]] that are used for inference.
 
-To dynamically adapt level of detail, a learned [[LensNet]] model, continuously/incrementally refocuses the [[MegaContext Tree]] onto the [[Working Context]], giving the model effectively infinite memory at constant compute with automatic context management.
+To dynamically adapt level of detail, a learned [[LensNet]] model [2, 3], continuously/incrementally refocuses the [[MegaContext Tree]] onto the [[Working Context]], giving the model effectively infinite memory at constant compute with automatic context management.
 
 ---
 
@@ -41,38 +41,38 @@ To dynamically adapt level of detail, a learned [[LensNet]] model, continuously/
 
 Large language models face an inherent trade-off between **memory capacity** and **computational efficiency**:
 
-1. **Fixed Context Windows**: Traditional LLMs have a fixed context window (e.g., 4k, 8k, 32k tokens). Once you exceed this limit, you must either:
-   - Truncate old information (losing history)
-   - Use sliding windows (losing distant context)
-   - Compress everything equally (losing important details)
+**1. Fixed Context Windows**: Traditional LLMs have a fixed context window (e.g., 4k, 8k, 32k tokens) [12]. Once you exceed this limit, you must either:
+     - Truncate old information (losing history)
+     - Use sliding windows (losing distant context) [12]
+     - Compress everything equally (losing important details)
 
-2. **Uniform Attention Cost**: Standard transformer attention has O(n²) complexity, where n is the context length. Every token attends to every other token with equal computational cost, regardless of relevance.
+2. **Uniform Attention Cost**: Standard transformer attention has O(n²) complexity, where n is the context length. Every token attends to every other token with equal computational cost, regardless of relevance [17].
 
-3. **Static Representation**: Once text is processed, its representation is fixed. You cannot dynamically adjust the level of detail based on changing relevance as the conversation evolves.
+3. **Static Representation**: Once text is processed, its representation is fixed. You cannot dynamically adjust the level of detail based on changing relevance as the conversation evolves [9, 11].
 
 ### The Two-Context Solution
 
 MegaContext solves these problems by **separating concerns** into two complementary contexts:
 
-#### **MegaContext Tree: The "Hard Drive" of Memory**
+#### **MegaContext Tree: The "Hard Drive" of Memory** [1]
 - **Purpose**: Store the **complete** history indefinitely
-- **Storage**: Disk-backed (RAM for POC), hierarchical structure
+- **Storage**: Disk-backed (RAM for POC), hierarchical structure [1]
 - **Capacity**: Effectively unlimited (millions to billions of tokens)
 - **Access Pattern**: Random access, multi-resolution
 - **Cost Model**: Storage cost only, no computation per token
 
 #### **Working Context: The "RAM" of Active Memory**
-- **Purpose**: Provide the **relevant** subset for immediate inference
-- **Storage**: GPU memory, flat sequence
+- **Purpose**: Provide the **relevant** subset for immediate inference [9]
+- **Storage**: GPU memory, flat sequence [14]
 - **Capacity**: Fixed budget (8k-32k tokens)
-- **Access Pattern**: Sequential, contiguous in time
-- **Cost Model**: Full attention cost during inference
+- **Access Pattern**: Sequential processing (left-to-right)
+- **Cost Model**: Full attention cost during inference [17]
 
 ### Why This Separation Is Necessary
 
-**1. Scalability**: You cannot fit millions of tokens in GPU memory or process them with O(n²) attention in real-time.
+**1. Scalability**: You cannot fit millions of tokens in GPU memory or process them with O(n²) attention [17] in real-time.
 
-**2. Efficiency**: Most historical context is not relevant for the current task. Processing everything equally is wasteful.
+**2. Efficiency**: Most historical context is not relevant for the current task. Processing everything equally is wasteful [9].
 
 **3. Adaptability**: Relevance changes over time. Something unimportant earlier may become critical later. The system needs to dynamically refocus.
 
@@ -661,8 +661,8 @@ Total cost: 1000 + 320 + 5120 = 6440 tokens (vs. 1B tokens for full scan)
 **Architecture**:
 - Input: 32 embeddings (4096-dim each)
 - Output: 1 embedding (4096-dim)
-- Model: Transformer encoder (6-12 layers, 512-2048 hidden dim)
-- Training: Minimize perplexity of next-token prediction
+- Model: Transformer encoder (6-12 layers, 512-2048 hidden dim) [2]
+- Training: Minimize perplexity of next-token prediction [21]
 
 **See**: [[GistNet]], [[GistNet Architecture Details]], [[GistNet Training]]
 
@@ -906,6 +906,24 @@ This separation enables:
 - ✓ Multi-resolution access (coarse scan → fine detail)
 
 **The key insight**: By separating **long-term storage** from **active processing**, MegaContext can optimize each independently while maintaining a coherent view of the entire interaction history. This is not possible with a single-context architecture.
+
+---
+
+## References
+
+1. **MegaTexture** (Carmack, 2007) — [[papers/MegaTexture|Analysis]] — Virtual texturing system that inspired the core hierarchical streaming architecture
+2. **Perceiver** (Jaegle et al., 2021) — [[papers/Perceiver - 2103.03206v2|Analysis]] — Latent cross-attention bottleneck architecture
+3. **Perceiver IO** (Jaegle et al., 2021) — [[papers/Perceiver IO - 2107.14795v3|Analysis]] — Query-based decoding for arbitrary structured outputs
+4. **Gist Tokens** (Mu et al., 2023) — [[papers/Gist Tokens - 2304.08467v3|Analysis]] — Learned prompt compression via attention masking
+5. **Compressive Transformer** (Rae et al., 2019) — [[papers/Compressive Transformer|Analysis]] — Long-term compressed memory for transformers
+6. **RAG** (Lewis et al., 2020) — [[papers/RAG - 2005.11401v4|Analysis]] — Retrieval-augmented generation baseline
+7. **Memorizing Transformers** (Wu et al., 2022) — [[papers/Memorizing Transformers|Analysis]] — kNN-augmented approximate retrieval
+8. **Transformer-XL** (Dai et al., 2019) — [[papers/Transformer-XL|Analysis]] — Segment-level recurrence and relative positional encoding
+9. **RoPE** (Su et al., 2021) — [[papers/RoPE|Analysis]] — Rotary position embeddings used throughout MegaContext
+10. **Flash Attention** (Dao et al., 2022) — [[papers/Flash Attention|Analysis]] — IO-aware exact attention algorithm
+11. **Knowledge Distillation** (Hinton et al., 2015) — [[papers/Knowledge Distillation|Analysis]] — Teacher-student framework for GistNet training
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.
 
 ---
 

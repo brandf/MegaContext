@@ -48,7 +48,7 @@ Working Context: [L0: 0-32] [L1: 32-64] [L1: 64-96] [L0: 96-128] ...
 
 This [[Glossary#Contiguity Invariant|contiguity]] ensures:
 - Coherent narrative flow for the base model
-- Consistent RoPE positional encodings
+- Consistent RoPE [1] positional encodings
 - No discontinuities during focus changes
 
 ---
@@ -74,7 +74,7 @@ The working context is not a separate data structure—it's a **dynamic view** i
 
 The working context is assembled from the [[MegaContext Tree]] by:
 1. Selecting a temporal span to cover
-2. Choosing appropriate LOD for each region based on relevance
+2. Choosing appropriate LOD for each region based on relevance (using sparse attention patterns [2])
 3. Fetching data from the tree's storage
 4. Materializing embeddings (tokens → embeddings, or gist vectors)
 5. Concatenating into a single contiguous tensor
@@ -101,7 +101,7 @@ For full refocusing mechanics, see **[[Working Context Refocusing]]**.
 From the base model's perspective, the working context is **just another context window**. It doesn't know some embeddings are gists rather than raw tokens:
 
 1. **Dimensionality match:** Gists live in the same embedding space as tokens
-2. **RoPE compatibility:** Gists positioned at central token index for consistent encoding
+2. **RoPE compatibility:** Gists positioned at central token index for consistent encoding [1]
 3. **Substitutability:** [[GistNet]] trained so gists produce similar hidden states to original tokens
 
 ```python
@@ -109,7 +109,7 @@ From the base model's perspective, the working context is **just another context
 outputs = base_model(
     inputs_embeds=working_context,  # [N, d] - mixed tokens & gists
     attention_mask=attention_mask,
-    position_ids=position_ids        # Absolute indices for RoPE
+    position_ids=position_ids        # Absolute indices for RoPE [1]
 )
 ```
 
@@ -163,3 +163,12 @@ See **[[POC Implementation]]** for full details and constraints.
 - **[[Focus Allocator]]** - Component that applies expand/collapse operations
 - **[[GistNet]]** - Neural network that produces compressed gist embeddings
 - **[[POC Implementation]]** - Proof-of-concept constraints and implementation details
+
+---
+
+## References
+
+1. **RoPE** (Su et al., 2021) — [[papers/RoPE|Analysis]] — Rotary position embeddings used throughout MegaContext
+2. **Sparse Transformers** (Child et al., 2019) — [[papers/Sparse Transformers|Analysis]] — Factorized sparse attention patterns
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.

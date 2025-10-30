@@ -9,13 +9,13 @@ GistNet compresses each N-token/gist block (32 in [[POC Implementation]]) into a
 
 ## What is GistNet?
 
-GistNet is a **local encoder for token spans** that replaces short, fixed-length token sequences with compact **gist embeddings** ("gists"). Each gist preserves the meaning of its original tokens while freeing [[Working Context]] budget for new information. The key innovation is **substitutability**: gists can stand in for their original tokens inside the base LLM's context with minimal impact on predictions.
+GistNet is a **local encoder for token spans** that replaces short, fixed-length token sequences with compact **gist embeddings** ("gists") [1]. Each gist preserves the meaning of its original tokens while freeing [[Working Context]] budget for new information. The key innovation is **substitutability** [1]: gists can stand in for their original tokens inside the base LLM's context with minimal impact on predictions.
 
 ## Purpose
 
-- **Replace raw tokens** with substitutable gists to free context budget.
+- **Replace raw tokens** with substitutable gists [1] to free context budget.
 - **Enable compression** of 32 tokens → 1 gist at each layer.
-- **Hierarchical stacking** provides 1024× compression (32² with two layers).
+- **Hierarchical stacking** [2] provides 1024× compression (32² with two layers).
 - **Align embeddings** with the base LLM's embedding space for seamless integration.
 
 ## High-Level Architecture
@@ -46,7 +46,7 @@ GistNet uses a **two-stage refinement process** to compress token spans:
 
 ### Hierarchical Stacking
 
-- Two 32→1 layers stacked hierarchically
+- Two 32→1 layers stacked hierarchically [2]
 - Lower layer: operates on raw token embeddings
 - Upper layer: operates on lower-layer gist outputs
 - Result: 1024 tokens compressed to 1 top-level gist (32² compression)
@@ -55,7 +55,7 @@ GistNet uses a **two-stage refinement process** to compress token spans:
 
 | Property | Description |
 |----------|-------------|
-| **Substitutability** | Gists can replace original tokens in LLM context with minimal prediction change |
+| **Substitutability** | Gists can replace original tokens in LLM context with minimal prediction change [1] |
 | **Limited scope** | Operates within fixed 32-token windows; no long-range attention |
 | **Parameter sharing** | Shared weights across all spans |
 | **Aligned embeddings** | Output dimension matches base LLM embedding size |
@@ -64,7 +64,7 @@ GistNet uses a **two-stage refinement process** to compress token spans:
 
 ## Training
 
-GistNet is trained to ensure **substitutability**: replacing a span with its gist should minimally change the base LLM's predictions. The primary objective minimizes [[ΔNLL]]@H between original and gist-replaced contexts.
+GistNet is trained to ensure **substitutability** [1]: replacing a span with its gist should minimally change the base LLM's predictions. The primary objective minimizes [[ΔNLL]]@H between original and gist-replaced contexts. The training process uses knowledge distillation [3] techniques to align gist representations with the base LLM's internal representations.
 
 For complete training details, see:
 - [[GistNet Training]] — Training objectives, loss functions, curriculum, and pipeline
@@ -116,3 +116,11 @@ Gists L1 (32) → GistNet L2 → Gists L2 (1)
 - [[substitutability]] — Core principle guiding GistNet design
 - [[POC Implementation]] — Proof of concept parameters and settings
 - [[Training & Operations]] — Overall training strategy
+
+## References
+
+1. **Gist Tokens** (Mu et al., 2023) — [[papers/Gist Tokens - 2304.08467v3|Analysis]] — Learned prompt compression via attention masking
+2. **Compressive Transformer** (Rae et al., 2019) — [[papers/Compressive Transformer|Analysis]] — Long-term compressed memory for transformers
+3. **Knowledge Distillation** (Hinton et al., 2015) — [[papers/Knowledge Distillation|Analysis]] — Teacher-student framework for GistNet training
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.

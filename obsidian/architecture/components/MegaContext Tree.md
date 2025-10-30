@@ -5,12 +5,12 @@ summary: The hierarchical gist tree that stores the complete interaction history
 ---
 ![[MegaContext Tree Diagram.png]]
 
-The MegaContext Tree is the complete, append-only history of all tokens and their hierarchical gist summaries. It separates long-term memory (potentially millions or billions of tokens) from the fixed-size [[Working Context]] that the base model actually sees.
+The MegaContext Tree is the complete, append-only history of all tokens and their hierarchical gist summaries [1]. It separates long-term memory (potentially millions or billions of tokens) from the fixed-size [[Working Context]] that the base model actually sees.
 
 ---
 
 - **Purpose:** Store unbounded context history at multiple levels of detail (L0, L1, L2, …).
-- **Structure:** 32-ary tree where each parent gist compresses 32 children (tokens or lower-level gists).
+- **Structure:** 32-ary tree where each parent gist compresses 32 children (tokens or lower-level gists) [2].
 - **Storage:** Persisted as binary files (`{L0,L1,L2}.ctx`) with deterministic offsets. See [[Storage Format]].
 - **Updates:** Incremental ingest as 32-token blocks arrive. See [[Tree Operations]].
 - **Interfaces:** Feeds [[Working Context]] assembly, [[LensNet]] conditioning, and [[Focus Allocator]] decisions.
@@ -25,7 +25,7 @@ The MegaContext Tree is a **hierarchical data structure** that stores the comple
 Think of it like a pyramid:
 - **Base layer ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0]]):** Every raw token ever seen
 - **Level 1 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]]):** Each group of 32 L0 tokens compressed into a single [[Glossary#Gist / Gist Embedding|gist]]
-- **Level 2 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L2]]):** Each group of 32 L1 gists compressed into a single gist (representing 1,024 L0 tokens)
+- **Level 2 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L2]]):** Each group of 32 L1 gists compressed into a single gist (representing 1,024 L0 tokens) [2]
 - **Level 3+ (future):** Additional layers for even coarser summaries
 
 At any moment, the [[Working Context]] draws from this tree, selecting which parts to show as raw tokens and which as compressed gists based on [[LensNet]]'s focus scores.
@@ -50,7 +50,7 @@ Each node in the MegaContext Tree represents a contiguous span of the original t
 - **Fixed branching factor:** Every internal node has exactly 32 children (block size K=32 in POC)
 - **Perfect alignment:** Node boundaries align with 32-token blocks; no partial spans
 - **Contiguous coverage:** Nodes at each level tile the timeline without gaps or overlaps
-- **Append-only:** New tokens extend the rightmost branch; historical nodes are immutable (except for refreshing gists when GistNet is retrained)
+- **Append-only:** New tokens extend the rightmost branch; historical nodes are immutable (except for refreshing gists when GistNet is retrained) [3]
 - **Balanced growth:** Tree depth grows logarithmically (log₃₂(N) levels for N tokens)
 
 #### Example Tree Fragment
@@ -80,7 +80,7 @@ The MegaContext Tree enforces strict **block alignment** to maintain the [[Gloss
 
 **Why this matters:**
 - [[Focus Allocator]] can swap LOD levels (expand/collapse) without breaking continuity
-- [[Glossary#RoPE (Rotary Position Embedding)|RoPE]] positional encodings remain consistent when gists replace tokens
+- [[Glossary#RoPE (Rotary Position Embedding)|RoPE]] positional encodings [4] remain consistent when gists replace tokens
 - [[Working Context]] assembly is simplified—just concatenate contiguous node ranges
 
 ---
@@ -143,3 +143,14 @@ The MegaContext Tree is the **foundational data structure** that enables everyth
 ## Summary
 
 The MegaContext Tree is MegaContext's "hard drive"—a persistent, hierarchical memory that stores the complete interaction history at multiple levels of detail. By separating long-term storage (tree) from short-term attention ([[Working Context]]), the system achieves **effectively infinite context** while keeping per-step compute constant. All roads in MegaContext lead through the tree: [[GistNet]] builds it, [[LensNet]] reads it, [[Focus Allocator]] navigates it, and the frozen base model consumes refined views drawn from it.
+
+---
+
+## References
+
+1. **MegaTexture** (Carmack, 2007) — [[papers/MegaTexture|Analysis]] — Virtual texturing system that inspired the core hierarchical streaming architecture
+2. **Compressive Transformer** (Rae et al., 2019) — [[papers/Compressive Transformer|Analysis]] — Long-term compressed memory for transformers
+3. **Transformer-XL** (Dai et al., 2019) — [[papers/Transformer-XL|Analysis]] — Segment-level recurrence and relative positional encoding
+4. **RoPE** (Su et al., 2021) — [[papers/RoPE|Analysis]] — Rotary position embeddings used throughout MegaContext
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.

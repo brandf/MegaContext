@@ -32,7 +32,7 @@ Standard LLMs have a fundamental limitation:
 
 ## The MegaContext Solution: Virtual Memory for LLMs
 
-MegaContext solves this by separating **long-term storage** from **active attention**, just like a computer's virtual memory separates disk from RAM.
+MegaContext solves this by separating **long-term storage** from **active attention**, just like a computer's virtual memory separates disk from RAM [1].
 
 ![[ArchitectureDiagram.png]]
 
@@ -100,6 +100,7 @@ Every individual token at full detail—highest cost, highest fidelity.
 - Outputs live in the same [[Glossary#Embedding|embedding]] space as tokens
 - Trained to minimize [[Glossary#ΔNLL / ΔNLL@H (Perplexity Delta at Hidden Layer)|ΔNLL@H]] (prediction error after [[Glossary#Substitutability|substitution]])
 - Tiny model (~0.5M params per layer)
+- Learns compression using techniques inspired by Gist Tokens [5], LLMLingua-2 [6], and Compressive Transformer [7]
 
 **Result:** Hierarchical [[Glossary#Gist / Gist Embedding|gist]] tree where each parent summarizes 32 children
 
@@ -114,10 +115,11 @@ See [[GistNet]] for full architecture and [[GistNet Architecture Details]] for i
 **What it does:** Decides which parts of memory deserve detail vs compression
 
 **Key features:**
-- Dual cross-attention network ([[Working Context|working context]] ↔ [[tail gists]])
+- Dual cross-attention network ([[Working Context|working context]] ↔ [[tail gists]]) using cross-attention inspired by Perceiver [2] and Perceiver IO [3]
 - Non-causal—can "look ahead" to understand what will matter
 - Outputs signed [[focus score|focus scores]]: positive = [[Glossary#Expand|expand]], negative = [[Glossary#Collapse|collapse]]
 - Trained via [[counterfactual labeling]]: compute [[Glossary#ΔNLL / ΔNLL@H (Perplexity Delta at Hidden Layer)|ΔNLL]] for hypothetical operations
+- Uses content-based addressing similar to Neural Turing Machines [8]
 
 **Why non-causal?**
 Traditional LLM attention is causal (token N can't see token N+1). But to know if an old fact matters, you need to see future queries. [[LensNet]] operates on the full [[Working Context|working context]] to predict relevance.
@@ -183,7 +185,7 @@ How does MegaContext differ from standard LLMs, RAG, or other approaches?
 
 **vs. Standard LLMs:** Unbounded vs fixed context, constant vs quadratic compute, compressed vs lost history
 
-**vs. RAG:** Inline [[Glossary#Gist / Gist Embedding|gist]] [[Glossary#Substitutability|substitution]] vs external retrieval, continuous refocusing vs query-time search, persistent evolving memory vs stateless chunks
+**vs. RAG [4]:** Inline [[Glossary#Gist / Gist Embedding|gist]] [[Glossary#Substitutability|substitution]] vs external retrieval, continuous refocusing vs query-time search, persistent evolving memory vs stateless chunks
 
 See [[Comparisons]] for detailed comparison tables and [[MegaContext & RAG]] for RAG-specific analysis.
 
@@ -255,3 +257,18 @@ MegaContext virtualizes LLM context through three key innovations:
 3. **Two-context architecture** — Separate unbounded storage ([[MegaContext Tree]]) from fixed attention ([[Working Context]])
 
 The result: **effectively infinite context at constant compute**, with automatic memory management and learned relevance detection. It's not about making context windows longer—it's about making them **smarter**.
+
+---
+
+## References
+
+1. **MegaTexture** (Carmack, 2007) — [[papers/MegaTexture|Analysis]] — Virtual texturing system that inspired the core hierarchical streaming architecture
+2. **Perceiver** (Jaegle et al., 2021) — [[papers/Perceiver - 2103.03206v2|Analysis]] — Latent cross-attention bottleneck architecture
+3. **Perceiver IO** (Jaegle et al., 2021) — [[papers/Perceiver IO - 2107.14795v3|Analysis]] — Query-based decoding for arbitrary structured outputs
+4. **RAG** (Lewis et al., 2020) — [[papers/RAG - 2005.11401v4|Analysis]] — Retrieval-augmented generation baseline
+5. **Gist Tokens** (Mu et al., 2023) — [[papers/Gist Tokens - 2304.08467v3|Analysis]] — Learned prompt compression via attention masking
+6. **LLMLingua-2** (Pan et al., 2024) — [[papers/LLMLingua-2 - 2403.12968v2|Analysis]] — Task-agnostic prompt compression via token classification
+7. **Compressive Transformer** (Rae et al., 2019) — [[papers/Compressive Transformer|Analysis]] — Long-term compressed memory for transformers
+8. **Neural Turing Machines** (Graves et al., 2014) — [[papers/Neural Turing Machines|Analysis]] — Content-based addressing and memory controllers
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.

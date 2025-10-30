@@ -42,7 +42,7 @@ This milestone isolates the minimum "hot path" required to demonstrate MegaConte
 ## Phase 2 — Minimal Gist Compression
 **Goal:** Train and validate a single-level (32→1) gist model sufficient to replace segments without catastrophic degradation.
 - **Design directive:** keep gist-side [[components]] tensor-first. Prefer thin Python wrappers around PyTorch modules and persist MegaContext structures as contiguous L0/L1/L2 tensors that mirror on-disk layouts instead of dense Python object graphs.
-- Task 2.1: Implement `src/gistnet/blocks.py` and `src/gistnet/model.py` with RoPE-enabled self-attention, shared slot queries, and residual MLPs outputting the base embedding dimension.
+- Task 2.1: Implement `src/gistnet/blocks.py` and `src/gistnet/model.py` with RoPE-enabled self-attention [1], shared slot queries [2], and residual MLPs outputting the base embedding dimension.
 - Task 2.2: Extend dataset tooling to emit paired `(tokens, gist_tokens)` batches over horizon `H=64`; cache teacher embeddings for repeatability.
 - Task 2.3: Build `tools/train_gistnet.py` with a masked-attention curriculum (per Gist Token paper) and W&B logging of ΔNLL@H.
 - Task 2.4: Add unit tests for determinism (seeded RNG) plus a smoke eval comparing base vs gist-replaced loss with ≤5 % degradation on the toy corpus.
@@ -76,7 +76,7 @@ This milestone isolates the minimum "hot path" required to demonstrate MegaConte
 - Task 3.5: Assemble `src/runtime/engine.py` that ingests streams, updates the gist tree, queries [[LensNet]], applies focus adjustments, and decodes via the base model.
 - Task 3.6: Provide unit tests across [[components]] (tree ingest, allocator edge cases, [[LensNet]] mask handling) plus an integration test with a deterministic synthetic stream.
 - Task 3.7: Ship `uv run python -m tools.run_poc_loop --config configs/runs/poc_smollm3.yaml` demonstrating a short session that expands/collapses spans while respecting the budget.
-- Task 3.8: Add the positional adapter described in [[Positional Encoding]]—NTK-scaled RoPE, LOD-aware Gaussian damping, and lightweight ALiBi LoRA—along with regression tests that verify ΔNLL stability for long-range, teleported spans.
+- Task 3.8: Add the positional adapter described in [[Positional Encoding]]—NTK-scaled RoPE [1], LOD-aware Gaussian damping, and lightweight ALiBi LoRA [3]—along with regression tests that verify ΔNLL stability for long-range, teleported spans.
 - Task 3.9: Stub an image-ingest path that converts ViT patch embeddings into no-op gists and flows modality metadata through the runtime (consume-only); align interfaces with [[Multimodal MegaContext]] while keeping the demo text-only.
 
 **Exit criteria:** End-to-end loop runs on the demo corpus, logs focus actions, maintains budget invariants, and tests cover core behavior.
@@ -91,3 +91,13 @@ This milestone isolates the minimum "hot path" required to demonstrate MegaConte
 - Task 4.5: Document multimodal readiness: summarize the placeholder ingest path, positional expectations, and next-step gaps referencing [[Multimodal MegaContext]] and [[Positional Encoding]].
 
 **Exit criteria:** Demo artifacts prove that MegaContext can retain context beyond the [[Working Context]] window with manageable complexity per the [[POC Scope]], unlocking the [[Training & Operations]] and [[Performance Sketch]] goals for the PAPER milestone.
+
+---
+
+## References
+
+1. **RoPE** (Su et al., 2021) — [[papers/RoPE|Analysis]] — Rotary position embeddings used throughout MegaContext
+2. **Slot Attention** (Locatello et al., 2020) — [[papers/Slot Attention - 2006.15055v2|Analysis]] — Object-centric iterative attention mechanism
+3. **LoRA** (Hu et al., 2021) — [[papers/LoRA|Analysis]] — Low-rank adaptation used in GistNet/LensNet training
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.

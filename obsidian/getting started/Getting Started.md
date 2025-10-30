@@ -17,10 +17,18 @@ Importantly, with MegaContext is able to do this with sub-linear compute/memory 
 ---
 
 - [[MegaTexture Analogy]]
-    - The inspiration for MegaContext came from graphics tech
-    - Explains what MegaTexture is, and how it maps to MegaTexture components/features
+     - The inspiration for MegaContext came from graphics tech (1)
+     - Explains what MegaTexture is, and how it maps to MegaTexture components/features
 - [[How MegaContext Works]]
     - An overview of how MegaContext works
     - Explains the problems it solves and how the major components interact
 - [[Glossary]]
     - A glossary of terms related to this project
+
+---
+
+## References
+
+1. **MegaTexture** (Carmack, 2007) — [[papers/MegaTexture|Analysis]] — Virtual texturing system that inspired the core hierarchical streaming architecture
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.

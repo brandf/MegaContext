@@ -28,7 +28,7 @@ It bridges the gap between [[LensNet]]'s predictions and actual changes to what 
 
 ### Block-Aligned Operations
 
-The allocator works with 32-token blocks and their gist parents to preserve contiguity:
+The allocator works with 32-token blocks and their gist parents to preserve contiguity, using content-based addressing principles [1]:
 - **L0**: 32 raw tokens
 - **L1**: Single gist token representing 32 L0 tokens
 - **L2+**: Hierarchical gists covering 32 children at the previous level
@@ -37,7 +37,7 @@ All [[Working Context]] entries must cover exactly one full block at a single [[
 
 ### Greedy Loop
 
-The allocator uses a **diff-limited greedy approach**:
+The allocator uses a **diff-limited greedy approach** inspired by learned memory allocation mechanisms [1, 2]:
 
 1. **Collect candidates** from [[LensNet]] scores:
    - Positive scores (`> τ_expand`) → expand queue (replace gist with tokens)
@@ -55,7 +55,7 @@ The allocator uses a **diff-limited greedy approach**:
    - Next action would exceed `W_max`
    - Collapses refund tokens; expands consume them
 
-4. **Optionally re-run [[LensNet]]** if LOD changes significantly alter utilities (2-3 refinement steps max)
+4. **Optionally re-run [[LensNet]]** if LOD changes significantly alter utilities (2-3 refinement steps max), similar to iterative attention refinement mechanisms [3]
 
 For detailed strategy variants and future approaches, see [[Focus Allocator Strategies]].
 
@@ -134,3 +134,13 @@ The Focus Allocator uses several tunable parameters including expansion/collapse
 - [[Working Context Assembly]] - Initial context construction
 - [[Working Context Refocusing]] - Overall attention management loop
 - [[Alternating Optimization]] - Training regime including allocator behavior
+
+---
+
+## References
+
+1. **Neural Turing Machines** (Graves et al., 2014) — [[papers/Neural Turing Machines|Analysis]] — Content-based addressing and memory controllers
+2. **Differentiable Neural Computer** (Graves et al., 2016) — [[papers/DNC|Analysis]] — Learned memory allocation and routing
+3. **Slot Attention** (Locatello et al., 2020) — [[papers/Slot Attention - 2006.15055v2|Analysis]] — Object-centric iterative attention mechanism
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.

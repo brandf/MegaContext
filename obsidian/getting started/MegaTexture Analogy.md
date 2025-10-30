@@ -5,7 +5,7 @@ summary: Explains how MegaContext is inspired by id Software's MegaTexture graph
 ---
 ## Analogy: MegaTexture → MegaContext
 
-- In graphics, **MegaTexture** streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.
+- In graphics, **MegaTexture** (1) streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.
 - **MegaContext** mirrors that idea for language: instead of mipmap tiles, it maintains embeddings at multiple levels of detail (token L0, gist L1, gist L2, …), yielding effectively unbounded context for a frozen LLM.
 
 ---
@@ -41,3 +41,11 @@ For those that are interested in learning about the inspiration, [this video](ht
 
 3. the end result, if I get it working, should be a system that can 'wrap' any model with some light fine-tuning, and upgrade it to have **effectively infinite context lengths** with sub-linear compute/memory
     this could open up all kinds of new scenarios like having entire codebases maintained as a system-prompt-like-[[MegaContext Tree]] that is updated any time a file changes
+
+---
+
+## References
+
+1. **MegaTexture** (Carmack, 2007) — [[papers/MegaTexture|Analysis]] — Virtual texturing system that inspired the core hierarchical streaming architecture
+
+See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.
