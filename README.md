@@ -47,6 +47,7 @@ The bootstrap script is idempotent—rerun it whenever you reconnect to a fresh 
 - The notebook’s **Configure Storage** cell lets you override paths interactively; it creates directories as needed.
 - Checkpoint selection is handled in **Checkpoints & Resume**—pick `Do not resume` for a fresh run or choose any `.ckpt` discovered under the artifact root.
 - Reproducibility defaults to seed `42`; set `MEGACONTEXT_SEED` to pin a different seed per experiment.
+- Set `MEGACONTEXT_FORCE_REINSTALL=1` before running the bootstrap cell if you need to rebuild the editable install in-place (otherwise cached installs are reused to avoid Colab restarts).
 
 ---
 
