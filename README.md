@@ -21,6 +21,32 @@ You can view/read the documentation [here](https://brandf.github.io/MegaContext/
 
 For the best editing/contributing experience open in Obsidian client, open a the vault in the `obsidian/` folder;
 
+---
+
+## Runtime Requirements & Setup
+
+- Python 3.10 or newer
+- CUDA-capable GPU (recommended for training)
+
+### Local (Linux/macOS)
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and ensure `python3.10+` is available.
+2. Run `uv venv` followed by `uv sync` to install the runtime and development dependencies.
+3. Launch Jupyter with `uv run jupyter lab` and open [`notebooks/megacontext.ipynb`](./notebooks/megacontext.ipynb).
+
+### Google Colab
+1. Open the notebook via the badge above or [this link](https://colab.research.google.com/github/brandf/MegaContext/blob/main/notebooks/megacontext.ipynb).
+2. Select a GPU runtime (`Runtime → Change runtime type → T4/L4/A100`).
+3. Run the **Quick Start** bootstrap cell at the top of the notebook; it clones the repo, installs dependencies, and wires up widget support.
+4. Continue through the numbered sections (environment snapshot → data prep → training).
+
+The bootstrap script is idempotent—rerun it whenever you reconnect to a fresh Colab session.
+
+### Artifact Storage & Resuming Runs
+- Point `MEGACONTEXT_ARTIFACT_ROOT` to mounted network storage (e.g. Novita.ai volumes) before launching the notebook. All checkpoints, logs, and summaries flow there by default.
+- Use `MEGACONTEXT_DATA_ROOT` if you want dataset shards on a different mount than the git checkout.
+- The notebook’s **Configure Storage** cell lets you override paths interactively; it creates directories as needed.
+- Checkpoint selection is handled in **Checkpoints & Resume**—pick `Do not resume` for a fresh run or choose any `.ckpt` discovered under the artifact root.
+- Reproducibility defaults to seed `42`; set `MEGACONTEXT_SEED` to pin a different seed per experiment.
 
 ---
 

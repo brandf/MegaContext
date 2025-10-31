@@ -14,6 +14,21 @@ Rotate through [[GistNet]], [[LensNet]], and LoRA [1] updates while collecting t
 - **Tooling:** rely on `uv run pytest`, W&B logging, and artifacts directories for repeatability.
 
 ---
+### Colab Runtime Setup
+
+- Switch the notebook runtime to a GPU before launching the bootstrap cell (`Runtime → Change runtime type → GPU`).
+- Execute the **Quick Start** bootstrap cell in [`notebooks/megacontext.ipynb`](../../notebooks/megacontext.ipynb) to clone the repo, install dependencies, and enable widget support inside Colab.
+- The package targets Python 3.10+, matching Colab's default interpreter; restart and rerun the bootstrap cell whenever the VM resets.
+- Keep WANDB and Hugging Face tokens handy—enter them via the widgets block to persist credentials for the current session.
+
+### Resuming Interrupted Runs
+
+- Mount durable storage (e.g. Novita.ai network volumes) and point `MEGACONTEXT_ARTIFACT_ROOT` at it before starting; checkpoints and summaries land under `gistnet/`.
+- After reconnecting, rerun the bootstrap + storage cells, then pick the most recent `.ckpt` in **Checkpoints & Resume** to continue training.
+- `MEGACONTEXT_DATA_ROOT` keeps dataset shards on the same persistent volume; rerunning dataset prep simply validates existing files.
+- Use `MEGACONTEXT_SEED` to fix randomness per experiment so resumed runs stay deterministic.
+
+---
 ## Overview
 
 MegaContext uses **alternating optimization** [similar to GAN training] to co-train [[GistNet]], [[LensNet]], and lightweight base-model adapters without full end-to-end backprop through the discrete [[Focus Allocator]].
