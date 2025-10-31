@@ -1,0 +1,32 @@
+# Normalize all text files to LF in repo, CRLF when checked out on Windows.
+* text=auto eol=lf
+
+# Preserve line endings for binaries.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.pkg binary
+*.exe binary
+*.psd binary
+
+# Keep notebooks with LF endings to avoid churn.
+*.ipynb text eol=lf
+
+# Shell scripts should always be LF.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Windows-specific scripts can keep CRLF if needed.
+*.ps1 text eol=crlf
+
+# Batch files use CRLF by convention.
+*.bat text eol=crlf
+
+# Keep generated lockfiles consistent.
+package-lock.json text eol=lf
+uv.lock text eol=lf
