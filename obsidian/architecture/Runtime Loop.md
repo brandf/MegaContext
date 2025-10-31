@@ -9,7 +9,7 @@ The runtime loop ingests tokens into the [[MegaContext Tree]], scores the workin
 
 - **Stages:** ingest → gist update → focus scoring → allocation → decode → telemetry.
 - **Budget:** [[Working Context]] remains within `W_max` using block-aligned actions.
-- **Demo goals:** `tools.run_poc_loop` showcases expansion/collapse within limits.
+- **Demo goals:** Planned `tools/run_poc_loop` script will showcase expansion/collapse within limits once the runtime loop lands (tracked in [[POC Plan]]).
 - **Telemetry:** swap rates, ΔNLL, latency feed pruning and training loops.
 
 ---
@@ -26,7 +26,7 @@ The streaming runtime keeps a frozen base LLM within a fixed working window whil
 6. **Telemetry:** Swap events, ΔNLL comparisons, and latency stats are logged for analysis and future tuning.
 
 ## Demo targets
-- POC goal: `tools.run_poc_loop` streams a synthetic session, showing expansion/collapse while maintaining budget invariants ([[POC Plan]], [[POC Architecture]]).
+- POC goal: a dedicated `tools/run_poc_loop` entry point (TBD) streams a synthetic session, showing expansion/collapse while maintaining budget invariants ([[POC Plan]], [[POC Architecture]]). Until then, use the notebook or unit tests to exercise individual components.
 - Research milestone: benchmarking harnesses compare MegaContext runs against baselines and track swap rate, loss, and latency ([[Research Paper Plan]] Phase 4).
 
 ### Focus heuristics

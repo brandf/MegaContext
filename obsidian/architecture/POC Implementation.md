@@ -113,14 +113,14 @@ uv sync
 # Run tests
 uv run pytest --maxfail=1 --disable-warnings
 
-# Train GistNet
-uv run python -m tools.train_gistnet --config configs/runs/poc_gistnet.yaml
+# Train GistNet (Lightning)
+uv run jupyter lab  # run notebooks/megacontext.ipynb and customise phases
 
 # Run POC loop
-uv run python -m tools.run_poc_loop --config configs/runs/poc_smollm3.yaml
+# (planned) uv run python -m tools.run_poc_loop --config configs/Gutenberg_SmolLM3.yaml
 
 # Demo decode
-uv run python -m tools.decode_demo --config configs/runs/base_llm.yaml
+uv run python -m tools.decode_demo --config configs/SampleText_TinyGPT2.yaml
 ```
 
 ### Base Model Configuration
@@ -397,53 +397,50 @@ See [[Storage Format]] for complete details.
 
 ## Sample Configuration File
 
-**File:** `configs/runs/poc_smollm3.yaml`
+**File:** `configs/Gutenberg_SmolLM3.yaml`
 
 ```yaml
-run_name: poc_smollm3_l4
-base_model: HuggingFaceTB/SmolLM3-3B
-tokenizer: HuggingFaceTB/SmolLM3-3B
-precision: bf16
+name: Gutenberg_SmolLM3
+description: Gutenberg subset with SmolLM3-3B base model and two-stage GistNet training.
 
-# Core parameters
-block_size: 32                # K
-working_budget: 8192          # W_max
-horizon: 64                   # H for ΔNLL labeling
+dataset:
+  dataset_name: gutenberg_sample
+  tokenizer: HuggingFaceTB/SmolLM2-360M-Instruct
+  block_size: 32
+  context_tokens: 512
+  context_stride: 512
+  horizon: 32
+  teacher_model: HuggingFaceTB/SmolLM2-360M-Instruct
+  splits:
+    train:
+      source: ../data/raw/gutenberg/**/*.txt
+      output_path: ../data/gutenberg_sample/train.arrow
 
-# Focus configuration
-focus_thresholds:
-  expand: 0.2                 # τ_expand
-  collapse: 0.2               # τ_collapse
-  cooldown_steps: 2
-  max_actions_per_step: 4     # N_diff
+base_model:
+  name: HuggingFaceTB/SmolLM3-3B
+  torch_dtype: bfloat16
+  run_name: poc_smollm3_l4
 
-# Datasets
-datasets:
-  gistnet_pretrain:
-    - pg19
-    - booksum
-  lensnet_traces:
-    - synthetic_coding_sessions
-    - longbench_narratives
-
-# Optimizer
-optimizer:
-  lr: 1.0e-4
-  weight_decay: 0.01
-  scheduler: cosine
-
-# Logging
-logging:
-  wandb_project: megacontext-poc
-  log_interval: 50
-
-# Storage
-storage:
-  lifetime_dir: artifacts/lifetime/
-  files:
-    L0: L0.ctx
-    L1: L1.ctx
-    L2: L2.ctx
+gistnet:
+  model:
+    hidden_size: auto
+    block_size: 32
+    num_heads: 16
+    mlp_ratio: 4.0
+  training:
+    batch_size: 8
+    precision: bf16-mixed
+    phases:
+      - name: pooling-pretrain
+        objective: pooling_mse
+        max_steps: 2000
+        window_tokens: 512
+        lr: 0.001
+      - name: delta-finetune
+        objective: delta_nll
+        max_steps: 1000
+        window_tokens: 512
+        lr: 0.0005
 ```
 
 ---

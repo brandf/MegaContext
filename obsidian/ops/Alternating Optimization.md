@@ -362,7 +362,7 @@ This feedback loop drives co-adaptation:
 **After each phase:**
 - Save module weights under `artifacts/checkpoints/`
 - Store counterfactual utility tables under `artifacts/deltas/` (Parquet/Arrow format)
-- Mirror run config YAML under `configs/runs/`
+- Mirror the unified experiment config under `configs/`
 
 **Enables:**
 - Rollback if a phase destabilizes training

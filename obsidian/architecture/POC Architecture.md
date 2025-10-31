@@ -40,8 +40,8 @@ This note captures the module map, environment assumptions, and storage layout t
 - **Logging:** use [Weights & Biases](https://wandb.ai) for metrics and counterfactual ΔNLL traces; keep raw gists in memory for the POC.
 - **Precision:** bf16 for model forward/backward; fp16 for gist snapshots if you need serialization.
 - **Configuration:** place experiment configs under `configs/` (YAML) documenting block size `K`, horizon `H`, ΔNLL sampling strategy, and thresholds (`τ_expand`, `τ_collapse`).
-- **Dataset staging:** tokenize corpora into contiguous 32-token blocks and store them as `.arrow` shards under `data/<dataset>/<split>.arrow`; provide `uv run python -m tools.prepare_dataset --config configs/data/<name>.yaml` to regenerate them. Set `MEGACONTEXT_DATA_ROOT=/path/to/storage` (e.g., `/content/drive/MyDrive/MegaContext` in Colab) to redirect outputs to persistent storage.
-- **GistNet training:** invoke `uv run python -m tools.train_gistnet --dataset … --config …` (or `python -m tools.train_gistnet` inside notebooks) so the package resolves without ad-hoc path edits.
+- **Dataset staging:** tokenize corpora into contiguous 32-token blocks and store them as `.arrow` shards under `data/<dataset>/<split>.arrow`; provide `uv run python -m tools.prepare_dataset --config configs/<experiment>.yaml` (e.g., `configs/Gutenberg_SmolLM3.yaml`) to regenerate them. Set `MEGACONTEXT_DATA_ROOT=/path/to/storage` (e.g., a mounted NFS directory) to redirect outputs to persistent storage.
+- **GistNet training:** orchestrate runs via `megacontext.gistnet.lightning.build_gistnet_experiment` (see `notebooks/megacontext.ipynb` for a ready-made Jupyter workflow) instead of the deprecated CLI script.
 - **Storage layout:** persist [[MegaContext Tree]] memory as `{L0,L1,L2}.ctx` binary files with a fixed header plus packed data (see below). Fixed block sizes make byte offsets deterministic, so no external index is required.
 
 ## Binary storage layout (`{L0,L1,L2}.ctx`)
@@ -65,42 +65,42 @@ Payload layout per level:
 
 Per-node metadata (`span_id`, `start_token`, `level`, parent/child pointers) stays in the [[MegaContext Tree]]'s in-memory index; because the binary payloads are fixed-width, offsets can always be recomputed on the fly.
 
-## Sample run config (`configs/runs/poc_smollm3.yaml`)
+## Sample run config (`configs/Gutenberg_SmolLM3.yaml`)
 
 ```yaml
-run_name: poc_smollm3_l4
-base_model: HuggingFaceTB/SmolLM3-3B
-tokenizer: HuggingFaceTB/SmolLM3-3B
-precision: bf16
-block_size: 32                # K
-working_budget: 8192          # W_max
-horizon: 64                   # H for ΔNLL labeling
-focus_thresholds:
-  expand: 0.2
-  collapse: 0.2
-  cooldown_steps: 2
-datasets:
-  gistnet_pretrain:
-    - pg19
-    - booksum
-  lensnet_traces:
-    - synthetic_coding_sessions
-    - longbench_narratives
-optimizer:
-  lr: 1.0e-4
-  weight_decay: 0.01
-  scheduler: cosine
-logging:
-  wandb_project: megacontext-poc
-  log_interval: 50
-artifacts_dir: artifacts/
-cli_tools_dir: tools/
-storage:
-  lifetime_dir: artifacts/lifetime/
-  files:
-    L0: L0.ctx
-    L1: L1.ctx
-    L2: L2.ctx
+name: Gutenberg_SmolLM3
+dataset:
+  dataset_name: gutenberg_sample
+  tokenizer: HuggingFaceTB/SmolLM2-360M-Instruct
+  block_size: 32
+  context_tokens: 512
+  horizon: 32
+  splits:
+    train:
+      source: ../data/raw/gutenberg/**/*.txt
+      output_path: ../data/gutenberg_sample/train.arrow
+base_model:
+  name: HuggingFaceTB/SmolLM3-3B
+  torch_dtype: bfloat16
+  run_name: poc_smollm3_l4
+gistnet:
+  model:
+    hidden_size: auto
+    block_size: 32
+    num_heads: 16
+  training:
+    batch_size: 8
+    phases:
+      - name: pooling-pretrain
+        objective: pooling_mse
+        max_steps: 2000
+        window_tokens: 512
+        lr: 0.001
+      - name: delta-finetune
+        objective: delta_nll
+        max_steps: 1000
+        window_tokens: 512
+        lr: 0.0005
 ```
 
 Refer back to this configuration when wiring up the [[Runtime Loop]] or when validating scope boundaries in [[POC Scope]].

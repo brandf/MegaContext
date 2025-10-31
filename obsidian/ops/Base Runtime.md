@@ -7,7 +7,7 @@ Baseline decode demo for the frozen LLM runtime. Run this after provisioning ass
 
 ---
 
-- **Command:** `uv run python -m tools.decode_demo --config configs/runs/base_llm.yaml`.
+- **Command:** `uv run python -m tools.decode_demo --config configs/SampleText_TinyGPT2.yaml`.
 - **Prompt source:** uses the sample corpus installed during bootstrap; update the config for custom prompts or datasets.
 - **Telemetry:** CLI prints the generated continuation and logs structured events to `artifacts/run_logs/<run>-<timestamp>.log`.
 - **Weights & Biases:** export `MEGACONTEXT_ENABLE_WANDB=1` (optionally `WANDB_MODE=online`) before running to stream metrics; otherwise W&B initialization is skipped.

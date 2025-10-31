@@ -17,7 +17,7 @@ MegaContext's telemetry infrastructure provides **real-time and post-hoc** analy
 2. **Runtime validation:** Track focus allocator behavior (swap rate, residency, thrashing) to ensure budget-constrained inference remains stable.
 3. **Performance profiling:** Measure latency, memory, and token budget utilization to maintain constant-time promises.
 4. **Regression detection:** Persist structured logs for diagnosing failures (oscillations, boundary artifacts, drift).
-5. **Reproducibility:** Tag runs with configs/datasets/thresholds so experiments can be replayed exactly.
+5. **Reproducibility:** Tag runs with the unified configs under `configs/*.yaml` plus key thresholds so experiments can be replayed exactly.
 
 ---
 
@@ -322,29 +322,38 @@ Serialized focus allocator decisions for replay and debugging.
 
 ---
 
-### Configuration Mirroring: `configs/runs/`
+### Configuration Mirroring: `configs/*.yaml`
 
-**Every experiment** persists its YAML config for reproducibility.
+**Every experiment** saves a single YAML that bundles dataset staging, base-model settings, and GistNet/LensNet training parameters.
 
 ```yaml
-# configs/runs/poc_smollm3_run_001.yaml
-run_id: "poc_smollm3_run_001"
-dataset: "toy_narrative_4k"
-model: "HuggingFaceTB/SmolLM3-3B"
-training:
-  W_max: 8192
-  H: 64
-  batch_size: 4
-  grad_accumulation: 2
-allocator:
-  thresholds:
-    expand: 0.3
-    collapse: -0.2
-  cooldown_steps: 3
-  hysteresis: 0.05
-telemetry:
-  log_interval: 10
-  snapshot_interval: 500
+# configs/Gutenberg_SmolLM3.yaml
+name: Gutenberg_SmolLM3
+dataset:
+  dataset_name: gutenberg_sample
+  tokenizer: HuggingFaceTB/SmolLM2-360M-Instruct
+  block_size: 32
+  context_tokens: 512
+  horizon: 32
+  splits:
+    train:
+      source: ../data/raw/gutenberg/**/*.txt
+      output_path: ../data/gutenberg_sample/train.arrow
+base_model:
+  name: HuggingFaceTB/SmolLM3-3B
+  torch_dtype: bfloat16
+  run_name: base_llm_demo
+gistnet:
+  model:
+    hidden_size: auto
+    block_size: 32
+    num_heads: 16
+  training:
+    batch_size: 8
+    phases:
+      - name: pooling-pretrain
+        objective: pooling_mse
+        max_steps: 2000
 ```
 
 ---
@@ -481,7 +490,7 @@ print(high_latency[["num_candidates", "latency_ms"]].corr())
 **Profiling command:**
 ```bash
 uv run python -m tools.profile_runtime \
-  --config configs/runs/poc_smollm3.yaml \
+  --config configs/Gutenberg_SmolLM3.yaml \
   --profile-output artifacts/traces/runtime_profile.json
 ```
 
@@ -548,31 +557,27 @@ python -m torch.cuda._memory_viz trace_plot artifacts/traces/memory_snapshot.pic
 ### Example 1: Training Run Telemetry
 
 ```python
-# tools/train_gistnet.py (excerpt)
-import wandb
+# megacontext/gistnet/lightning.py (excerpt)
+class GistNetLightningModule(pl.LightningModule):
+    def training_step(self, batch, batch_idx):
+        phase_index = self._phase_index_for_step(int(self.global_step))
+        phase = self.phases[phase_index]
+        loss, metrics = self._compute_phase_loss(batch, phase)
 
-wandb.init(project="megacontext-poc", name="JT1_cycle2", config=config)
+        self.log("train/loss", loss, prog_bar=True, on_step=True)
+        for name, value in metrics.items():
+            self.log(f"train/{name}", value, prog_bar=False, on_step=True)
 
-for step, batch in enumerate(dataloader):
-    # Forward pass with gist substitution
-    loss, delta_nll = compute_substitutability_loss(batch)
+        return loss
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-
-    # Log every 10 steps
-    if step % 10 == 0:
-        wandb.log({
-            "train/loss": loss.item(),
-            "train/delta_nll": delta_nll.mean().item(),
-            "train/learning_rate": scheduler.get_last_lr()[0],
-            "train/grad_norm": torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        }, step=step)
-
-    # Snapshot every 500 steps
-    if step % 500 == 0:
-        torch.save(model.state_dict(), f"artifacts/checkpoints/JT1_cycle2_step{step}.pt")
+# In a notebook configure WandbLogger or CSVLogger, then:
+trainer = pl.Trainer(
+    logger=pl.loggers.WandbLogger(project="megacontext-poc"),
+    max_steps=module.total_steps,
+    accelerator="gpu",
+    devices=1,
+)
+trainer.fit(module, data_module)
 ```
 
 ---

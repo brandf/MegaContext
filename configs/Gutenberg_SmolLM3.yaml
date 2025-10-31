@@ -1,0 +1,64 @@
+# Combined MegaContext configuration for the Gutenberg sample corpus
+# using SmolLM3-3B as the base model. Add additional presets alongside
+# this file (e.g., SampleText_TinyGPT2.yaml) for new experiments.
+name: Gutenberg_SmolLM3
+description: Gutenberg subset with SmolLM3-3B base model and two-stage GistNet training.
+
+dataset:
+  dataset_name: gutenberg_sample
+  tokenizer: HuggingFaceTB/SmolLM2-360M-Instruct
+  block_size: 32
+  context_tokens: 512
+  context_stride: 512
+  horizon: 32
+  teacher_model: HuggingFaceTB/SmolLM2-360M-Instruct
+  teacher_batch_size: 32
+  teacher_dtype: float32
+  teacher_device: cpu
+  teacher_trust_remote_code: false
+  splits:
+    train:
+      name: train
+      source: ../data/raw/gutenberg/**/*.txt
+      output_path: ../data/gutenberg_sample/train.arrow
+      max_files: 200
+
+base_model:
+  name: HuggingFaceTB/SmolLM3-3B
+  torch_dtype: bfloat16
+  device: null
+  trust_remote_code: false
+  run_name: base_llm_demo
+  prompt: >
+    MegaContext virtualizes long-term memory. Explain the core idea in two sentences.
+  max_new_tokens: 64
+  do_sample: false
+  temperature: 0.7
+  wandb_project: megacontext-poc
+
+gistnet:
+  model:
+    hidden_size: auto  # Resolved from dataset teacher hidden size.
+    block_size: 32
+    num_heads: 16
+    mlp_ratio: 4.0
+    rope_base: 10000.0
+    layer_norm_eps: 1.0e-5
+  training:
+    batch_size: 8
+    seed: 0
+    precision: bf16-mixed
+    accumulate_grad_batches: 1
+    log_every_n_steps: 25
+    weight_decay: 0.01
+    phases:
+      - name: pooling-pretrain
+        objective: pooling_mse
+        max_steps: 2000
+        window_tokens: 512
+        lr: 0.001
+      - name: delta-finetune
+        objective: delta_nll
+        max_steps: 1000
+        window_tokens: 512
+        lr: 0.0005

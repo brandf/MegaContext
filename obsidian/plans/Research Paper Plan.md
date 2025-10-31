@@ -28,7 +28,7 @@ This milestone produces a polished, reproducible MegaContext system suitable for
 - Task 1.3: Support multi-scale curricula—progressively tightening gist budgets (≤5×, ≤10×, >10×) and logging compression-band performance.
 - Task 1.4: Implement contrastive / auxiliary losses in `src/gistnet/trainer.py` to encourage gist diversity and faithfulness.
 - Task 1.5: Automate quality checks (LLMLingua faithfulness metrics, repetition detectors) gating checkpoint promotion.
-- Task 1.6: Publish reproducible configs (`configs/runs/gistnet_pretrain.yaml`) and W&B dashboards summarizing ΔNLL, compression bands, and failure modes.
+- Task 1.6: Publish reproducible unified configs (e.g., `configs/Gutenberg_SmolLM3.yaml`) and W&B dashboards summarizing ΔNLL, compression bands, and failure modes.
 - Task 1.7: Incorporate multimodal corpora (e.g., LAION captions, DocVQA renderings) by exporting tiled image patch datasets aligned with [[Multimodal MegaContext]]; surface modality metadata to downstream trainers.
 
 **Exit criteria:** Multi-domain gist models meet target losses across compression bands with validated quality gates and reproducible training scripts.

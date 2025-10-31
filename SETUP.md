@@ -1,11 +1,11 @@
 # Cloud GPU Setup (Novita.ai)
 
 This guide walks through provisioning a Novita.ai GPU instance and running the
-Phase 1 decode demo against a real base model.
+Jupyter notebook for training.
 
 ## 1. Provision the instance
 - Sign in to <https://novita.ai/> and add credits.
-- Launch a GPU instance (RTX 4090 24 GB to begin, Ubuntu image, ≥80 GB SSD).
+- Launch a GPU instance.
 - Attach your SSH key (or note the password) and record the public IP.
 
 ## 2. First-time login
@@ -22,58 +22,24 @@ nvidia-smi
 ## 3. Clone the repository
 ```bash
 mkdir -p ~/src && cd ~/src
-git clone git@github.com:<your-handle>/MegaContext.git
+git clone git@github.com:brandf/MegaContext.git
 cd MegaContext
 ```
-(Use HTTPS if you prefer.)
 
-## 4. Python environment
+## 4. Bootstrap the repository
+
+We ship an interactive helper that creates the virtualenv, installs dependencies, and (optionally) runs lint/tests:
+
 ```bash
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
-uv pip install -e .[dev]
-uv run pre-commit install  # optional
+bash scripts/setup_megacontext.sh
 ```
 
-## 5. Hugging Face authentication (if needed)
-```bash
-export HUGGINGFACE_HUB_TOKEN=hf_xxx
-uv run huggingface-cli login --token "$HUGGINGFACE_HUB_TOKEN"
-```
+Use flags such as `--yes` (non-interactive) or `--skip-tests`; run `bash scripts/setup_megacontext.sh --help` for the full menu.
 
-## 6. Sanity checks
-```bash
-uv run ruff check
-uv run pytest --maxfail=1 --disable-warnings
-```
+## 5. Launch the research notebook
+- Start Jupyter (e.g. `uv run jupyter lab`) and open `notebooks/megacontext.ipynb`.
+- The notebook guides you through environment checks, dataset prep, training config overrides, Lightning runs, and artifact export. Enable Weights & Biases in the notebook UI if you want live metrics.
 
-## 7. Dataset prep smoke test
-```bash
-# Optional: persist shards somewhere else (e.g., mounted Drive in Colab)
-# export MEGACONTEXT_DATA_ROOT=/path/to/storage
-uv run python -m tools.prepare_dataset --config configs/data/sample_text.yaml
-```
-
-## 8. Run the decode demo
-```bash
-export MEGACONTEXT_ENABLE_WANDB=1    # optional
-export WANDB_MODE=online             # or "offline"
-uv run python -m tools.decode_demo --config configs/runs/base_llm.yaml
-```
-
-You should see:
-- Generation output printed to stdout.
-- Log file in `artifacts/run_logs/base_llm_demo-<timestamp>.log`.
-- (Optional) W&B run under the `megacontext-poc` project.
-
-## 9. (Optional) GistNet training smoke
-```bash
-uv run python -m tools.train_gistnet \
-    --dataset data/sample_text/train.arrow \
-    --config configs/runs/gistnet_example.yaml
-```
-
-## 10. Shut down when idle
+## 6. Shut down when idle
 - Use `nvidia-smi` to confirm utilisation during runs.
 - Stop or snapshot the instance when you’re done to avoid extra charges.

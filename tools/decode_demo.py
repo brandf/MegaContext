@@ -29,7 +29,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        default="configs/runs/base_llm.yaml",
+        default="configs/SampleText_TinyGPT2.yaml",
         type=Path,
         help="Path to the run config YAML file.",
     )
@@ -42,6 +42,24 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
+    if "model_name" not in config and "base_model" in config:
+        base_cfg = dict(config["base_model"])
+        if "model_name" not in base_cfg and "name" in base_cfg:
+            base_cfg["model_name"] = base_cfg["name"]
+        for key in (
+            "run_name",
+            "prompt",
+            "max_new_tokens",
+            "do_sample",
+            "temperature",
+            "wandb_project",
+            "torch_dtype",
+            "device",
+            "trust_remote_code",
+        ):
+            base_cfg.setdefault(key, config.get(key))
+        config = base_cfg
+
     run_name = config.get("run_name", "base_llm_demo")
     logger = setup_logging(run_name)
     logger.info("Starting decode demo", extra={"config_path": str(args.config)})

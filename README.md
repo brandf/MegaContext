@@ -24,17 +24,23 @@ For the best editing/contributing experience open in Obsidian client, open a the
 
 ## Development & Contribution
 
-- Follow the conventions in `AGENTS.md` for directory layout, testing, linting, and communication.
-- Bootstrap: `uv venv`, `uv sync`, then `uv run pytest --maxfail=1 --disable-warnings` for smoke tests. Lint/format via `uv run ruff check src tests` and `uv run black src tests`.
-- Tooling and demos live under `tools/`; see the corresponding Obsidian notes for command examples.
-- Update progress in the Obsidian plan notes before hand-off so the next contributor has full context.
+### Agents
+  - follow the conventions in `AGENTS.md` for directory layout, testing, linting, and communication.
+  - otherwise use the same workflow as a human contributor
+
+### Humans
+  - Background information:
+    + Watch Karpathy videos
+      * [Intro to LLMs](https://www.youtube.com/watch?v=zjkBMFhNj_g)
+      * [Deep Dive into LLMs](https://www.youtube.com/watch?v=7xTGNNLPyMI)
+      * [Zero to Hero](https://www.youtube.com/watch?v=VMj-3S1tku0&list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ)
+    + Read [Megacontext Documentation](https://brandf.github.io/MegaContext/)
+  - Follow [SETUP.md](./SETUP.md) instruction in a linux environment.
+    + Such as a rented GPU from https://novita.ai
+  - Use the Jupyter [notebook](./notebooks/megacontext.ipynb) for training.
 
 ---
 
 # License
 
-MIT License (suggested). PRs welcome—please include reproducible tests for GistNet, LensNet, the focus allocator, and end-to-end demos.
-
----
-
-*MegaContext virtualizes sequence memory just as MegaTexture virtualized textures—focusing detailed computation only where needed. It opens a path to persistent, updatable, and truly lifelong language models.*
+MIT [License](./LICENSE). PRs welcome.

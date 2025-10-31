@@ -2,7 +2,8 @@
 Convert raw corpora into tensor-aligned Arrow shards for gist training.
 
 Usage:
-    uv run python -m tools.prepare_dataset --config configs/data/sample_text.yaml
+    uv run python -m tools.prepare_dataset --config configs/Gutenberg_SmolLM3.yaml
+    # Combined experiment configs live under configs/*.yaml
 """
 
 from __future__ import annotations
@@ -30,7 +31,10 @@ from megacontext.data import DatasetConfig, SplitConfig
 def load_dataset_config(path: Path) -> DatasetConfig:
     with path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle)
-    return DatasetConfig.model_validate(raw)
+    dataset_payload = raw.get("dataset") if isinstance(raw, dict) else None
+    if dataset_payload is None:
+        dataset_payload = raw
+    return DatasetConfig.model_validate(dataset_payload)
 
 
 def gather_documents(split: SplitConfig, base_dir: Path) -> list[str]:
@@ -451,23 +455,29 @@ def process_split(
     return summary
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare datasets for MegaContext.")
-    parser.add_argument(
-        "--config",
-        type=Path,
-        required=True,
-        help="Dataset YAML config.",
-    )
-    args = parser.parse_args()
+def prepare_dataset_from_config(
+    config_path: Path,
+    *,
+    log: bool = True,
+) -> dict[str, Any]:
+    """
+    Prepare dataset shards and metadata using the provided YAML config.
 
-    config_path = args.config.resolve()
-    config = load_dataset_config(config_path)
+    Args:
+        config_path: Path to a ``DatasetConfig`` YAML file.
+        log: When ``True``, emit progress summaries to stdout (default: ``True``).
+
+    Returns:
+        Dictionary containing per-split summaries and the metadata path.
+    """
+
+    resolved_path = config_path.resolve()
+    config = load_dataset_config(resolved_path)
     tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    # Allow very long documents; chunking keeps blocks within block_size.
     tokenizer.model_max_length = int(1e6)
+
     teacher_dtype = select_teacher_dtype(config.teacher_dtype, config.teacher_device)
     teacher_model = None
     if config.teacher_model is not None:
@@ -479,7 +489,7 @@ def main() -> None:
         teacher_model.to(config.teacher_device)
         teacher_model.eval()
 
-    base_dir = config_path.parent
+    base_dir = resolved_path.parent
     split_summaries: dict[str, dict[str, Any]] = {}
     actual_teacher_dtype_str: str | None = None
     for split_name, split_config in tqdm(config.splits.items(), desc="Splits"):
@@ -493,13 +503,14 @@ def main() -> None:
         )
         split_summaries[split_name] = summary
         actual_teacher_dtype_str = summary["teacher_dtype"]
-        summary_line = (
-            f"[{split_name}] {summary['documents']} docs, "
-            f"{summary['contexts']} contexts → {summary['examples']} examples "
-            f"(teacher dim={summary['teacher_hidden_size']} "
-            f"dtype={summary['teacher_dtype']})"
-        )
-        print(summary_line)
+        if log:
+            summary_line = (
+                f"[{split_name}] {summary['documents']} docs, "
+                f"{summary['contexts']} contexts → {summary['examples']} examples "
+                f"(teacher dim={summary['teacher_hidden_size']} "
+                f"dtype={summary['teacher_dtype']})"
+            )
+            print(summary_line)
 
     metadata_path = config.metadata_path()
     if metadata_path.suffix not in {".yaml", ".yml"}:
@@ -511,7 +522,28 @@ def main() -> None:
         split_summaries,
         teacher_dtype=dtype_str,
     )
-    print(f"Wrote metadata to {metadata_path}")
+    if log:
+        print(f"Wrote metadata to {metadata_path}")
+
+    return {
+        "config_path": str(resolved_path),
+        "metadata_path": str(metadata_path),
+        "teacher_dtype": dtype_str,
+        "splits": split_summaries,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Prepare datasets for MegaContext.")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Dataset YAML config.",
+    )
+    args = parser.parse_args()
+
+    prepare_dataset_from_config(args.config)
 
 
 if __name__ == "__main__":

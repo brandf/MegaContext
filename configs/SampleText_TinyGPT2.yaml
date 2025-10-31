@@ -1,0 +1,57 @@
+# Tiny sample configuration for quick smoke tests on the bundled text snippet.
+# Duplicate this file to spin up new experiments with different datasets/models.
+name: SampleText_TinyGPT2
+description: Minimal config that keeps everything CPU-friendly for local notebooks.
+
+dataset:
+  dataset_name: sample_text
+  tokenizer: gpt2
+  block_size: 4
+  context_tokens: 32
+  context_stride: 16
+  horizon: 8
+  teacher_model: sshleifer/tiny-gpt2
+  teacher_batch_size: 2
+  teacher_dtype: auto
+  teacher_device: cpu
+  splits:
+    train:
+      name: train
+      source: ../data/raw/sample_text.txt
+      output_path: ../data/sample_text/train.arrow
+      max_files: 1
+
+base_model:
+  name: sshleifer/tiny-gpt2
+  torch_dtype: float32
+  device: cpu
+  trust_remote_code: false
+  run_name: sample-text-demo
+  prompt: >
+    MegaContext compresses history into reusable gists. Summarise this idea in a sentence.
+  max_new_tokens: 32
+  do_sample: false
+  temperature: 0.7
+  wandb_project: megacontext-poc
+
+gistnet:
+  model:
+    hidden_size: auto
+    block_size: 4
+    num_heads: 1
+    mlp_ratio: 2.0
+    rope_base: 10000.0
+    layer_norm_eps: 1.0e-5
+  training:
+    batch_size: 2
+    seed: 0
+    precision: 32-true
+    accumulate_grad_batches: 1
+    log_every_n_steps: 10
+    weight_decay: 0.0
+    phases:
+      - name: pooling-pretrain
+        objective: pooling_mse
+        max_steps: 50
+        window_tokens: 32
+        lr: 0.001
