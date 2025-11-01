@@ -37,15 +37,16 @@ For the best editing/contributing experience open in Obsidian client, open a the
 1. Open the notebook via the badge above or [this link](https://colab.research.google.com/github/brandf/MegaContext/blob/main/notebooks/megacontext.ipynb).
 2. Select a GPU runtime (`Runtime → Change runtime type → T4/L4/A100`).
 3. Run the **Quick Start** bootstrap cell at the top of the notebook; it clones the repo, installs dependencies, and wires up widget support.
-4. Continue through the numbered sections (environment snapshot → data prep → training).
+4. Launch the **0. Setup Console** cell to choose the experiment config, artifact/data roots, logging, tokens, resume checkpoint, and reproducibility seed in one place.
+5. Continue with `1. Dataset Preparation` → `2. Configure GistNet Training` → `3. Build Lightning Components` → `4. Launch Training`.
 
 The bootstrap script is idempotent—rerun it whenever you reconnect to a fresh Colab session.
 
 ### Artifact Storage & Resuming Runs
 - Point `MEGACONTEXT_ARTIFACT_ROOT` to mounted network storage (e.g. Novita.ai volumes) before launching the notebook. All checkpoints, logs, and summaries flow there by default.
 - Use `MEGACONTEXT_DATA_ROOT` if you want dataset shards on a different mount than the git checkout.
-- The notebook’s **Configure Storage** cell lets you override paths interactively; it creates directories as needed.
-- Checkpoint selection is handled in **Checkpoints & Resume**—pick `Do not resume` for a fresh run or choose any `.ckpt` discovered under the artifact root.
+- The **Setup Console** cell lets you override paths interactively; it creates directories as needed and surfaces available checkpoints.
+- Pick `Do not resume` for a fresh run or choose any `.ckpt` discovered under the artifact root directly from the console.
 - Reproducibility defaults to seed `42`; set `MEGACONTEXT_SEED` to pin a different seed per experiment.
 - Set `MEGACONTEXT_FORCE_REINSTALL=1` before running the bootstrap cell if you need to rebuild the editable install in-place (otherwise cached installs are reused to avoid Colab restarts).
 

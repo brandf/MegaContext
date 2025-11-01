@@ -20,6 +20,7 @@ Rotate through [[GistNet]], [[LensNet]], and LoRA [1] updates while collecting t
 - Execute the **Quick Start** bootstrap cell in [`notebooks/megacontext.ipynb`](../../notebooks/megacontext.ipynb) to clone the repo, install dependencies, and enable widget support inside Colab.
 - The package targets Python 3.10+, matching Colab's default interpreter; restart and rerun the bootstrap cell whenever the VM resets.
 - Keep WANDB and Hugging Face tokens handy—enter them via the widgets block to persist credentials for the current session.
+- Use the **0. Setup Console** cell to select configs, tokens, storage roots, logging mode, resume checkpoints, and seeds before kicking off dataset prep or training.
 
 ### Resuming Interrupted Runs
 
