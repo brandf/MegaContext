@@ -8,6 +8,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -26,34 +27,72 @@ DOC_LINKS = {
 }
 
 
-def _format_heading(title: str, link_key: str | None = None) -> str:
-    if link_key and link_key in DOC_LINKS:
-        return f"### {title} ([docs]({DOC_LINKS[link_key]}))"
-    return f"### {title}"
+def _format_heading_html(title: str, link_key: str | None = None) -> str:
+    """Render an HTML heading with an optional docs link."""
+
+    doc_href = DOC_LINKS.get(link_key) if link_key else None
+    if doc_href:
+        return (
+            f'<h3 style="margin: 0 0 8px; font-size: 1.05rem;">{title} '
+            f'<a href="{doc_href}" target="_blank" rel="noopener noreferrer" '
+            f'style="font-size: 0.85rem; text-decoration: none;">(docs)</a></h3>'
+        )
+    return f'<h3 style="margin: 0 0 8px; font-size: 1.05rem;">{title}</h3>'
 
 
 def format_config_markdown(config: Mapping[str, Any]) -> str:
-    """Render a combined experiment config (dataset/base_model/gistnet) as Markdown."""
+    """Render experiment config sections inside a horizontal HTML table."""
 
-    parts: list[str] = []
+    sections: list[tuple[str, Mapping[str, Any], str | None]] = [
+        ("Dataset", config.get("dataset", {}), "Telemetry"),
+        ("Base Model", config.get("base_model", {}), "Base Runtime"),
+        ("GistNet", config.get("gistnet", {}), "GistNet"),
+    ]
 
-    dataset_cfg = config.get("dataset", {})
-    base_model_cfg = config.get("base_model", {})
-    gistnet_cfg = config.get("gistnet", {})
+    # Include any other nested mapping sections so the preview stays complete.
+    for key, value in config.items():
+        if key in {"dataset", "base_model", "gistnet"}:
+            continue
+        if isinstance(value, Mapping):
+            sections.append((key.replace("_", " ").title(), value, None))
 
-    parts.append(_format_heading("Dataset", "Telemetry"))
-    dataset_yaml = yaml.safe_dump(dataset_cfg, sort_keys=False)
-    parts.append(f"```yaml\n{dataset_yaml}\n```")
+    visible_sections = [
+        (title, payload, link) for title, payload, link in sections if payload
+    ]
+    if not visible_sections:
+        return "<p>No experiment settings detected.</p>"
 
-    parts.append(_format_heading("Base Model", "Base Runtime"))
-    base_yaml = yaml.safe_dump(base_model_cfg, sort_keys=False)
-    parts.append(f"```yaml\n{base_yaml}\n```")
+    header_cells: list[str] = []
+    body_cells: list[str] = []
 
-    parts.append(_format_heading("GistNet", "GistNet"))
-    gist_yaml = yaml.safe_dump(gistnet_cfg, sort_keys=False)
-    parts.append(f"```yaml\n{gist_yaml}\n```")
+    for title, payload, link_key in visible_sections:
+        header_cells.append(
+            '<th style="text-align: left; padding: 8px 12px; '
+            "border-bottom: 1px solid var(--jp-border-color2, #d0d0d0); "
+            'font-weight: 600; font-size: 0.95rem;">'
+            f"{_format_heading_html(title, link_key)}</th>"
+        )
+        yaml_dump = yaml.safe_dump(payload, sort_keys=False).strip()
+        body_cells.append(
+            '<td style="vertical-align: top; padding: 12px;">'
+            '<pre style="margin: 0; white-space: pre-wrap; word-break: break-word; '
+            "font-family: var(--jp-code-font-family, monospace); "
+            "font-size: var(--jp-code-font-size, 13px); "
+            "background-color: var(--jp-layout-color2, #f7f7f9); "
+            "border: 1px solid var(--jp-border-color2, #d0d0d0); "
+            'border-radius: 6px; padding: 12px;">'
+            f"{escape(yaml_dump)}"
+            "</pre></td>"
+        )
 
-    return "\n\n".join(parts)
+    table_html = (
+        "<table style=\"width: 100%; border-collapse: separate; border-spacing: 0 0; "
+        "table-layout: fixed;\">"
+        f"<tr>{''.join(header_cells)}</tr>"
+        f"<tr>{''.join(body_cells)}</tr>"
+        "</table>"
+    )
+    return table_html
 
 
 def format_dataset_summary(summary: Mapping[str, Any]) -> str:
