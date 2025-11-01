@@ -21,6 +21,7 @@ Rotate through [[GistNet]], [[LensNet]], and LoRA [1] updates while collecting t
 - The package targets Python 3.10+, matching Colab's default interpreter; restart and rerun the bootstrap cell whenever the VM resets.
 - Keep WANDB and Hugging Face tokens handy—enter them via the widgets block to persist credentials for the current session.
 - Use the **0. Setup Console** cell to select configs, tokens, storage roots, logging mode, resume checkpoints, and seeds before kicking off dataset prep or training.
+- Set `MEGACONTEXT_FORCE_DATA_REBUILD=1` if you need to regenerate dataset shards even when Arrow outputs are already present; otherwise the notebook reuses cached data.
 
 ### Resuming Interrupted Runs
 

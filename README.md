@@ -49,6 +49,7 @@ The bootstrap script is idempotent—rerun it whenever you reconnect to a fresh 
 - Pick `Do not resume` for a fresh run or choose any `.ckpt` discovered under the artifact root directly from the console.
 - Reproducibility defaults to seed `42`; set `MEGACONTEXT_SEED` to pin a different seed per experiment.
 - Set `MEGACONTEXT_FORCE_REINSTALL=1` before running the bootstrap cell if you need to rebuild the editable install in-place (otherwise cached installs are reused to avoid Colab restarts).
+- Set `MEGACONTEXT_FORCE_DATA_REBUILD=1` when you need to regenerate dataset shards even if Arrow files already exist.
 
 ---
 
