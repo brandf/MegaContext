@@ -8,7 +8,6 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
-from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -27,72 +26,47 @@ DOC_LINKS = {
 }
 
 
-def _format_heading_html(title: str, link_key: str | None = None) -> str:
-    """Render an HTML heading with an optional docs link."""
+def iter_config_sections(
+    config: Mapping[str, Any],
+) -> list[tuple[str, Any, str | None]]:
+    """Return experiment config sections as tuples of (title, payload, docs link)."""
 
-    doc_href = DOC_LINKS.get(link_key) if link_key else None
-    if doc_href:
-        return (
-            f'<h3 style="margin: 0 0 8px; font-size: 1.05rem;">{title} '
-            f'<a href="{doc_href}" target="_blank" rel="noopener noreferrer" '
-            f'style="font-size: 0.85rem; text-decoration: none;">(docs)</a></h3>'
-        )
-    return f'<h3 style="margin: 0 0 8px; font-size: 1.05rem;">{title}</h3>'
+    ordered_sections = [
+        ("Dataset", config.get("dataset"), "Telemetry"),
+        ("Base Model", config.get("base_model"), "Base Runtime"),
+        ("GistNet", config.get("gistnet"), "GistNet"),
+    ]
+    seen_keys = {"dataset", "base_model", "gistnet"}
+
+    for key, value in config.items():
+        if key in seen_keys:
+            continue
+        if isinstance(value, Mapping) and value:
+            ordered_sections.append((key.replace("_", " ").title(), value, None))
+
+    sections: list[tuple[str, Any, str | None]] = []
+    for title, payload, link_key in ordered_sections:
+        if payload in (None, {}, []):
+            continue
+        sections.append((title, payload, DOC_LINKS.get(link_key) if link_key else None))
+    return sections
 
 
 def format_config_markdown(config: Mapping[str, Any]) -> str:
-    """Render experiment config sections inside a horizontal HTML table."""
+    """Render experiment config sections as stacked Markdown blocks."""
 
-    sections: list[tuple[str, Mapping[str, Any], str | None]] = [
-        ("Dataset", config.get("dataset", {}), "Telemetry"),
-        ("Base Model", config.get("base_model", {}), "Base Runtime"),
-        ("GistNet", config.get("gistnet", {}), "GistNet"),
-    ]
+    sections = iter_config_sections(config)
+    if not sections:
+        return "No experiment settings detected."
 
-    # Include any other nested mapping sections so the preview stays complete.
-    for key, value in config.items():
-        if key in {"dataset", "base_model", "gistnet"}:
-            continue
-        if isinstance(value, Mapping):
-            sections.append((key.replace("_", " ").title(), value, None))
-
-    visible_sections = [
-        (title, payload, link) for title, payload, link in sections if payload
-    ]
-    if not visible_sections:
-        return "<p>No experiment settings detected.</p>"
-
-    header_cells: list[str] = []
-    body_cells: list[str] = []
-
-    for title, payload, link_key in visible_sections:
-        header_cells.append(
-            '<th style="text-align: left; padding: 8px 12px; '
-            "border-bottom: 1px solid var(--jp-border-color2, #d0d0d0); "
-            'font-weight: 600; font-size: 0.95rem;">'
-            f"{_format_heading_html(title, link_key)}</th>"
-        )
-        yaml_dump = yaml.safe_dump(payload, sort_keys=False).strip()
-        body_cells.append(
-            '<td style="vertical-align: top; padding: 12px;">'
-            '<pre style="margin: 0; white-space: pre-wrap; word-break: break-word; '
-            "font-family: var(--jp-code-font-family, monospace); "
-            "font-size: var(--jp-code-font-size, 13px); "
-            "background-color: var(--jp-layout-color2, #f7f7f9); "
-            "border: 1px solid var(--jp-border-color2, #d0d0d0); "
-            'border-radius: 6px; padding: 12px;">'
-            f"{escape(yaml_dump)}"
-            "</pre></td>"
-        )
-
-    table_html = (
-        "<table style=\"width: 100%; border-collapse: separate; border-spacing: 0 0; "
-        "table-layout: fixed;\">"
-        f"<tr>{''.join(header_cells)}</tr>"
-        f"<tr>{''.join(body_cells)}</tr>"
-        "</table>"
-    )
-    return table_html
+    blocks: list[str] = []
+    for title, payload, docs_link in sections:
+        heading = f"### {title}"
+        if docs_link:
+            heading = f"{heading} ([docs]({docs_link}))"
+        yaml_dump = yaml.safe_dump(payload, sort_keys=False)
+        blocks.append(f"{heading}\n```yaml\n{yaml_dump}\n```")
+    return "\n\n".join(blocks)
 
 
 def format_dataset_summary(summary: Mapping[str, Any]) -> str:

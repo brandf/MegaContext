@@ -17,6 +17,7 @@ from .summary import (
     format_dataset_summary,
     format_training_config,
     format_training_summary,
+    iter_config_sections,
     save_experiment_summary,
 )
 
@@ -29,6 +30,7 @@ __all__ = [
     "format_dataset_summary",
     "format_training_summary",
     "format_training_config",
+    "iter_config_sections",
     "save_experiment_summary",
     "build_logger",
 ]
