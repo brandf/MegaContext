@@ -474,75 +474,60 @@ def prepare_dataset_from_config(
         device_preference=config.teacher_device,
         dtype_preference=config.teacher_dtype,
     )
-    previous_determinism = torch.are_deterministic_algorithms_enabled()
-    restore_determinism = False
     if teacher_device_str.startswith("cuda"):
         os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-        if previous_determinism:
-            if log:
-                print(
-                    "Disabling torch deterministic algorithms during dataset "
-                    "preparation (GPU teacher).",
-                    flush=True,
-                )
-            torch.use_deterministic_algorithms(False)
-            restore_determinism = True
 
-    try:
-        teacher_model = None
-        if config.teacher_model is not None:
-            teacher_model = AutoModelForCausalLM.from_pretrained(
-                config.teacher_model,
-                torch_dtype=teacher_dtype,
-                trust_remote_code=config.teacher_trust_remote_code,
-            )
-            teacher_model.to(teacher_device_str)
-            teacher_model.eval()
-
-        base_dir = resolved_path.parent
-        split_summaries: dict[str, dict[str, Any]] = {}
-        actual_teacher_dtype_str: str | None = None
-        for split_name, split_config in tqdm(config.splits.items(), desc="Splits"):
-            summary = process_split(
-                split_config,
-                tokenizer,
-                config,
-                base_dir=base_dir,
-                teacher_model=teacher_model,
-                teacher_dtype=teacher_dtype,
-            )
-            split_summaries[split_name] = summary
-            actual_teacher_dtype_str = summary["teacher_dtype"]
-            if log:
-                summary_line = (
-                    f"[{split_name}] {summary['documents']} docs, "
-                    f"{summary['contexts']} contexts → {summary['examples']} examples "
-                    f"(teacher dim={summary['teacher_hidden_size']} "
-                    f"dtype={summary['teacher_dtype']})"
-                )
-                print(summary_line)
-
-        metadata_path = config.metadata_path()
-        if metadata_path.suffix not in {".yaml", ".yml"}:
-            metadata_path = metadata_path.with_suffix(".yaml")
-        dtype_str = actual_teacher_dtype_str or torch_dtype_to_str(teacher_dtype)
-        update_metadata(
-            metadata_path,
-            config,
-            split_summaries,
-            teacher_dtype=dtype_str,
+    teacher_model = None
+    if config.teacher_model is not None:
+        teacher_model = AutoModelForCausalLM.from_pretrained(
+            config.teacher_model,
+            torch_dtype=teacher_dtype,
+            trust_remote_code=config.teacher_trust_remote_code,
         )
+        teacher_model.to(teacher_device_str)
+        teacher_model.eval()
+
+    base_dir = resolved_path.parent
+    split_summaries: dict[str, dict[str, Any]] = {}
+    actual_teacher_dtype_str: str | None = None
+    for split_name, split_config in tqdm(config.splits.items(), desc="Splits"):
+        summary = process_split(
+            split_config,
+            tokenizer,
+            config,
+            base_dir=base_dir,
+            teacher_model=teacher_model,
+            teacher_dtype=teacher_dtype,
+        )
+        split_summaries[split_name] = summary
+        actual_teacher_dtype_str = summary["teacher_dtype"]
         if log:
-            print(f"Wrote metadata to {metadata_path}")
-        return {
-            "config_path": str(resolved_path),
-            "metadata_path": str(metadata_path),
-            "teacher_dtype": dtype_str,
-            "splits": split_summaries,
-        }
-    finally:
-        if restore_determinism:
-            torch.use_deterministic_algorithms(True)
+            summary_line = (
+                f"[{split_name}] {summary['documents']} docs, "
+                f"{summary['contexts']} contexts → {summary['examples']} examples "
+                f"(teacher dim={summary['teacher_hidden_size']} "
+                f"dtype={summary['teacher_dtype']})"
+            )
+            print(summary_line)
+
+    metadata_path = config.metadata_path()
+    if metadata_path.suffix not in {".yaml", ".yml"}:
+        metadata_path = metadata_path.with_suffix(".yaml")
+    dtype_str = actual_teacher_dtype_str or torch_dtype_to_str(teacher_dtype)
+    update_metadata(
+        metadata_path,
+        config,
+        split_summaries,
+        teacher_dtype=dtype_str,
+    )
+    if log:
+        print(f"Wrote metadata to {metadata_path}")
+    return {
+        "config_path": str(resolved_path),
+        "metadata_path": str(metadata_path),
+        "teacher_dtype": dtype_str,
+        "splits": split_summaries,
+    }
 
 
 def main() -> None:
