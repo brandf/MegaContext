@@ -459,6 +459,11 @@ def prepare_dataset_from_config(
     )
     teacher_model = None
     if config.teacher_model is not None:
+        if (
+            teacher_device_str.startswith("cuda")
+            and torch.are_deterministic_algorithms_enabled()
+        ):
+            os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
         teacher_model = AutoModelForCausalLM.from_pretrained(
             config.teacher_model,
             torch_dtype=teacher_dtype,
