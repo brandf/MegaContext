@@ -26,6 +26,7 @@ from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from megacontext.data import DatasetConfig, SplitConfig
+from megacontext.utils.precision import resolve_runtime_precision
 
 
 def load_dataset_config(path: Path) -> DatasetConfig:
@@ -58,16 +59,6 @@ def chunkify(tokens: Sequence[int], block_size: int) -> Iterable[list[int]]:
             yield list(block)
 
 
-def resolve_torch_dtype(value: str | None) -> torch.dtype | None:
-    if value is None or value == "auto":
-        return None
-    if isinstance(value, str):
-        if hasattr(torch, value):
-            return getattr(torch, value)
-        raise ValueError(f"Unsupported torch dtype {value!r}")
-    raise TypeError(f"Expected dtype string or None, received {type(value)!r}")
-
-
 def torch_dtype_to_str(dtype: torch.dtype) -> str:
     if dtype is torch.float16:
         return "float16"
@@ -76,46 +67,6 @@ def torch_dtype_to_str(dtype: torch.dtype) -> str:
     if dtype is torch.float32:
         return "float32"
     raise ValueError(f"Unsupported torch dtype {dtype!r}")
-
-
-def select_teacher_device(preferred: str) -> str:
-    """Resolve teacher execution device, preferring GPU when available."""
-
-    if preferred in {None, "", "auto"}:
-        if torch.cuda.is_available():
-            return "cuda:0"
-        return "cpu"
-    try:
-        device = torch.device(preferred)
-    except (TypeError, ValueError) as exc:
-        msg = f"Invalid teacher device string {preferred!r}"
-        raise ValueError(msg) from exc
-    if device.type == "cuda" and not torch.cuda.is_available():
-        print(
-            (
-                "CUDA device requested "
-                f"({preferred}) but no GPU detected; falling back to CPU."
-            ),
-            flush=True,
-        )
-        return "cpu"
-    return preferred
-
-
-def select_teacher_dtype(requested: str | None, device_str: str) -> torch.dtype:
-    resolved = resolve_torch_dtype(requested)
-    if resolved is not None:
-        return resolved
-    device = torch.device(device_str)
-    if device.type == "cuda" and torch.cuda.is_available():
-        index = (
-            device.index if device.index is not None else torch.cuda.current_device()
-        )
-        major, _ = torch.cuda.get_device_capability(index)
-        if major >= 8:
-            return torch.bfloat16
-        return torch.float16
-    return torch.float32
 
 
 def torch_dtype_to_arrow(dtype: torch.dtype) -> pa.DataType:
@@ -502,8 +453,10 @@ def prepare_dataset_from_config(
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.model_max_length = int(1e6)
 
-    teacher_device_str = select_teacher_device(config.teacher_device)
-    teacher_dtype = select_teacher_dtype(config.teacher_dtype, teacher_device_str)
+    teacher_device_str, teacher_dtype = resolve_runtime_precision(
+        device_preference=config.teacher_device,
+        dtype_preference=config.teacher_dtype,
+    )
     teacher_model = None
     if config.teacher_model is not None:
         teacher_model = AutoModelForCausalLM.from_pretrained(
