@@ -28,8 +28,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from megacontext.data import DatasetConfig, SplitConfig
 from megacontext.utils.precision import resolve_runtime_precision
 
-_DETERMINISM_WARNING_EMITTED = False
-
 
 def load_dataset_config(path: Path) -> DatasetConfig:
     with path.open("r", encoding="utf-8") as handle:
@@ -277,7 +275,10 @@ def process_split(
         position=2,
         dynamic_ncols=True,
         mininterval=0.2,
+        total=0,
+        unit="ctx",
     )
+    context_bar.set_postfix(examples=0)
 
     def flush_batch() -> None:
         nonlocal batch_examples, teacher_hidden_size
@@ -290,35 +291,13 @@ def process_split(
             ]
             input_ids = torch.tensor(sequences, dtype=torch.long, device=teacher_device)
             attention_mask = torch.ones_like(input_ids, device=teacher_device)
-            reset_determinism = False
-            global _DETERMINISM_WARNING_EMITTED
-            if (
-                teacher_device is not None
-                and teacher_device.type == "cuda"
-                and torch.are_deterministic_algorithms_enabled()
-            ):
-                if os.environ.get("CUBLAS_WORKSPACE_CONFIG") is None:
-                    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-                torch.use_deterministic_algorithms(False)
-                reset_determinism = True
-                if not _DETERMINISM_WARNING_EMITTED:
-                    print(
-                        "Warning: temporarily disabling torch deterministic algorithms "
-                        "for GPU teacher model execution.",
-                        flush=True,
-                    )
-                    _DETERMINISM_WARNING_EMITTED = True
-            try:
-                with torch.no_grad():
-                    outputs = teacher_model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        output_hidden_states=True,
-                        use_cache=False,
-                    )
-            finally:
-                if reset_determinism:
-                    torch.use_deterministic_algorithms(True)
+            with torch.no_grad():
+                outputs = teacher_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=True,
+                    use_cache=False,
+                )
             hidden = outputs.hidden_states[-1][:, : context_tokens + horizon_tokens, :]
             hidden = hidden.to(teacher_dtype)
             teacher_hidden_size = int(hidden.shape[-1])
@@ -393,6 +372,10 @@ def process_split(
             continue
 
         max_start = total_blocks - blocks_per_example + 1
+        if max_start > 0 and stride_blocks > 0:
+            contexts_for_doc = (max_start + stride_blocks - 1) // stride_blocks
+            context_bar.total += contexts_for_doc
+            context_bar.refresh()
         for start in range(0, max_start, stride_blocks):
             context_blocks = blocks[start : start + blocks_per_context]
             future_blocks = blocks[
@@ -413,12 +396,18 @@ def process_split(
             )
             contexts_processed += 1
             context_bar.update(1)
+            if contexts_processed % 20 == 0:
+                context_bar.set_postfix(examples=examples_emitted)
             if (
                 split_config.max_tokens is not None
                 and tokens_consumed >= split_config.max_tokens
             ):
                 if batch_examples:
                     flush_batch()
+                context_bar.n = contexts_processed
+                context_bar.set_postfix(examples=examples_emitted)
+                context_bar.total = max(context_bar.total, contexts_processed)
+                context_bar.refresh()
                 doc_iter.close()
                 context_bar.close()
                 writer.close()
@@ -440,6 +429,10 @@ def process_split(
             break
 
     flush_batch()
+    context_bar.n = contexts_processed
+    context_bar.set_postfix(examples=examples_emitted)
+    context_bar.total = max(context_bar.total, contexts_processed)
+    context_bar.refresh()
     doc_iter.close()
     context_bar.close()
     writer.close()
@@ -481,63 +474,75 @@ def prepare_dataset_from_config(
         device_preference=config.teacher_device,
         dtype_preference=config.teacher_dtype,
     )
-    teacher_model = None
-    if config.teacher_model is not None:
-        if (
-            teacher_device_str.startswith("cuda")
-            and torch.are_deterministic_algorithms_enabled()
-        ):
-            os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-        teacher_model = AutoModelForCausalLM.from_pretrained(
-            config.teacher_model,
-            torch_dtype=teacher_dtype,
-            trust_remote_code=config.teacher_trust_remote_code,
-        )
-        teacher_model.to(teacher_device_str)
-        teacher_model.eval()
+    previous_determinism = torch.are_deterministic_algorithms_enabled()
+    restore_determinism = False
+    if teacher_device_str.startswith("cuda"):
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        if previous_determinism:
+            if log:
+                print(
+                    "Disabling torch deterministic algorithms during dataset "
+                    "preparation (GPU teacher).",
+                    flush=True,
+                )
+            torch.use_deterministic_algorithms(False)
+            restore_determinism = True
 
-    base_dir = resolved_path.parent
-    split_summaries: dict[str, dict[str, Any]] = {}
-    actual_teacher_dtype_str: str | None = None
-    for split_name, split_config in tqdm(config.splits.items(), desc="Splits"):
-        summary = process_split(
-            split_config,
-            tokenizer,
-            config,
-            base_dir=base_dir,
-            teacher_model=teacher_model,
-            teacher_dtype=teacher_dtype,
-        )
-        split_summaries[split_name] = summary
-        actual_teacher_dtype_str = summary["teacher_dtype"]
-        if log:
-            summary_line = (
-                f"[{split_name}] {summary['documents']} docs, "
-                f"{summary['contexts']} contexts → {summary['examples']} examples "
-                f"(teacher dim={summary['teacher_hidden_size']} "
-                f"dtype={summary['teacher_dtype']})"
+    try:
+        teacher_model = None
+        if config.teacher_model is not None:
+            teacher_model = AutoModelForCausalLM.from_pretrained(
+                config.teacher_model,
+                torch_dtype=teacher_dtype,
+                trust_remote_code=config.teacher_trust_remote_code,
             )
-            print(summary_line)
+            teacher_model.to(teacher_device_str)
+            teacher_model.eval()
 
-    metadata_path = config.metadata_path()
-    if metadata_path.suffix not in {".yaml", ".yml"}:
-        metadata_path = metadata_path.with_suffix(".yaml")
-    dtype_str = actual_teacher_dtype_str or torch_dtype_to_str(teacher_dtype)
-    update_metadata(
-        metadata_path,
-        config,
-        split_summaries,
-        teacher_dtype=dtype_str,
-    )
-    if log:
-        print(f"Wrote metadata to {metadata_path}")
+        base_dir = resolved_path.parent
+        split_summaries: dict[str, dict[str, Any]] = {}
+        actual_teacher_dtype_str: str | None = None
+        for split_name, split_config in tqdm(config.splits.items(), desc="Splits"):
+            summary = process_split(
+                split_config,
+                tokenizer,
+                config,
+                base_dir=base_dir,
+                teacher_model=teacher_model,
+                teacher_dtype=teacher_dtype,
+            )
+            split_summaries[split_name] = summary
+            actual_teacher_dtype_str = summary["teacher_dtype"]
+            if log:
+                summary_line = (
+                    f"[{split_name}] {summary['documents']} docs, "
+                    f"{summary['contexts']} contexts → {summary['examples']} examples "
+                    f"(teacher dim={summary['teacher_hidden_size']} "
+                    f"dtype={summary['teacher_dtype']})"
+                )
+                print(summary_line)
 
-    return {
-        "config_path": str(resolved_path),
-        "metadata_path": str(metadata_path),
-        "teacher_dtype": dtype_str,
-        "splits": split_summaries,
-    }
+        metadata_path = config.metadata_path()
+        if metadata_path.suffix not in {".yaml", ".yml"}:
+            metadata_path = metadata_path.with_suffix(".yaml")
+        dtype_str = actual_teacher_dtype_str or torch_dtype_to_str(teacher_dtype)
+        update_metadata(
+            metadata_path,
+            config,
+            split_summaries,
+            teacher_dtype=dtype_str,
+        )
+        if log:
+            print(f"Wrote metadata to {metadata_path}")
+        return {
+            "config_path": str(resolved_path),
+            "metadata_path": str(metadata_path),
+            "teacher_dtype": dtype_str,
+            "splits": split_summaries,
+        }
+    finally:
+        if restore_determinism:
+            torch.use_deterministic_algorithms(True)
 
 
 def main() -> None:
