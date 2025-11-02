@@ -19,8 +19,8 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.ipc as pa_ipc
 import pyarrow.types as pa_types
-import pytorch_lightning as pl
 import torch
+from lightning import pytorch as pl
 from lightning.pytorch.callbacks import Callback  # type: ignore
 from lightning.pytorch.loggers import Logger  # type: ignore
 from torch import Tensor, nn

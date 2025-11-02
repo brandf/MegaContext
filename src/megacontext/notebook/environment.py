@@ -46,7 +46,7 @@ def _get_torch_info() -> tuple[str | None, bool, int, list[str]]:
 
 def _get_lightning_version() -> str | None:
     try:
-        import pytorch_lightning as pl  # type: ignore
+        from lightning import pytorch as pl  # type: ignore
     except ImportError:  # pragma: no cover - optional dependency
         return None
     return pl.__version__
