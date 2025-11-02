@@ -374,6 +374,8 @@ class GistNetLightningModule(pl.LightningModule):
                 raise RuntimeError("Base model does not expose input embeddings.")
             self.base_model = base_model
             self.embed_layer = embed_layer
+            self.embed_layer.requires_grad_(False)
+            self.embed_layer.train()
 
     # Lightning API -----------------------------------------------------------------
 
