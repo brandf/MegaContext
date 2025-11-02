@@ -72,8 +72,11 @@ class DatasetConfig(BaseModel):
         ),
     )
     teacher_device: str = Field(
-        default="cpu",
-        description="Device string for teacher model execution (e.g., cpu, cuda:0).",
+        default="auto",
+        description=(
+            "Device string for teacher model execution (e.g., cpu, cuda:0). "
+            "Use 'auto' to pick a GPU when available, otherwise fall back to CPU."
+        ),
     )
     teacher_trust_remote_code: bool = Field(
         default=False,

@@ -78,6 +78,30 @@ def torch_dtype_to_str(dtype: torch.dtype) -> str:
     raise ValueError(f"Unsupported torch dtype {dtype!r}")
 
 
+def select_teacher_device(preferred: str) -> str:
+    """Resolve teacher execution device, preferring GPU when available."""
+
+    if preferred in {None, "", "auto"}:
+        if torch.cuda.is_available():
+            return "cuda:0"
+        return "cpu"
+    try:
+        device = torch.device(preferred)
+    except (TypeError, ValueError) as exc:
+        msg = f"Invalid teacher device string {preferred!r}"
+        raise ValueError(msg) from exc
+    if device.type == "cuda" and not torch.cuda.is_available():
+        print(
+            (
+                "CUDA device requested "
+                f"({preferred}) but no GPU detected; falling back to CPU."
+            ),
+            flush=True,
+        )
+        return "cpu"
+    return preferred
+
+
 def select_teacher_dtype(requested: str | None, device_str: str) -> torch.dtype:
     resolved = resolve_torch_dtype(requested)
     if resolved is not None:
@@ -478,7 +502,8 @@ def prepare_dataset_from_config(
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.model_max_length = int(1e6)
 
-    teacher_dtype = select_teacher_dtype(config.teacher_dtype, config.teacher_device)
+    teacher_device_str = select_teacher_device(config.teacher_device)
+    teacher_dtype = select_teacher_dtype(config.teacher_dtype, teacher_device_str)
     teacher_model = None
     if config.teacher_model is not None:
         teacher_model = AutoModelForCausalLM.from_pretrained(
@@ -486,7 +511,7 @@ def prepare_dataset_from_config(
             torch_dtype=teacher_dtype,
             trust_remote_code=config.teacher_trust_remote_code,
         )
-        teacher_model.to(config.teacher_device)
+        teacher_model.to(teacher_device_str)
         teacher_model.eval()
 
     base_dir = resolved_path.parent

@@ -13,7 +13,7 @@ dataset:
   teacher_model: sshleifer/tiny-gpt2
   teacher_batch_size: 2
   teacher_dtype: auto
-  teacher_device: cpu
+  teacher_device: auto
   splits:
     train:
       name: train
