@@ -28,6 +28,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from megacontext.data import DatasetConfig, SplitConfig
 from megacontext.utils.precision import resolve_runtime_precision
 
+_DETERMINISM_WARNING_EMITTED = False
+
 
 def load_dataset_config(path: Path) -> DatasetConfig:
     with path.open("r", encoding="utf-8") as handle:
@@ -288,13 +290,35 @@ def process_split(
             ]
             input_ids = torch.tensor(sequences, dtype=torch.long, device=teacher_device)
             attention_mask = torch.ones_like(input_ids, device=teacher_device)
-            with torch.no_grad():
-                outputs = teacher_model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    output_hidden_states=True,
-                    use_cache=False,
-                )
+            reset_determinism = False
+            global _DETERMINISM_WARNING_EMITTED
+            if (
+                teacher_device is not None
+                and teacher_device.type == "cuda"
+                and torch.are_deterministic_algorithms_enabled()
+            ):
+                if os.environ.get("CUBLAS_WORKSPACE_CONFIG") is None:
+                    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+                torch.use_deterministic_algorithms(False)
+                reset_determinism = True
+                if not _DETERMINISM_WARNING_EMITTED:
+                    print(
+                        "Warning: temporarily disabling torch deterministic algorithms "
+                        "for GPU teacher model execution.",
+                        flush=True,
+                    )
+                    _DETERMINISM_WARNING_EMITTED = True
+            try:
+                with torch.no_grad():
+                    outputs = teacher_model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        output_hidden_states=True,
+                        use_cache=False,
+                    )
+            finally:
+                if reset_determinism:
+                    torch.use_deterministic_algorithms(True)
             hidden = outputs.hidden_states[-1][:, : context_tokens + horizon_tokens, :]
             hidden = hidden.to(teacher_dtype)
             teacher_hidden_size = int(hidden.shape[-1])
