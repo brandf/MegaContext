@@ -35,6 +35,24 @@ def load_dataset_config(path: Path) -> DatasetConfig:
     dataset_payload = raw.get("dataset") if isinstance(raw, dict) else None
     if dataset_payload is None:
         dataset_payload = raw
+    if isinstance(raw, dict):
+        base_model_payload = raw.get("base_model")
+        if base_model_payload and isinstance(base_model_payload, dict):
+            base_model_name = base_model_payload.get("name")
+            tokenizer = dataset_payload.get("tokenizer")
+            if tokenizer in (None, "auto"):
+                if not base_model_name:
+                    raise ValueError(
+                        "Specify dataset.tokenizer when base_model.name is unset."
+                    )
+                dataset_payload["tokenizer"] = base_model_name
+            teacher_model = dataset_payload.get("teacher_model")
+            if teacher_model in (None, "auto"):
+                if not base_model_name:
+                    raise ValueError(
+                        "Specify dataset.teacher_model when base_model.name is unset."
+                    )
+                dataset_payload["teacher_model"] = base_model_name
     return DatasetConfig.model_validate(dataset_payload)
 
 

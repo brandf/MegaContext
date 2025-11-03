@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 import torch
@@ -66,7 +67,25 @@ def test_gistnet_lightning_pooling_step() -> None:
         lr=1e-3,
         name="phase-1",
     )
-    module = GistNetLightningModule(config, [phase])
+    base_settings = BaseModelSettings(name="dummy")
+    dummy_embed = torch.nn.Embedding(16, 4)
+
+    dummy_model = MagicMock()
+    dummy_model.get_input_embeddings.return_value = dummy_embed
+    dummy_model.eval.return_value = dummy_model
+    dummy_model.requires_grad_.return_value = dummy_model
+
+    dummy_base = MagicMock()
+    dummy_base.model = dummy_model
+
+    with patch(
+        "megacontext.gistnet.lightning.BaseModel.from_pretrained",
+        return_value=dummy_base,
+    ):
+        module = GistNetLightningModule(
+            config, [phase], base_model_config=base_settings
+        )
+        module.setup()
     module.train()
 
     batch = {
@@ -92,14 +111,28 @@ def test_build_gistnet_experiment(tmp_path: Path) -> None:
         lr=1e-3,
         name="phase-1",
     )
-    trainer, module, data_module = build_gistnet_experiment(
-        dataset_path=shard_path,
-        model_config=config,
-        training=GistNetTrainingConfig(
-            batch_size=1,
-            phases=(phase,),
-        ),
-    )
+    base_settings = BaseModelSettings(name="dummy")
+    dummy_embed = torch.nn.Embedding(16, 2)
+    dummy_model = MagicMock()
+    dummy_model.get_input_embeddings.return_value = dummy_embed
+    dummy_model.eval.return_value = dummy_model
+    dummy_model.requires_grad_.return_value = dummy_model
+    dummy_base = MagicMock()
+    dummy_base.model = dummy_model
+
+    with patch(
+        "megacontext.gistnet.lightning.BaseModel.from_pretrained",
+        return_value=dummy_base,
+    ):
+        trainer, module, data_module = build_gistnet_experiment(
+            dataset_path=shard_path,
+            model_config=config,
+            training=GistNetTrainingConfig(
+                batch_size=1,
+                phases=(phase,),
+                base_model=base_settings,
+            ),
+        )
 
     assert module.total_steps == 5
     assert trainer.max_steps == 5

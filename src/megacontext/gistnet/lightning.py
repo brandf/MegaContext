@@ -318,10 +318,8 @@ class GistNetLightningModule(pl.LightningModule):
         self.requires_base_model = any(
             phase.objective == "delta_nll" for phase in self.phases
         )
-        if self.requires_base_model and base_model_config is None:
-            raise ValueError(
-                "delta_nll objective requires a BaseModelSettings configuration."
-            )
+        if base_model_config is None:
+            raise ValueError("GistNet training requires a base_model configuration.")
         self.base_model_config = base_model_config
         self.base_model: BaseModel | None = None
         self.embed_layer: nn.Module | None = None
@@ -357,7 +355,7 @@ class GistNetLightningModule(pl.LightningModule):
         return self._model_dtype
 
     def setup(self, stage: str | None = None) -> None:
-        if self.requires_base_model and self.base_model is None:
+        if self.base_model is None:
             cfg = self.base_model_config
             assert cfg is not None  # for mypy
             base_model = BaseModel.from_pretrained(
@@ -503,8 +501,17 @@ class GistNetLightningModule(pl.LightningModule):
         reshaped, num_blocks = self._reshape_blocks(context_slice_hidden)
 
         if phase.objective == "pooling_mse":
+            block_size = self.model.config.block_size
+            batch_size = context_tokens.shape[0]
+            inputs = reshaped
+            if self.embed_layer is not None:
+                token_embeds = self.embed_layer(context_slice_ids)
+                token_embeds = token_embeds.to(device=device, dtype=self.model_dtype)
+                inputs = token_embeds.view(batch_size, num_blocks, block_size, -1)
+            else:  # pragma: no cover - fallback for tests without base model
+                inputs = inputs.to(dtype=self.model_dtype)
             targets = reshaped.mean(dim=2)
-            preds = self.model(reshaped)
+            preds = self.model(inputs)
             loss = F.mse_loss(preds, targets)
             return loss, {}
 

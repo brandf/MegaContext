@@ -109,7 +109,13 @@ class MetricsTracker(Callback):
         drawn_line_labels: set[str] = set()
         for key, values in series.items():
             label = self.metric_labels.get(key, key)
-            ax.plot(steps, values, label=label)
+            if not values:
+                continue
+            if len(values) == len(steps):
+                x_values = steps
+            else:
+                x_values = steps[-len(values) :]
+            ax.plot(x_values, values, label=label)
             for value in self.reference_lines.get(key, ()):
                 line_label = f"{label} target ({value:.3f})"
                 show_label = line_label not in drawn_line_labels
