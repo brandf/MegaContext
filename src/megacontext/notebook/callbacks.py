@@ -32,6 +32,8 @@ class MetricsTracker(Callback):
         reference_lines: Mapping[str, Sequence[float] | float] | None = None,
         y_label: str = "Value",
         warmup_steps: int = 5,
+        holdout_evaluator=None,
+        holdout_interval: int | None = None,
     ) -> None:
         super().__init__()
         self.metric_keys = tuple(metric_keys) if metric_keys else ()
@@ -51,6 +53,11 @@ class MetricsTracker(Callback):
         self.y_label = y_label
         self.warmup_steps = max(0, int(warmup_steps))
         self._post_warmup_ylim: float | None = None
+        self.holdout_evaluator = holdout_evaluator
+        self.holdout_interval = (
+            max(1, int(holdout_interval)) if holdout_interval else None
+        )
+        self._last_holdout_metrics: dict[str, float] = {}
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:  # type: ignore[override]  # pragma: no cover - Lightning runtime
         step = int(trainer.global_step)
@@ -67,6 +74,20 @@ class MetricsTracker(Callback):
                 except Exception:
                     record[key] = float(logged[key])
         if len(record) > 1:
+            if self.holdout_evaluator and (
+                self.holdout_interval is None or step % self.holdout_interval == 0
+            ):
+                try:
+                    eval_metrics = self.holdout_evaluator(trainer, pl_module)
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    print(f"Holdout evaluation failed: {exc}")
+                else:
+                    if eval_metrics:
+                        self._last_holdout_metrics = {
+                            key: float(value) for key, value in eval_metrics.items()
+                        }
+            if self._last_holdout_metrics:
+                record.update(self._last_holdout_metrics)
             self.history.append(record)
             self._maybe_update_live_plot(step)
 
