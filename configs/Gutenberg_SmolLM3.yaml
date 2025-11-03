@@ -51,6 +51,12 @@ gistnet:
     accumulate_grad_batches: 1
     log_every_n_steps: 25
     weight_decay: 0.01
+    base_model:
+      name: HuggingFaceTB/SmolLM3-3B
+      torch_dtype: auto
+      device: cuda  # ensure ΔNLL teacher runs on GPU during phase 2
+      trust_remote_code: false
+      load_kwargs: {}
     phases:
       - name: pooling-pretrain
         objective: pooling_mse
