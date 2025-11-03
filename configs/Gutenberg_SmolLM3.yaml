@@ -14,11 +14,11 @@ base_model:
   wandb_project: megacontext-poc
 dataset:
   dataset_name: gutenberg_sample
-  block_size: 64
+  block_size: 32
   context_tokens: 512
   context_stride: 512
   horizon: 32
-  teacher_batch_size: 64
+  teacher_batch_size: 32
   teacher_dtype: auto
   teacher_device: auto
   teacher_trust_remote_code: false
