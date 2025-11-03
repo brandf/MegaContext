@@ -5,7 +5,7 @@ Lightning callbacks tailored for notebook usage.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 
 from IPython.display import clear_output, display  # type: ignore
 
@@ -28,6 +28,10 @@ class MetricsTracker(Callback):
         *,
         live_output=None,
         plot_every: int = 20,
+        metric_labels: Mapping[str, str] | None = None,
+        reference_lines: Mapping[str, Sequence[float] | float] | None = None,
+        y_label: str = "Value",
+        warmup_steps: int = 5,
     ) -> None:
         super().__init__()
         self.metric_keys = tuple(metric_keys) if metric_keys else ()
@@ -35,6 +39,18 @@ class MetricsTracker(Callback):
         self.live_output = live_output
         self.plot_every = max(1, int(plot_every))
         self._last_live_step: int = -1
+        self.metric_labels = dict(metric_labels or {})
+        self.reference_lines = {
+            key: (
+                tuple(float(v) for v in value)
+                if isinstance(value, Sequence) and not isinstance(value, (str | bytes))
+                else (float(value),)
+            )
+            for key, value in (reference_lines or {}).items()
+        }
+        self.y_label = y_label
+        self.warmup_steps = max(0, int(warmup_steps))
+        self._post_warmup_ylim: float | None = None
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:  # type: ignore[override]  # pragma: no cover - Lightning runtime
         step = int(trainer.global_step)
@@ -90,11 +106,53 @@ class MetricsTracker(Callback):
         if not steps:
             return None
         fig, ax = plt.subplots(figsize=figsize)
+        drawn_line_labels: set[str] = set()
         for key, values in series.items():
-            ax.plot(steps, values, label=key)
-        ax.set_xlabel("Step")
-        ax.set_ylabel("Value")
+            label = self.metric_labels.get(key, key)
+            ax.plot(steps, values, label=label)
+            for value in self.reference_lines.get(key, ()):
+                line_label = f"{label} target ({value:.3f})"
+                show_label = line_label not in drawn_line_labels
+                ax.axhline(
+                    value,
+                    color="#888888",
+                    linestyle="--",
+                    linewidth=1.0,
+                    alpha=0.6,
+                    label=line_label if show_label else None,
+                )
+                drawn_line_labels.add(line_label)
+        all_values: list[float] = []
+        for values in series.values():
+            all_values.extend(values)
+
+        if self._post_warmup_ylim is None and len(steps) > self.warmup_steps:
+            idx = min(self.warmup_steps, len(steps) - 1)
+            warmup_values = [
+                values[idx] for values in series.values() if len(values) > idx
+            ]
+            if warmup_values:
+                ref_vals = [
+                    val for vals in self.reference_lines.values() for val in vals
+                ]
+                candidate = (
+                    max(warmup_values + ref_vals) if ref_vals else max(warmup_values)
+                )
+                self._post_warmup_ylim = float(candidate)
+
+        ax.set_xlabel("Global Step")
+        ax.set_ylabel(self.y_label)
         ax.grid(True, alpha=0.2)
+        if self._post_warmup_ylim is not None:
+            top = self._post_warmup_ylim
+            if top == 0.0:
+                top = 0.05
+            margin = abs(top) * 0.05
+            min_value = min(all_values) if all_values else 0.0
+            ax.set_ylim(
+                bottom=min_value - margin if all_values else None,
+                top=top + margin,
+            )
         if series:
             ax.legend(loc="best")
         fig.tight_layout()
