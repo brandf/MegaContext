@@ -325,8 +325,6 @@ class GistNetLightningModule(pl.LightningModule):
         self.base_model_config = base_model_config
         self.base_model: BaseModel | None = None
         self.embed_layer: nn.Module | None = None
-        self.gist_projection: nn.Module = nn.Identity()
-        self._projection_initialized = False
 
         self.phase_boundaries: list[int] = []
         cumulative = 0
@@ -378,31 +376,13 @@ class GistNetLightningModule(pl.LightningModule):
             self.embed_layer = embed_layer
             self.embed_layer.requires_grad_(False)
             self.embed_layer.train()
-            embed_dim = embed_layer.weight.shape[1]
-            gist_dim = self.model.config.hidden_size
-            if gist_dim != embed_dim:
-                projection = nn.Linear(gist_dim, embed_dim, bias=False)
-                projection.to(device=self.device, dtype=self.model_dtype)
-                self.gist_projection = projection
-                self._projection_initialized = True
-                print(
-                    f"GistNet projection initialised to map {gist_dim}→{embed_dim} "
-                    "for delta_nll compatibility."
-                )
-            else:
-                if not isinstance(self.gist_projection, nn.Identity):
-                    self.gist_projection = nn.Identity()
-                self._projection_initialized = False
 
     # Lightning API -----------------------------------------------------------------
 
     def configure_optimizers(self) -> Any:
         base_lr = self.phases[0].lr
-        params = list(self.model.parameters())
-        if not isinstance(self.gist_projection, nn.Identity):
-            params += list(self.gist_projection.parameters())
         optimizer = AdamW(
-            params,
+            self.model.parameters(),
             lr=base_lr,
             weight_decay=self.weight_decay,
         )
@@ -554,7 +534,6 @@ class GistNetLightningModule(pl.LightningModule):
             assert embed_layer is not None  # for mypy
             embed_dtype = embed_layer.weight.dtype
             gists = gists.to(dtype=embed_dtype)
-            gists = self.gist_projection(gists)
 
             future_embeds = embed_layer(future_tokens).to(device=device)
             future_embeds = future_embeds.to(dtype=embed_dtype)

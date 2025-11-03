@@ -1,17 +1,24 @@
 # Combined MegaContext configuration for the Gutenberg sample corpus
-# using SmolLM3-3B as the base model. Add additional presets alongside
+# using SmolLM2-360M as the base model. Add additional presets alongside
 # this file (e.g., SampleText_TinyGPT2.yaml) for new experiments.
 name: Gutenberg_SmolLM3
-description: Gutenberg subset with SmolLM3-3B base model and two-stage GistNet training.
+description: Gutenberg subset with SmolLM2-360M base model and two-stage GistNet training.
+
+shared_base_model: &shared_base_model
+  name: &base_model_name HuggingFaceTB/SmolLM2-360M-Instruct
+  torch_dtype: auto
+  device: cuda
+  trust_remote_code: false
+  load_kwargs: {}
 
 dataset:
   dataset_name: gutenberg_sample
-  tokenizer: HuggingFaceTB/SmolLM2-360M-Instruct
+  tokenizer: *base_model_name
   block_size: 32
   context_tokens: 512
   context_stride: 512
   horizon: 32
-  teacher_model: HuggingFaceTB/SmolLM2-360M-Instruct
+  teacher_model: *base_model_name
   teacher_batch_size: 32
   teacher_dtype: auto
   teacher_device: auto
@@ -24,10 +31,7 @@ dataset:
       max_files: 200
 
 base_model:
-  name: HuggingFaceTB/SmolLM3-3B
-  torch_dtype: bfloat16
-  device: null
-  trust_remote_code: false
+  <<: *shared_base_model
   run_name: base_llm_demo
   prompt: >
     MegaContext virtualizes long-term memory. Explain the core idea in two sentences.
@@ -53,12 +57,7 @@ gistnet:
     weight_decay: 0.01
     num_workers: 15
     pin_memory: true
-    base_model:
-      name: HuggingFaceTB/SmolLM3-3B
-      torch_dtype: auto
-      device: cuda  # ensure ΔNLL teacher runs on GPU during phase 2
-      trust_remote_code: false
-      load_kwargs: {}
+    base_model: *shared_base_model
     phases:
       - name: pooling-pretrain
         objective: pooling_mse
