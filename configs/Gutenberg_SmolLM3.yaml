@@ -14,11 +14,11 @@ base_model:
   wandb_project: megacontext-poc
 dataset:
   dataset_name: gutenberg_sample
-  block_size: 32
+  block_size: 64
   context_tokens: 512
   context_stride: 512
   horizon: 32
-  teacher_batch_size: 32
+  teacher_batch_size: 64
   teacher_dtype: auto
   teacher_device: auto
   teacher_trust_remote_code: false
@@ -39,11 +39,11 @@ gistnet:
     rope_base: 10000.0
     layer_norm_eps: 1.0e-05
   training:
-    batch_size: 8
+    batch_size: 32
     seed: 0
     precision: bf16-mixed
     accumulate_grad_batches: 1
-    log_every_n_steps: 25
+    log_every_n_steps: 100
     weight_decay: 0.01
     num_workers: 15
     pin_memory: true
