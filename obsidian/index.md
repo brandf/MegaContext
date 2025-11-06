@@ -5,12 +5,13 @@ summary: A system architecture for virtualized LLM context that enables effectiv
 ---
 # MegaContext
 
-*A system architecture for virtualized LLM memory.*
+A system architecture for *virtualized hierarchical LLM memory*.
+![[Logo.png]]
 
 ---
 
 ## What is MegaContext?
-
+![[HighLevelMCArchitecture.png]]
 MegaContext virtualizes context by separating it into two parts (see [[Architecture Details]] for complete explanation): the [[MegaContext Tree]] (unbounded storage on disk) holds the complete history as a hierarchical gist tree, while the [[Working Context]] (fixed GPU window of 8k–32k tokens) holds a dynamically focused mix of raw tokens and compressed gists. [[GistNet]] compresses history into the tree, [[LensNet]] scores relevance, and the [[Focus Allocator]] streams the right level of detail into the working window, giving the model **effectively infinite memory at constant compute** with automatic context management. Emerging designs like [[Focus Architectures]] explore multi-headed and staged focus to deepen this core principle.
 
 ---
@@ -108,6 +109,10 @@ See [[POC Plan]] for the full roadmap.
 - [[Working Context Refocusing]] — dynamic context adjustment
 
 ### [[Plans]]
+- PRDs
+    - [[1. MegaContext End-to-End Training]]
+    - [[2. MegaPrediction Training]]
+    - [[3. Cognitive-Core Training]]
 - [[Plans]] — milestone plans (POC, Paper, Future)
 - [[POC Plan]] — stepwise guide for delivering the proof-of-concept
 - [[POC Implementation]] — implementation details and current status
