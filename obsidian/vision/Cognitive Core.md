@@ -25,11 +25,8 @@ Inspired by Andrej Karpathy's "cognitive core" concept—a compact reasoning eng
 
 ### Training the cognitive core
 
-1. **Curate & gist the knowledge base:** preprocess the corpus into block-aligned spans, compute multi-level gists with a dedicated [[GistNet]], and store them via the `{LOD0,LOD1,LOD2}.ctx` format.
-2. **Warm start the controllers:** pretrain [[LensNet]] using counterfactual traces from a larger teacher model so the small core inherits a strong focusing policy; refresh [[GistNet]] on spans the policy touches most.
-3. **Alternating training loop:** during each batch, the base model observes an 8–32 k [[Working Context]] assembled by [[LensNet]]/[[Focus Allocator]] from the knowledge tree. Optimize the model on task NLL, then refresh [[LensNet]] and [[GistNet]] in alternating phases (see [[Training & Operations]]).
-4. **Encourage dependence on memory:** include tasks that require multi-hop reasoning across the knowledge tree; penalize ignoring relevant spans by comparing ΔNLL with/without expansions.
-5. **Distill from a teacher:** use a larger LLM with direct access to the knowledge base to produce targets, distilling reasoning strategies into the smaller model.
+1. **Curate & gist the knowledge base:** preprocess the corpus into block-aligned spans, compute multi-level gists with a dedicated [[GistNet]], and store them via the `{LOD0,LOD1,LOD2}.ctx` format.  See: [[MegaCuration]]
+2. **Perform e2e C2 training**: See: [[3. Cognitive-Core Training#5. Training Loop]]
 
 ### Why it matters
 
@@ -40,7 +37,6 @@ Inspired by Andrej Karpathy's "cognitive core" concept—a compact reasoning eng
 
 ### Open research directions
 
-- **Joint training:** exploring end-to-end differentiable surrogates that allow gradients to flow through expand/collapse actions.
 - **Knowledge curation:** tools for versioning, deduplicating, and auditing the [[MegaContext Tree]] as it scales to billions of tokens (see [[MegaCuration]]).
 - **Focus policies:** RL or bandit strategies that optimize accuracy × latency beyond the current greedy allocator.
 - **Safety & alignment:** policies for moderating which knowledge segments are surfaced to the [[Working Context]] in sensitive domains.
