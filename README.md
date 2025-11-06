@@ -19,7 +19,7 @@ To dynamically adapt level of detail, a learned LensNet model, continuously/incr
 
 You can view/read the documentation [here](https://brandf.github.io/MegaContext/).
 
-For the best editing/contributing experience open in Obsidian client, open a the vault in the `obsidian/` folder;
+For the best editing/contributing experience, use the Obsidian client - open the vault in the `obsidian/` folder.
 
 ---
 
