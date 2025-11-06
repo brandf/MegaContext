@@ -111,6 +111,7 @@ See [[POC Plan]] for the full roadmap.
 - [[Plans]] — milestone plans (POC, Paper, Future)
 - [[POC Plan]] — stepwise guide for delivering the proof-of-concept
 - [[POC Implementation]] — implementation details and current status
+- [[PRDs/Index|Product Requirement Docs]] — quick links to active MegaContext PRDs
 - [[Ops]] — training cadence, workflow, performance, pruning
 - [[Alternating Optimization]] — training GistNet and LensNet together
 - [[Telemetry]] — metrics and monitoring
