@@ -20,8 +20,8 @@ sum(entry_costs in Working Context) ≤ W_max
 
 **What it means:**
 - The total token-equivalent cost of all entries in the [[Working Context]] must never exceed the budget [[Glossary#W_max (Token Budget)|W_max]]
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0 blocks]] cost 32 tokens each
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]] and [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L2]] [[gist|gists]] cost 1 token each
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0 blocks]] cost 32 tokens each
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD1]] and [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD2]] [[gist|gists]] cost 1 token each
 
 **Why it matters:**
 - Ensures constant GPU memory usage regardless of total history size
@@ -75,17 +75,17 @@ entry[i].end_token == entry[i+1].start_token  (for all consecutive entries)
 **Visual Example:**
 ```
 ✓ Valid (contiguous):
-[L0: 0-32] [L1: 32-64] [L0: 64-96] [L2: 96-1120]
+[LOD0: 0-32] [LOD1: 32-64] [LOD0: 64-96] [LOD2: 96-1120]
      └───────┘└────────┘└────────┘└──────────┘
      No gaps, perfect adjacency
 
 ✗ Invalid (gap):
-[L0: 0-32] [L1: 32-64] [L0: 96-128]
+[LOD0: 0-32] [LOD1: 32-64] [LOD0: 96-128]
      └───────┘└────────┘      └────────┘
                          ↑ GAP (tokens 64-96 missing)
 
 ✗ Invalid (overlap):
-[L0: 0-32] [L1: 28-60] [L0: 60-92]
+[LOD0: 0-32] [LOD1: 28-60] [LOD0: 60-92]
      └───────┘└────────┘└────────┘
           ↑ OVERLAP (tokens 28-32 appear twice)
 ```
@@ -105,9 +105,9 @@ Where [[Glossary#K (Block Size)|K]] = 32 in the [[POC Scope|POC]].
 **What it means:**
 - All entry boundaries must align with [[Glossary#K (Block Size)|K]]-token block boundaries
 - No entry can start or end mid-block (e.g., at token 17 or token 50)
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0 blocks]] are exactly 32 tokens
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]] [[gist|gists]] represent exactly 32 tokens (one L0 block)
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L2]] [[gist|gists]] represent exactly 1,024 tokens (32 L0 blocks)
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0 blocks]] are exactly 32 tokens
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD1]] [[gist|gists]] represent exactly 32 tokens (one LOD0 block)
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD2]] [[gist|gists]] represent exactly 1,024 tokens (32 LOD0 blocks)
 
 **Why it matters:**
 - Matches [[GistNet]] compression granularity (32→1)
@@ -142,10 +142,10 @@ entry covers span [s, e) → level ∈ {0, 1, 2} is legal for that span size
 ```
 
 **What it means:**
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0]] entries must cover exactly 32 tokens
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]] entries must cover exactly 32 tokens (compressing one L0 block)
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L2]] entries must cover exactly 1,024 tokens (compressing 32 L0 blocks)
-- Cannot have an L1 [[gist]] representing 64 tokens or an L2 [[gist]] representing 512 tokens
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0]] entries must cover exactly 32 tokens
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD1]] entries must cover exactly 32 tokens (compressing one LOD0 block)
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD2]] entries must cover exactly 1,024 tokens (compressing 32 LOD0 blocks)
+- Cannot have an LOD1 [[gist]] representing 64 tokens or an LOD2 [[gist]] representing 512 tokens
 
 **Why it matters:**
 - Ensures [[gist|gists]] accurately represent their source spans
@@ -161,13 +161,13 @@ entry covers span [s, e) → level ∈ {0, 1, 2} is legal for that span size
 **Example:**
 ```python
 # Valid level assignments
-entry_1 = Entry(level=0, start=0, end=32)        # ✓ L0 covers 32 tokens
-entry_2 = Entry(level=1, start=32, end=64)       # ✓ L1 covers 32 tokens
-entry_3 = Entry(level=2, start=64, end=1088)     # ✓ L2 covers 1024 tokens
+entry_1 = Entry(level=0, start=0, end=32)        # ✓ LOD0 covers 32 tokens
+entry_2 = Entry(level=1, start=32, end=64)       # ✓ LOD1 covers 32 tokens
+entry_3 = Entry(level=2, start=64, end=1088)     # ✓ LOD2 covers 1024 tokens
 
 # Invalid level assignments
-bad_1 = Entry(level=1, start=0, end=64)          # ✗ L1 can't cover 64 tokens
-bad_2 = Entry(level=2, start=0, end=512)         # ✗ L2 can't cover 512 tokens
+bad_1 = Entry(level=1, start=0, end=64)          # ✗ LOD1 can't cover 64 tokens
+bad_2 = Entry(level=2, start=0, end=512)         # ✗ LOD2 can't cover 512 tokens
 ```
 
 ---
@@ -177,12 +177,12 @@ bad_2 = Entry(level=2, start=0, end=512)         # ✗ L2 can't cover 512 tokens
 **Definition:**
 ```
 For gists: position_id = start_token + (K / 2)
-For L0 blocks: position_ids = [start_token, start_token+1, ..., end_token-1]
+For LOD0 blocks: position_ids = [start_token, start_token+1, ..., end_token-1]
 ```
 
 **What it means:**
 - [[gist|Gists]] are positioned at the **central token index** of their span for [[Glossary#RoPE (Rotary Position Embedding)|RoPE]]
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0 tokens]] use their actual sequential positions
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0 tokens]] use their actual sequential positions
 - This ensures [[Glossary#RoPE (Rotary Position Embedding)|RoPE]] phase information remains consistent when swapping [[LOD|LODs]]
 
 **Why it matters:**
@@ -198,13 +198,13 @@ For L0 blocks: position_ids = [start_token, start_token+1, ..., end_token-1]
 
 **Example:**
 ```python
-# L1 gist representing tokens [64, 96)
+# LOD1 gist representing tokens [64, 96)
 gist_position = 64 + (32 / 2) = 80  # Central position
 
-# L0 block representing tokens [64, 96)
+# LOD0 block representing tokens [64, 96)
 token_positions = [64, 65, 66, ..., 95]  # Sequential positions
 
-# When swapping L1→L0 or L0→L1 for span [64, 96):
+# When swapping LOD1→LOD0 or LOD0→LOD1 for span [64, 96):
 # - RoPE still sees positions centered around 80
 # - Relative distances to other spans remain consistent
 ```
@@ -226,8 +226,8 @@ These invariants follow from the core invariants above:
 Every entry in the [[Working Context]] corresponds to a node in the [[MegaContext Tree]] at the appropriate level.
 
 **Implications:**
-- Cannot have an [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0]] entry for a span that doesn't exist in `L0.ctx`
-- Cannot have an [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]] [[gist]] that wasn't generated by [[GistNet]]
+- Cannot have an [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0]] entry for a span that doesn't exist in `LOD0.ctx`
+- Cannot have an [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD1]] [[gist]] that wasn't generated by [[GistNet]]
 - [[expand|Expand]] operations require children to exist in the tree
 - [[collapse|Collapse]] operations require parent [[gist]] to exist in the tree
 
@@ -253,8 +253,8 @@ entry[i].start_token < entry[i+1].start_token  (for all i)
 When [[expand|expanding]] or [[collapse|collapsing]], all 32 children/parent must be swapped atomically.
 
 **Implications:**
-- Cannot [[expand]] half of an [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]] [[gist]] (e.g., only 16 of its 32 tokens)
-- Cannot [[collapse]] just 10 of 32 [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0 blocks]] into an incomplete [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]] [[gist]]
+- Cannot [[expand]] half of an [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD1]] [[gist]] (e.g., only 16 of its 32 tokens)
+- Cannot [[collapse]] just 10 of 32 [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0 blocks]] into an incomplete [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD1]] [[gist]]
 - Follows from Block Alignment Invariant + Level Consistency Invariant
 
 ---

@@ -72,7 +72,7 @@ summary: Modality-agnostic Transformer that scales to large inputs via cross-att
 
 ## Open Questions for MegaContext
 - How many latent slots does [[Working Context]] need to cover both **[[Gist|gist]]
-  embeddings and raw [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0]] tokens**
+  embeddings and raw [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0]] tokens**
   without starving the [[Glossary#Base Model|base model]]? (POC uses 8,192 token budget)
 - Can we interleave **Perceiver-style attention** with our hierarchical [[MegaContext Tree]]
   traversal to provide better credit assignment during [[Alternating Optimization]]?

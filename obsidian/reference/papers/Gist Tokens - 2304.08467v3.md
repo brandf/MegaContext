@@ -75,7 +75,7 @@ summary: Teaches LLMs to compress prompts into reusable gist tokens via attentio
 
 ## Open Questions for MegaContext
 - How to blend learned gist tokens with our **hierarchical [[MegaContext Tree]]**—should
-  precomputed prompt gists live as pseudo-[[L1]] nodes or as special metadata entries
+  precomputed prompt gists live as pseudo-[[LOD1]] nodes or as special metadata entries
   that bypass normal compression?
 - Can we **precompute domain-specific gists** (e.g., tool instructions, boilerplate) and
   cache them in [[Storage Format]] for instant [[Working Context]] injection, reducing

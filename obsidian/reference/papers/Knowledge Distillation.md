@@ -65,7 +65,7 @@ Knowledge distillation's core principle—preserving output distributions while 
 
 1. **Soften ΔNLL targets** during [[GistNet]] early training to expose subtle dependencies
 2. **Curriculum schedule** that gradually lowers temperature as compression improves
-3. **Multi-scale distillation** where L2 gists learn from L1's "soft" representations
+3. **Multi-scale distillation** where LOD2 gists learn from LOD1's "soft" representations
 
 ### LensNet Training Signal
 The paper's observation that soft targets carry richer training signal than hard labels applies to [[LensNet]]:
@@ -222,10 +222,10 @@ Paper focuses on forward predictions. For [[GistNet]], could we also distill **b
 - Ensures gists capture sufficient information for bidirectional reasoning
 
 ### 4. Cross-Level Consistency
-Should L2 gists distill from L1's soft outputs, or directly from L0 tokens?
+Should LOD2 gists distill from LOD1's soft outputs, or directly from LOD0 tokens?
 
-- **Cascaded**: L2 learns from L1 (faster, compounds errors)
-- **Direct**: L2 learns from L0 (slower, more faithful)
+- **Cascaded**: LOD2 learns from LOD1 (faster, compounds errors)
+- **Direct**: LOD2 learns from LOD0 (slower, more faithful)
 - **Hybrid**: Multi-task loss with both signals
 
 ### 5. Distillation for Focus Allocation

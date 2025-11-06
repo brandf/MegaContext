@@ -41,7 +41,7 @@ summary: Fast and memory-efficient exact attention using IO-aware tiling and ker
   - [[Base Runtime]]'s frozen LLM attention (if we can modify inference code)
 - **Tune block sizes for MegaContext workloads**: Default Bᵣ=128, Bᶜ=64 optimized for standard transformers. Profile MegaContext's specific attention patterns (non-causal LensNet, short cross-attention in GistNet) and adjust tile sizes for optimal HBM↔SRAM traffic.
 - **Recomputation strategy for training**: Apply FlashAttention's backward pass recomputation to [[GistNet Training]] and [[LensNet Training]]. Reduces activation memory by 5-10×, enabling larger batch sizes or longer horizons.
-- **Variable-length attention**: Use FlashAttention's support for variable sequence lengths to handle [[Working Context Assembly]]'s mixed LOD sequences efficiently—don't need to pad L0/L1/L2 entries to uniform length.
+- **Variable-length attention**: Use FlashAttention's support for variable sequence lengths to handle [[Working Context Assembly]]'s mixed LOD sequences efficiently—don't need to pad LOD0/LOD1/LOD2 entries to uniform length.
 - **Fused dropout and masking**: Implement attention masking (for causal/non-causal switching) and dropout inside the FlashAttention kernel rather than as separate operations, reducing memory traffic by another 20-30%.
 - **Multi-query attention optimization**: FlashAttention-2 includes optimizations for MQA/GQA patterns (shared KV across heads). If we adopt grouped-query attention in [[GistNet]] or [[LensNet]], use these optimizations.
 - **Benchmark attention patterns**: Profile MegaContext's specific attention workloads (32-token compression, W-length scoring, H-horizon lookahead) against FlashAttention's block sizes to identify bottlenecks and optimize accordingly.
@@ -64,7 +64,7 @@ summary: Fast and memory-efficient exact attention using IO-aware tiling and ker
 
 ## Open Questions for MegaContext
 - What's the actual speedup/memory benefit for MegaContext's specific attention patterns (non-causal LensNet, small cross-attention GistNet) vs. standard causal LM attention?
-- Should we fork FlashAttention to add custom support for mixed LOD sequences (L0/L1/L2 with different embedding scales)?
+- Should we fork FlashAttention to add custom support for mixed LOD sequences (LOD0/LOD1/LOD2 with different embedding scales)?
 - Can we combine FlashAttention's tiling with sparse attention patterns from [[Sparse Transformers]]—tile within sparse blocks for maximum efficiency?
 - How to handle FlashAttention's recomputation during counterfactual ΔNLL@H computation in [[LensNet Training]]—double recomputation overhead?
 - Should [[POC Implementation]] have fallback to standard attention for debugging, or always require FlashAttention (simpler but less portable)?

@@ -13,7 +13,7 @@ The training process teaches [[LensNet]] [1,2] to:
 - **Regress** signed utility values `u_i` that quantify the benefit of expanding/collapsing each entry
 - **Rank** entries correctly (higher-value expansions should score higher than lower-value ones)
 - **Maintain budget neutrality** (total expansion cost ≈ total collapse refund)
-- **Respect legality constraints** (L0 tokens cannot expand; L2 gists cannot collapse)
+- **Respect legality constraints** (LOD0 tokens cannot expand; LOD2 gists cannot collapse)
 
 Training data is generated from **trace logs** of [[MegaContext Tree]] operations, where counterfactual ΔNLL measurements quantify the utility of each possible expand/collapse action.
 
@@ -23,7 +23,7 @@ Training data is generated from **trace logs** of [[MegaContext Tree]] operation
 
 Each entry in the [[Working Context]] receives a **signed target utility** `y_i` based on measuring the impact of focus actions on language modeling performance:
 
-#### Expandable Items (L1/L2 Gists)
+#### Expandable Items (LOD1/LOD2 Gists)
 For gists that can be expanded into finer-grained children:
 
 ```python
@@ -50,7 +50,7 @@ def compute_expand_utility(gist_node, context, base_model):
 
 **Intuition:** If expanding a gist into detailed tokens improves the model's ability to predict upcoming text (lower NLL), that gist should receive a high positive utility score.
 
-#### Collapsible Items (L0/L1 Spans)
+#### Collapsible Items (LOD0/LOD1 Spans)
 For token spans that can be collapsed into parent gists:
 
 ```python
@@ -248,12 +248,12 @@ def budget_loss(predictions, span_width, levels, eps=1e-6):
     Returns:
         L_budget: Scalar loss
     """
-    # Expansion cost (positive scores on L1/L2)
+    # Expansion cost (positive scores on LOD1/LOD2)
     expandable_mask = (levels >= 1)
     expand_scores = torch.relu(predictions) * expandable_mask
 
     # Cost = score * children_width
-    # Approximate: assume L1 expands 8x, L2 expands 64x
+    # Approximate: assume LOD1 expands 8x, LOD2 expands 64x
     expansion_multiplier = torch.where(
         levels == 1,
         torch.tensor(8.0),
@@ -263,7 +263,7 @@ def budget_loss(predictions, span_width, levels, eps=1e-6):
     c_plus = span_width * (expansion_multiplier - 1)  # Net token increase
     P = (expand_scores * c_plus).sum()
 
-    # Collapse refund (negative scores on L0/L1)
+    # Collapse refund (negative scores on LOD0/LOD1)
     collapsible_mask = (levels <= 1)
     collapse_scores = torch.relu(-predictions) * collapsible_mask
 
@@ -307,8 +307,8 @@ def illegality_loss(predictions, levels, alpha=0.3, beta=0.3):
     """
     Penalize illegal focus directions.
 
-    - L0 tokens cannot expand (no children exist)
-    - L2 gists cannot collapse (no parent exists)
+    - LOD0 tokens cannot expand (no children exist)
+    - LOD2 gists cannot collapse (no parent exists)
 
     Args:
         predictions: [B, N] - Signed scores u_i
@@ -319,11 +319,11 @@ def illegality_loss(predictions, levels, alpha=0.3, beta=0.3):
     Returns:
         L_illegal: Scalar loss
     """
-    # Penalize positive scores on L0 (cannot expand)
+    # Penalize positive scores on LOD0 (cannot expand)
     l0_mask = (levels == 0)
     illegal_expand = torch.relu(predictions[l0_mask]).sum()
 
-    # Penalize negative scores on L2 (cannot collapse)
+    # Penalize negative scores on LOD2 (cannot collapse)
     l2_mask = (levels == 2)
     illegal_collapse = torch.relu(-predictions[l2_mask]).sum()
 
@@ -805,11 +805,11 @@ def compute_legality_rate(predictions, levels):
     violations = 0
     total = len(predictions)
 
-    # Check L0 expansions
+    # Check LOD0 expansions
     l0_mask = (levels == 0)
     violations += (predictions[l0_mask] > 0).sum().item()
 
-    # Check L2 collapses
+    # Check LOD2 collapses
     l2_mask = (levels == 2)
     violations += (predictions[l2_mask] < 0).sum().item()
 

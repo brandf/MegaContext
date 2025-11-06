@@ -225,10 +225,10 @@ Compressive Transformer addresses a core challenge MegaContext tackles: **how to
 
 | Compressive Transformer | MegaContext | Mapping |
 |-------------------------|-------------|---------|
-| Regular Memory (M) | L0 (raw tokens) in Working Context | Recent, full-resolution |
-| Compressed Memory (CM) | L1/L2 gists in Working Context | Older, compressed |
+| Regular Memory (M) | LOD0 (raw tokens) in Working Context | Recent, full-resolution |
+| Compressed Memory (CM) | LOD1/LOD2 gists in Working Context | Older, compressed |
 | Compression functions | [[GistNet]] | Learned compression |
-| Two-tier hierarchy | Multi-level tree (L0→L1→L2) | Hierarchical abstraction |
+| Two-tier hierarchy | Multi-level tree (LOD0→LOD1→LOD2) | Hierarchical abstraction |
 | Bounded memory | [[W_max]] budget | Resource constraint |
 | Most-used compression | [[LensNet]] focus scoring | Content-aware selection |
 
@@ -250,12 +250,12 @@ Compressive Transformer addresses a core challenge MegaContext tackles: **how to
 
 **Concept**: Maintain recent full-resolution + older compressed memory
 - MegaContext already does this but more explicitly
-- Validates our approach of mixing L0 and L1/L2 in working context
+- Validates our approach of mixing LOD0 and LOD1/LOD2 in working context
 - Suggests 3× context extension is achievable minimum
 
 **Implementation**:
-- Working context naturally divides into L0 (recent) and L1/L2 (compressed)
-- Consider whether recent context should *always* be L0
+- Working context naturally divides into LOD0 (recent) and LOD1/LOD2 (compressed)
+- Consider whether recent context should *always* be LOD0
 - Or allow [[LensNet]] to decide dynamically (more flexible)
 
 ### 2. Compression Trigger Logic
@@ -297,10 +297,10 @@ lensnet_input = concat([
 
 **Finding**: c=3 works well (3:1 compression)
 - MegaContext's 32:1 is much more aggressive
-- But we have multiple levels: L1 is 32:1, but L2 is 1024:1
+- But we have multiple levels: LOD1 is 32:1, but LOD2 is 1024:1
 
 **Implications**:
-- Consider intermediate compression ratios (e.g., L0.5 with 8:1 or 16:1)
+- Consider intermediate compression ratios (e.g., LOD0.5 with 8:1 or 16:1)
 - Or make compression ratio adaptive based on content importance
 - High-utility spans could use less aggressive compression
 
@@ -396,12 +396,12 @@ lensnet_input = concat([
 ### 1. Hybrid Compression Strategies
 
 Should MegaContext blend time-based and importance-based compression?
-- **Temporal**: Always keep very recent context at L0 (like Compressive Transformer)
+- **Temporal**: Always keep very recent context at LOD0 (like Compressive Transformer)
 - **Importance**: Use [[LensNet]] for older context (MegaContext approach)
 - **Hybrid**: Recent = temporal, older = importance-based
 
 **Exploration**:
-- Experiment with "keep last N tokens at L0" constraint
+- Experiment with "keep last N tokens at LOD0" constraint
 - Compare vs. fully dynamic focus allocation
 - Measure impact on prediction quality
 
@@ -427,7 +427,7 @@ class AttentionAugmentedLensNet(LensNet):
 Should different content compress at different ratios?
 - High-entropy spans: lower compression (preserve detail)
 - Repetitive spans: higher compression (aggressive)
-- Currently: uniform 32:1 for all L1 gists
+- Currently: uniform 32:1 for all LOD1 gists
 
 **Implementation path**:
 - Train GistNet variants with different compression ratios (8:1, 16:1, 32:1, 64:1)
@@ -436,9 +436,9 @@ Should different content compress at different ratios?
 
 ### 4. Intermediate Compression Levels
 
-Should we add L0.5 between L0 and L1?
-- L0.5: 8:1 compression (4 L0 tokens → 1 L0.5 gist)
-- L1: 32:1 compression (remains unchanged)
+Should we add LOD0.5 between LOD0 and LOD1?
+- LOD0.5: 8:1 compression (4 LOD0 tokens → 1 LOD0.5 gist)
+- LOD1: 32:1 compression (remains unchanged)
 - Gentler transition, less aggressive initial compression
 
 **Trade-offs**:
@@ -462,7 +462,7 @@ Should GistNet training follow a curriculum?
 - [[GistNet]] - MegaContext's learned compression module
 - [[LensNet]] - Focus scoring (analogous to "most-used" compression)
 - [[Focus Allocator]] - Budget-aware memory management
-- [[Working Context]] - Mix of L0 and compressed gists
+- [[Working Context]] - Mix of LOD0 and compressed gists
 - [[RETRO]] - Alternative retrieval-based approach
 - [[Memorizing Transformers]] - k-NN over external memory
 - [[Related Work]] - Broader context of long-context methods

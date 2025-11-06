@@ -26,7 +26,7 @@ Even with disk-backed storage, a mature [[MegaContext Tree]] memory will accumul
 
 ### Pruning strategy
 
-- **Level-aware shrinkage:** drop long-idle L0 tokens first (keeping their L1 gist). If L1 gists are never expanded, collapse them into L2, and so on.
+- **Level-aware shrinkage:** drop long-idle LOD0 tokens first (keeping their LOD1 gist). If LOD1 gists are never expanded, collapse them into LOD2, and so on.
 - **Version compaction:** keep current file versions in high detail; archive historical revisions as coarse gists or diffs to preserve traceability without hoarding tokens.
 - **Temporal decay:** assign domain-specific half-lives (e.g., fast decay for sensor logs, slow for specs) so the tree naturally thins over time.
 
@@ -45,7 +45,7 @@ Even with disk-backed storage, a mature [[MegaContext Tree]] memory will accumul
 ### Domain notes
 
 - **Robotics:** tie retention to reward signals or anomaly detectors; keep high-resolution data around events (collisions, novel observations) and aggressively compress idle periods.
-- **Codebases:** maintain a graph from code spans to tests/issues/PRs so spans with active dependencies stay detailed; collapse stale modules to L2/L3 summaries.
+- **Codebases:** maintain a graph from code spans to tests/issues/PRs so spans with active dependencies stay detailed; collapse stale modules to LOD2/LOD3 summaries.
 - **Documentation:** preserve canonical specs verbatim, but decay meeting notes or superseded plans once new revisions land.
 
 Pruning is easiest if provenance, access counts, and tagging hooks exist from day one; the POC should wire these metrics even if pruning is a future feature.

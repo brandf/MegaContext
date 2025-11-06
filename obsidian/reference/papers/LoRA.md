@@ -506,7 +506,7 @@ for batch in train_loader:
     # 1. Create gists
     gists = gist_net(batch["tokens"])
 
-    # 2. Assemble working context (mix L0/L1/L2)
+    # 2. Assemble working context (mix LOD0/LOD1/LOD2)
     wc = assemble_working_context(gists, batch["focus_layout"])
 
     # 3. Forward through base model with LoRA

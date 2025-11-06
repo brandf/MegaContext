@@ -19,7 +19,7 @@ This example shows how MegaContext handles a typical software development conver
 User: "Show me the UserAuth class"
 
 MegaContext Tree: [empty]
-Working Context: [system prompt tokens at L0]
+Working Context: [system prompt tokens at LOD0]
 ```
 
 The system starts fresh with no history, just the initial system prompt in the [[Working Context]].
@@ -32,26 +32,26 @@ The system starts fresh with no history, just the initial system prompt in the [
 System loads entire codebase → 100k tokens
 
 MegaContext Tree:
-  L0: 100k raw tokens (all files)
-  L1: 3,125 gists (100k ÷ 32)
-  L2: 97 gists (3,125 ÷ 32)
+  LOD0: 100k raw tokens (all files)
+  LOD1: 3,125 gists (100k ÷ 32)
+  LOD2: 97 gists (3,125 ÷ 32)
 
 Working Context (W_max=8k):
-  - Recent tokens (UserAuth.py) at L0: 1,500 tokens
-  - Related files at L1: 100 gists
-  - Distant code at L2: 50 gists
+  - Recent tokens (UserAuth.py) at LOD0: 1,500 tokens
+  - Related files at LOD1: 100 gists
+  - Distant code at LOD2: 50 gists
   Total: 1,500 + 100 + 50 = 1,650 tokens ✓
 ```
 
 **What happened:**
 - The entire codebase (100k tokens) was ingested into the [[MegaContext Tree]]
 - [[GistNet]] automatically compressed it into a two-level hierarchy:
-  - L1: 3,125 [[Glossary#Gist / Gist Embedding|gists]] (each representing 32 tokens)
-  - L2: 97 gists (each representing 1,024 tokens)
+  - LOD1: 3,125 [[Glossary#Gist / Gist Embedding|gists]] (each representing 32 tokens)
+  - LOD2: 97 gists (each representing 1,024 tokens)
 - The [[Working Context]] assembles a mixed-resolution view:
-  - **UserAuth.py** stays at L0 (full detail) since it's most relevant
-  - **Related files** appear as L1 gists (medium compression)
-  - **Distant code** appears as L2 gists (heavy compression)
+  - **UserAuth.py** stays at LOD0 (full detail) since it's most relevant
+  - **Related files** appear as LOD1 gists (medium compression)
+  - **Distant code** appears as LOD2 gists (heavy compression)
 - Total [[Glossary#W_max (Token Budget)|token budget]] stays under 8k ✓
 
 ---
@@ -67,15 +67,15 @@ LensNet scores:
   - Unrelated files: -0.5 (compress more)
 
 Focus Allocator actions:
-  ✓ Expand login method region L1→L0 (+31 tokens)
-  ✓ Expand 2FA helper region L1→L0 (+31 tokens)
-  ✓ Collapse distant database.py L0→L1 (-31 tokens)
-  ✓ Collapse old session code L0→L1 (-31 tokens)
+  ✓ Expand login method region LOD1→LOD0 (+31 tokens)
+  ✓ Expand 2FA helper region LOD1→LOD0 (+31 tokens)
+  ✓ Collapse distant database.py LOD0→LOD1 (-31 tokens)
+  ✓ Collapse old session code LOD0→LOD1 (-31 tokens)
 
 Working Context (updated):
-  - Login & 2FA code at L0: 2,100 tokens (expanded!)
-  - UserAuth methods at L1: 80 gists
-  - Distant files at L2: 52 gists
+  - Login & 2FA code at LOD0: 2,100 tokens (expanded!)
+  - UserAuth methods at LOD1: 80 gists
+  - Distant files at LOD2: 52 gists
   Total: 2,100 + 80 + 52 = 2,232 tokens ✓
 ```
 
@@ -86,8 +86,8 @@ Working Context (updated):
   - **Moderate positive score** (+0.2) for other auth methods → keep compressed
   - **Negative score** (-0.5) for unrelated files → compress further
 - [[Focus Allocator]] applied the refocusing operations:
-  - **Expanded** login method and 2FA helper from L1 to L0 (added 62 tokens)
-  - **Collapsed** unrelated code from L0 to L1 (freed 62 tokens)
+  - **Expanded** login method and 2FA helper from LOD1 to LOD0 (added 62 tokens)
+  - **Collapsed** unrelated code from LOD0 to LOD1 (freed 62 tokens)
   - Net budget change: **0 tokens** (balanced)
 - The model now sees login details at **full resolution** while keeping unrelated code compressed
 
@@ -104,15 +104,15 @@ LensNet scores:
   - Schema definitions: +0.7 (very relevant!)
 
 Focus Allocator actions:
-  ✓ Collapse login code L0→L1 (-31 tokens × 20 blocks)
-  ✓ Expand database.py L1→L0 (+31 tokens × 15 blocks)
-  ✓ Expand schema.sql L2→L1 (+1023 tokens)
-  ✓ Expand schema L1→L0 in detail regions (+31 tokens × 10)
+  ✓ Collapse login code LOD0→LOD1 (-31 tokens × 20 blocks)
+  ✓ Expand database.py LOD1→LOD0 (+31 tokens × 15 blocks)
+  ✓ Expand schema.sql LOD2→LOD1 (+1023 tokens)
+  ✓ Expand schema LOD1→LOD0 in detail regions (+31 tokens × 10)
 
 Working Context (updated):
-  - Database & schema at L0: 1,800 tokens (refocused!)
-  - Related utils at L1: 90 gists
-  - Login code now at L1: 20 gists (compressed!)
+  - Database & schema at LOD0: 1,800 tokens (refocused!)
+  - Related utils at LOD1: 90 gists
+  - Login code now at LOD1: 20 gists (compressed!)
   Total: 1,800 + 90 + 20 = 1,910 tokens ✓
 ```
 
@@ -122,11 +122,11 @@ Working Context (updated):
   - **Negative score** (-0.6) for login code → no longer needed in detail
   - **High positive scores** (+0.9, +0.7) for database files → need detail
 - [[Focus Allocator]] performed a major refocusing:
-  - **Collapsed** 20 blocks of login code from L0→L1 (freed 620 tokens)
-  - **Expanded** database files from L1→L0 and L2→L1→L0 (used ~600 tokens)
+  - **Collapsed** 20 blocks of login code from LOD0→LOD1 (freed 620 tokens)
+  - **Expanded** database files from LOD1→LOD0 and LOD2→LOD1→LOD0 (used ~600 tokens)
   - The [[Working Context]] now focuses entirely on database-related code
 
-**The magic:** Login code didn't disappear—it's still in the [[MegaContext Tree]] at L0 if needed later. It's just compressed to L1 in the [[Working Context]]. If the conversation returns to authentication, [[LensNet]] can re-[[Glossary#Expand|expand]] it without losing any information.
+**The magic:** Login code didn't disappear—it's still in the [[MegaContext Tree]] at LOD0 if needed later. It's just compressed to LOD1 in the [[Working Context]]. If the conversation returns to authentication, [[LensNet]] can re-[[Glossary#Expand|expand]] it without losing any information.
 
 ---
 
@@ -136,7 +136,7 @@ Working Context (updated):
 
 2. **Budget-neutral refocusing:** Every [[Glossary#Expand|expansion]] is balanced by corresponding [[Glossary#Collapse|collapses]], keeping the [[Glossary#W_max (Token Budget)|token budget]] constant
 
-3. **Reversible compression:** Content that was compressed can be re-expanded later without information loss (thanks to the [[MegaContext Tree]] storing everything at L0)
+3. **Reversible compression:** Content that was compressed can be re-expanded later without information loss (thanks to the [[MegaContext Tree]] storing everything at LOD0)
 
 4. **Constant memory:** Total [[Working Context]] size stays around 2k tokens regardless of codebase size (100k tokens in this example)
 

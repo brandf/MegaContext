@@ -38,7 +38,7 @@ MegaContext treats **focus** as the organizing principle: [[GistNet]] compresses
 ### Design considerations
 
 - **Shared LensNet backbone:** keeps training affordable and scales with the number of heads. Head identity is injected via lightweight adapters or learned prompts.
-- **Focus diversity incentives:** telemetry can penalize overlapping L0 spans across heads, or reward heads that surface novel details.
+- **Focus diversity incentives:** telemetry can penalize overlapping LOD0 spans across heads, or reward heads that surface novel details.
 - **Merging outputs:** combine final hidden states (not logits) through a learned merger or weighted average, then run the LM head once to avoid repeated disembedding.
 - **Telemetry:** log ΔNLL improvements per head vs. compute cost to evaluate whether extra heads pay off.
 

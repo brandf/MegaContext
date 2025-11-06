@@ -36,8 +36,8 @@ summary: Task-agnostic prompt compression via GPT-4 data distillation, achieving
     hierarchical compression for hybrid focus strategies.
 - Distillation methodology aligns with [[GistNet Training]] and [[LensNet Training]]
     requirements—their teacher-student pipeline provides a template for generating
-    training labels that indicate which spans should remain in [[L0]] vs compress to
-    [[L1]] or [[L2]].
+    training labels that indicate which spans should remain in [[LOD0]] vs compress to
+    [[LOD1]] or [[LOD2]].
 - Provides **faithfulness metrics** (alignment span coverage, compression quality checks)
     relevant when [[Focus Allocator]] collapses spans; we can adopt these as automated
     quality gates in our [[Telemetry]] pipeline to flag over-aggressive compression.
@@ -53,8 +53,8 @@ summary: Task-agnostic prompt compression via GPT-4 data distillation, achieving
 - Adopt their **quality control pipeline** (alignment coverage metrics, faithfulness
     checks) as automated validation in our [[Training & Operations]] workflows—reject
     training samples where gist substitutions violate fidelity constraints.
-- Explore **hybrid compression modes** where [[L1]]/[[L2]] [[gist|gists]] encode
-    compressed semantics while LLMLingua-style masks select which [[L0]] tokens must
+- Explore **hybrid compression modes** where [[LOD1]]/[[LOD2]] [[gist|gists]] encode
+    compressed semantics while LLMLingua-style masks select which [[LOD0]] tokens must
     remain expanded for critical detail, optimizing [[Working Context]] budget allocation.
 
 ## Limitations & Risks

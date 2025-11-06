@@ -37,9 +37,9 @@ For a MegaContext-enabled system running on a single GPU (NVIDIA L4/A100-class):
 - **KV-cache:** ~512 MB GPU memory
 - **Throughput:** ~67 tokens/sec (includes autoregressive generation overhead)
 
-#### [[GistNet]] Overhead (32-token block → L1 gist)
+#### [[GistNet]] Overhead (32-token block → LOD1 gist)
 - **Compression time:** ~0.3 ms per block
-- **L1 generation (32 blocks → L2):** ~9.6 ms total
+- **LOD1 generation (32 blocks → LOD2):** ~9.6 ms total
 - **Amortized per decode step:** ~0.3 ms (runs once per K=32 tokens)
 - **Overhead:** ~2% relative to base decode
 
@@ -70,28 +70,28 @@ Total:              15.383 ms/token (~2.5% overhead)
 
 #### [[MegaContext Tree]] Storage
 
-For a corpus of N L0 tokens stored as a 32-ary hierarchical gist tree:
+For a corpus of N LOD0 tokens stored as a 32-ary hierarchical gist tree:
 
 | Level | Nodes | Storage (fp16) | Storage (8-bit) | Notes |
 |-------|-------|----------------|-----------------|-------|
-| **L0** | N | N × 4 bytes | N × 4 bytes | Token IDs (uint32) |
-| **L1** | N/32 | (N/32) × d × 2 | (N/32) × d × 1 | Gist vectors |
-| **L2** | N/1024 | (N/1024) × d × 2 | (N/1024) × d × 1 | Gist vectors |
-| **L3+** | N/32^k | ... | ... | Future expansion |
+| **LOD0** | N | N × 4 bytes | N × 4 bytes | Token IDs (uint32) |
+| **LOD1** | N/32 | (N/32) × d × 2 | (N/32) × d × 1 | Gist vectors |
+| **LOD2** | N/1024 | (N/1024) × d × 2 | (N/1024) × d × 1 | Gist vectors |
+| **LOD3+** | N/32^k | ... | ... | Future expansion |
 
 Where `d` = embedding dimension (typically 2048–4096).
 
 **Example: 1M tokens, d=2048, fp16 gists:**
-- L0: 1M × 4 bytes = 4 MB (token IDs)
-- L1: (1M/32) × 2048 × 2 = 128 MB
-- L2: (1M/1024) × 2048 × 2 = 4 MB
+- LOD0: 1M × 4 bytes = 4 MB (token IDs)
+- LOD1: (1M/32) × 2048 × 2 = 128 MB
+- LOD2: (1M/1024) × 2048 × 2 = 4 MB
 - **Total:** 136 MB for 1M token history (~136 bytes/token)
 
-**Tree overhead:** L1+L2 adds only ~3.2% storage compared to L0 alone (factor: 32/31).
+**Tree overhead:** LOD1+LOD2 adds only ~3.2% storage compared to LOD0 alone (factor: 32/31).
 
 #### Storage Scaling Scenarios
 
-| Scenario | Total Tokens | L0 Size | Tree Size (fp16) | Tree Size (8-bit) | Notes |
+| Scenario | Total Tokens | LOD0 Size | Tree Size (fp16) | Tree Size (8-bit) | Notes |
 |----------|--------------|---------|------------------|-------------------|-------|
 | **Short conversation** | 10k | 40 KB | 1.3 MB | 650 KB | Few messages |
 | **Coding session** | 100k | 400 KB | 13 MB | 6.5 MB | Medium codebase |
@@ -100,7 +100,7 @@ Where `d` = embedding dimension (typically 2048–4096).
 | **Knowledge base** | 100M | 400 MB | 13.6 GB | 6.8 GB | Wikipedia-scale |
 | **Decade robotics log** | 1.5×10¹¹ | 600 GB | ~20 TB | ~10 TB | See [[Realtime Scenarios]] |
 
-**With pruning:** Retaining only 0.5–1% of L0 tokens in high-detail form and aggressive quantization can reduce storage by 10–50× (see [[MegaCuration]]).
+**With pruning:** Retaining only 0.5–1% of LOD0 tokens in high-detail form and aggressive quantization can reduce storage by 10–50× (see [[MegaCuration]]).
 
 ---
 
@@ -128,7 +128,7 @@ For a production MegaContext system:
              ↕ (memory-mapped I/O)
 ┌─────────────────────────────────────────────┐
 │ SSD (Persistent Tree Storage)              │
-│ - L0/L1/L2.ctx files: 10 GB–10 TB          │
+│ - LOD0/LOD1/LOD2.ctx files: 10 GB–10 TB          │
 │ - Checkpointed snapshots: 2× tree size     │
 │ - Telemetry logs: 1–10% of tree size       │
 │ Cost: $ (NVMe/SATA)                         │
@@ -203,7 +203,7 @@ For a production MegaContext system:
 | Metric | Compressive Transformer | MegaContext |
 |--------|-------------------------|-------------|
 | **Compression** | Fixed functions (mean pool, attention) | Learned ([[GistNet]]) |
-| **Hierarchy** | Two-level (active, compressed) | Multi-level (L0, L1, L2, …) |
+| **Hierarchy** | Two-level (active, compressed) | Multi-level (LOD0, LOD1, LOD2, …) |
 | **Focus control** | Static aging policy | Learned dynamic ([[LensNet]]) |
 | **Substitutability** | Approximate | Trained for low ΔNLL@H |
 
@@ -219,10 +219,10 @@ See [[Realtime Scenarios]] for full details. Summary:
 
 | Compression Strategy | Storage Size | Notes |
 |----------------------|--------------|-------|
-| Raw L0 only (fp16) | ~1.29 PB | Impractical |
+| Raw LOD0 only (fp16) | ~1.29 PB | Impractical |
 | Full tree (fp16) | ~1.33 PB | Only +3.2% overhead |
 | Full tree (8-bit) | ~667 TB | Quantization helps 2× |
-| Pruned (1% L0 @ 8-bit) | ~27 TB | Aggressive pruning |
+| Pruned (1% LOD0 @ 8-bit) | ~27 TB | Aggressive pruning |
 | Pruned + entropy coding | ~13 TB | Compression on top |
 | Ultra-aggressive (0.5% + 4-bit internal) | ~6–8 TB | Fits on commodity arrays |
 
@@ -259,7 +259,7 @@ See [[Realtime Scenarios]] for full details. Summary:
 #### Compute Optimizations
 1. **Batch [[LensNet]] scoring:** Score multiple working contexts in parallel
 2. **KV-cache reuse:** Preserve KV entries that don't change across refocus
-3. **Async gist generation:** Generate L1/L2 gists in background workers
+3. **Async gist generation:** Generate LOD1/LOD2 gists in background workers
 4. **Quantized [[GistNet]]:** Run [[GistNet]] in int8 for 2× speedup
 
 #### Storage Optimizations

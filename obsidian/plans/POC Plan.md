@@ -41,14 +41,14 @@ This milestone isolates the minimum "hot path" required to demonstrate MegaConte
 ---
 ## Phase 2 — Minimal Gist Compression
 **Goal:** Train and validate a single-level (32→1) gist model sufficient to replace segments without catastrophic degradation.
-- **Design directive:** keep gist-side [[components]] tensor-first. Prefer thin Python wrappers around PyTorch modules and persist MegaContext structures as contiguous L0/L1/L2 tensors that mirror on-disk layouts instead of dense Python object graphs.
+- **Design directive:** keep gist-side [[components]] tensor-first. Prefer thin Python wrappers around PyTorch modules and persist MegaContext structures as contiguous LOD0/LOD1/LOD2 tensors that mirror on-disk layouts instead of dense Python object graphs.
 - Task 2.1: Implement `src/gistnet/blocks.py` and `src/gistnet/model.py` with RoPE-enabled self-attention [1], shared slot queries [2], and residual MLPs outputting the base embedding dimension.
 - Task 2.2: Extend dataset tooling to emit paired `(tokens, gist_tokens)` batches over horizon `H=64`; cache teacher embeddings for repeatability.
 - Task 2.3: Build a Lightning-based trainer (`megacontext.gistnet.lightning`) with a masked-attention curriculum (per Gist Token paper) and W&B logging of ΔNLL@H.
 - Task 2.4: Add unit tests for determinism (seeded RNG) plus a smoke eval comparing base vs gist-replaced loss with ≤5 % degradation on the toy corpus.
 - Task 2.5: Document gist training steps and expected metrics in `notebooks/megacontext.ipynb` (Jupyter notebook with Lightning workflow).
 - Task 2.6: Revise dataset preparation to output 4k-token context slices with cached teacher hidden states and future horizons, along with stride/layout metadata described in the schema sketch (gists/logits generated later during training).
-- Task 2.7: Introduce `MegaContext`/`WorkingContext` tensor wrappers that hydrate from dataset slices plus the current [[GistNet]], manage contiguous L0/L1/L2 buffers and offsets, and provide iterators for enumerating all legal `W_l` windows and gist substitution patterns.
+- Task 2.7: Introduce `MegaContext`/`WorkingContext` tensor wrappers that hydrate from dataset slices plus the current [[GistNet]], manage contiguous LOD0/LOD1/LOD2 buffers and offsets, and provide iterators for enumerating all legal `W_l` windows and gist substitution patterns.
 - Task 2.8: Upgrade the training loop to batch working-context windows, run prediction through the base model (replaying cached teacher hidden states/logits where applicable), and optimize ΔNLL/logit agreement with a curriculum that progressively shrinks `W_l`.
 
 *Progress (current): core [[GistNet]] modules, dataset tooling with teacher caches, trainer scaffold, and notebook documentation are implemented; outstanding work covers curriculum training, ΔNLL smoke evals, and logging.*
@@ -58,19 +58,19 @@ This milestone isolates the minimum "hot path" required to demonstrate MegaConte
 **Upcoming extensions under evaluation:**
 - Treat the current pooled hidden-state regression as a stepping stone. Long-term we want to phase it out in favour of training directly on prediction fidelity.
 - Expand dataset prep to emit 4k-token contexts plus 32–64 token horizons, caching the teacher's final hidden states so later stages can reconstruct rollouts and ΔNLL without re-running the model.
-- Proposed schema sketch: store `context_tokens` (4k L0 ids), `context_mask`, cached teacher hidden stacks (one per block), and `future_tokens` for the horizon, alongside metadata that captures tokenizer, stride, and window offsets. Training will materialize MegaContext hierarchy on the fly with the latest [[GistNet]] checkpoints, so no gists/logits are persisted in the dataset.
-- Generate hierarchical L1/L2 gists for each slice at training time so experiments always reflect the current compressor.
+- Proposed schema sketch: store `context_tokens` (4k LOD0 ids), `context_mask`, cached teacher hidden stacks (one per block), and `future_tokens` for the horizon, alongside metadata that captures tokenizer, stride, and window offsets. Training will materialize MegaContext hierarchy on the fly with the latest [[GistNet]] checkpoints, so no gists/logits are persisted in the dataset.
+- Generate hierarchical LOD1/LOD2 gists for each slice at training time so experiments always reflect the current compressor.
 - Construct batched working-context windows of width `W_l` by sliding across each prepared MegaContext (optionally ordered for KV-cache reuse), run the base model forward with those contexts, and compare the horizon rollout in latent/logit space to the teacher outputs to maximize gist substitutability.
 - Prototype a curriculum that gradually shrinks `W_l` during training to push the model toward using higher-level, lossy summaries.
-- Introduce lightweight `MegaContext`/`[[Working Context]]` tensor wrappers that own contiguous L0/L1/L2 buffers, expose combinator utilities (e.g., enumerate all legal `W_l`-sized windows, replace spans with specific gist levels), and surface batching hooks the trainer can call without hand-rolling slicing logic. The `MegaContext` helper should encapsulate offsets/parent pointers and emit iterator handles (or precomputed index tensors) that the trainer can batch together; `[[Working Context]]` should provide views for token embeddings vs gist embeddings, plus utilities to materialize KV-cache keys for a chosen slice.
+- Introduce lightweight `MegaContext`/`[[Working Context]]` tensor wrappers that own contiguous LOD0/LOD1/LOD2 buffers, expose combinator utilities (e.g., enumerate all legal `W_l`-sized windows, replace spans with specific gist levels), and surface batching hooks the trainer can call without hand-rolling slicing logic. The `MegaContext` helper should encapsulate offsets/parent pointers and emit iterator handles (or precomputed index tensors) that the trainer can batch together; `[[Working Context]]` should provide views for token embeddings vs gist embeddings, plus utilities to materialize KV-cache keys for a chosen slice.
 
 **Exit criteria:** Gist checkpoints reproduce ΔNLL targets, deterministic tests pass, and documentation explains the compression pipeline.
 
 ---
 ## Phase 3 — [[LensNet]], [[Focus Allocator]], and [[Runtime Loop]]
 **Goal:** Integrate [[MegaContext Tree]] storage with dynamic focus so a streaming run respects a fixed working budget.
-- Task 3.1: Implement `src/megacontext/memory/tree.py` with ingest/update APIs for 32-token blocks, node metadata (span id, level, offsets), and persistence to `{L0,L1,L2}.ctx`; include round-trip tests.
-- Task 3.2: Finish `src/runtime/working_context.py` to tile L0 tokens and L1 gists contiguously, reporting token-equivalent costs.
+- Task 3.1: Implement `src/megacontext/memory/tree.py` with ingest/update APIs for 32-token blocks, node metadata (span id, level, offsets), and persistence to `{LOD0,LOD1,LOD2}.ctx`; include round-trip tests.
+- Task 3.2: Finish `src/runtime/working_context.py` to tile LOD0 tokens and LOD1 gists contiguously, reporting token-equivalent costs.
 - Task 3.3: Build `src/lensnet/model.py` with dual cross-attention (working entries ↔ gist cache) and a signed focus score head; create `src/lensnet/dataloader.py` to replay working-context snapshots.
 - Task 3.4: Implement `src/runtime/focus_allocator.py` with greedy expand/collapse respecting contiguity, cooldowns, and budget hysteresis. Include Slot-Attention-style normalised competition to keep allocation bounded.
 - Task 3.5: Assemble `src/runtime/engine.py` that ingests streams, updates the gist tree, queries [[LensNet]], applies focus adjustments, and decodes via the base model.

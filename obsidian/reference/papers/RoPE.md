@@ -23,7 +23,7 @@ summary: Rotary Position Embedding (RoPE) encodes absolute positions through rot
 ## Relevance to MegaContext
 - **Foundation for positional compatibility**: MegaContext's [[Base Runtime]] assumes RoPE-based models. Understanding RoPE's mechanics is essential for designing [[GistNet]] to produce embeddings that integrate seamlessly with the base model's attention mechanism.
 - **Gist positioning strategy**: RoPE's properties justify MegaContext's approach of positioning gists at the **central token index** of their covered span. This choice ensures the rotation applied to the gist represents the "average" position of its constituents, maintaining coherent relative distances in attention.
-- **Hierarchical position challenges**: RoPE was designed for uniform token sequences. MegaContext's [[Working Context]] mixes L0 tokens (representing single positions) with L1/L2 gists (representing 32/1024 positions). We must carefully manage how RoPE's relative distance computation handles these non-uniform spans.
+- **Hierarchical position challenges**: RoPE was designed for uniform token sequences. MegaContext's [[Working Context]] mixes LOD0 tokens (representing single positions) with LOD1/LOD2 gists (representing 32/1024 positions). We must carefully manage how RoPE's relative distance computation handles these non-uniform spans.
 - **NTK scaling motivation**: The paper's analysis of frequency-based extrapolation directly motivates MegaContext's use of [[Glossary#NTK Scaling|NTK Scaling]] as the first step in [[Positional Encoding]] retrofit, enabling base models to work with extended contexts beyond their pretraining length.
 - **Gaussian RoPE foundation**: Understanding RoPE's frequency structure is prerequisite for [[Glossary#Gaussian RoPE|Gaussian RoPE]], where we generalize from sharp positions to positional distributions. Each frequency band's attenuation by variance creates natural uncertainty representation.
 
@@ -31,7 +31,7 @@ summary: Rotary Position Embedding (RoPE) encodes absolute positions through rot
 - **Adopt RoPE frequency structure for gist metadata**: Store per-gist rotation phases aligned with RoPE's frequency schedule in [[Node Metadata]]. This enables [[Working Context Assembly]] to compute proper relative distances when materializing mixed-LOD sequences.
 - **Implement NTK scaling in base runtime**: Add configurable NTK scaling to extend pretrained RoPE models beyond their training context length. This is critical for [[POC Implementation]] to work with models trained on 2k-4k contexts when we need 8k-32k working contexts.
 - **Design GistNet position projection**: Ensure [[GistNet]]'s output embeddings include proper RoPE rotation for their assigned central position. This may require adding explicit rotation layers or ensuring the cross-attention mechanism preserves positional phase information.
-- **Validate relative distance preservation**: Implement tests in [[Runtime Loop]] to verify that attention between gists and tokens produces relative distance signals matching what RoPE would compute if all L0 tokens were present. This ensures [[Substitutability]] extends to positional reasoning.
+- **Validate relative distance preservation**: Implement tests in [[Runtime Loop]] to verify that attention between gists and tokens produces relative distance signals matching what RoPE would compute if all LOD0 tokens were present. This ensures [[Substitutability]] extends to positional reasoning.
 - **Explore frequency-specific compression**: Consider whether [[GistNet]] should apply different compression strategies to high-frequency (local position) vs. low-frequency (global position) RoPE dimensions, potentially preserving more information in low-frequency bands for long-range coherence.
 
 ## Limitations & Risks
@@ -50,11 +50,11 @@ summary: Rotary Position Embedding (RoPE) encodes absolute positions through rot
 
 ## Open Questions for MegaContext
 - **Span representation**: When a gist covers 32 or 1024 tokens, should we use only the central RoPE rotation, or encode the span's extent through modified frequency parameters or additional bias terms?
-- **LOD transitions**: When [[Focus Allocator]] swaps an L0 block with its L1 gist, the working context's position indices remain unchanged, but the number of rotated embeddings changes. How do we ensure the base model's attention patterns remain stable across this transition?
+- **LOD transitions**: When [[Focus Allocator]] swaps an LOD0 block with its LOD1 gist, the working context's position indices remain unchanged, but the number of rotated embeddings changes. How do we ensure the base model's attention patterns remain stable across this transition?
 - **Frequency preservation**: Should [[GistNet]] be trained to preserve low-frequency RoPE components (global position) more carefully than high-frequency (local position), or does uniform compression work better?
 - **NTK vs. interpolation**: For MegaContext's context extension needs, should we use NTK scaling, position interpolation, or a hybrid? What are the implications for gist substitutability when base and gist use different scaling strategies?
 - **Gaussian RoPE integration**: Can we retrofit Gaussian RoPE into pretrained RoPE models without retraining, or does the distributional generalization require the base model to be trained with variance-aware attention from scratch?
-- **Multi-level RoPE**: Should L0, L1, and L2 representations use different RoPE base frequencies to reflect their different temporal granularities, or does this break the uniform attention mechanism?
+- **Multi-level RoPE**: Should LOD0, LOD1, and LOD2 representations use different RoPE base frequencies to reflect their different temporal granularities, or does this break the uniform attention mechanism?
 
 ## Related Pages
 - [[Positional Encoding]]

@@ -21,7 +21,7 @@ summary: Introduces segment-level recurrence and relative positional encoding to
 
 ## Relevance to MegaContext
 - **Position encoding strategy**: Transformer-XL's relative positional encoding directly influenced modern architectures using [[Glossary#RoPE (Rotary Position Embedding)|RoPE]]. Understanding RPE mechanics helps us reason about how to assign [[Glossary#Absolute Position Index|absolute position indices]] to gists when assembling the [[Working Context]] from non-contiguous tree segments.
-- **Segment boundary handling**: Transformer-XL's approach to maintaining coherence across segment boundaries is analogous to MegaContext's challenge of preserving continuity when swapping [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|LOD levels]]. Their recurrence mechanism shows that careful management of hidden-state handoffs enables seamless transitions.
+- **Segment boundary handling**: Transformer-XL's approach to maintaining coherence across segment boundaries is analogous to MegaContext's challenge of preserving continuity when swapping [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD levels]]. Their recurrence mechanism shows that careful management of hidden-state handoffs enables seamless transitions.
 - **Relative vs. absolute positioning**: The paper's analysis of why absolute encodings fail during recurrence validates MegaContext's choice to maintain original absolute indices in metadata while using positionally-aware embeddings. This ensures that [[GistNet]] gists integrate naturally with RoPE-based base models.
 - **Evaluation efficiency**: Transformer-XL's demonstration that reusing representations reduces redundant computation parallels our goal of caching gists to avoid recomputing compressed regions, especially relevant for [[Focus Allocator]] strategies that minimize working-context churn.
 
@@ -44,9 +44,9 @@ summary: Introduces segment-level recurrence and relative positional encoding to
 - **Analysis papers** on positional encoding extrapolation (Press et al., 2021 on ALiBi; Chen et al., 2023 on NTK scaling) to inform MegaContext's [[Positional Encoding]] retrofit strategies.
 
 ## Open Questions for MegaContext
-- How should we adapt Transformer-XL's **relative distance computation** when working-context entries represent spans of vastly different temporal lengths (L0 blocks vs. L2 gists covering 1024 tokens)?
+- How should we adapt Transformer-XL's **relative distance computation** when working-context entries represent spans of vastly different temporal lengths (LOD0 blocks vs. LOD2 gists covering 1024 tokens)?
 - Can we **reuse Transformer-XL's recurrence gradient tricks** when training [[LensNet]], which also needs to reason over sequences of varying-LOD entries without exploding memory?
-- Should MegaContext implement a **hybrid recurrence mechanism** where recent L0 tokens flow through standard attention while older gists use cached representations, similar to Transformer-XL's segment handoff but at the LOD boundary?
+- Should MegaContext implement a **hybrid recurrence mechanism** where recent LOD0 tokens flow through standard attention while older gists use cached representations, similar to Transformer-XL's segment handoff but at the LOD boundary?
 - What is the **optimal granularity** for reusing hidden states in MegaContext—should we cache at the entry level, the block level, or the full working-context level to maximize speedup without stale representations?
 
 ## Related Pages

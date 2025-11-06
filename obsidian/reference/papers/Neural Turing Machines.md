@@ -187,7 +187,7 @@ NTM tested with two controller architectures:
 
 **Key Parallel:** Both use **learned attention** to selectively access stored information based on content relevance rather than fixed heuristics.
 
-**Difference:** LensNet operates on **multi-resolution representations** (L0/L1/L2), while NTM has uniform memory granularity.
+**Difference:** LensNet operates on **multi-resolution representations** (LOD0/LOD1/LOD2), while NTM has uniform memory granularity.
 
 ---
 
@@ -251,8 +251,8 @@ for span, level in focus_decisions:
 - Modified by write operations (erase + add)
 
 **MegaContext Tree:**
-- Hierarchical tree structure with L0/L1/L2 levels
-- Multi-resolution: L0 tokens (32), L1 gists (1), L2 gists (1)
+- Hierarchical tree structure with LOD0/LOD1/LOD2 levels
+- Multi-resolution: LOD0 tokens (32), LOD1 gists (1), LOD2 gists (1)
 - Addressed via block-aligned span selection
 - Immutable (reads only; writes happen via tree extension/GistNet)
 
@@ -440,7 +440,7 @@ See [[Focus Architectures]] — already being considered:
 phase_1: context_size = 1k tokens, simple refocusing (fixed heuristics)
 phase_2: context_size = 4k tokens, train LensNet with limited actions
 phase_3: context_size = 8k tokens, train LensNet with full action set
-phase_4: context_size = 32k tokens (via L2), test generalization
+phase_4: context_size = 32k tokens (via LOD2), test generalization
 ```
 
 **Benefits:**
@@ -582,12 +582,12 @@ def analyze_focus_patterns(focus_history):
 - Memory is append-only (new tokens/gists added, old ones never modified)
 
 **Risk:** NTM's write capabilities enable sophisticated memory management (e.g., clearing old data, updating associations). MegaContext lacks this, potentially limiting its ability to:
-- Forget irrelevant information (must rely on collapse to L2)
+- Forget irrelevant information (must rely on collapse to LOD2)
 - Update representations as understanding evolves
 - Implement sophisticated memory management policies
 
 **MegaContext's Mitigation:**
-- Multi-resolution hierarchy (L0/L1/L2) provides implicit forgetting via lossy compression
+- Multi-resolution hierarchy (LOD0/LOD1/LOD2) provides implicit forgetting via lossy compression
 - GistNet learns to encode only relevant information
 - Focus mechanism effectively "forgets" by collapsing low-utility regions
 
@@ -602,7 +602,7 @@ def analyze_focus_patterns(focus_history):
 
 **MegaContext Solution:**
 - Hard attention over blocks (only materialize selected spans)
-- Hierarchical addressing (L2 gists cover 1024 tokens each)
+- Hierarchical addressing (LOD2 gists cover 1024 tokens each)
 - Working context size fixed at W_max ≈ 8k entries
 
 **Risk:** Hard attention may miss subtle relevance signals that soft attention would capture.
@@ -785,7 +785,7 @@ sharpened = scores ** gamma
 - Train with **diversity loss** to prevent collapse to same strategy
 
 **Potential Specializations:**
-1. **Recency head:** Focus on recent tokens (always keep tail at L0)
+1. **Recency head:** Focus on recent tokens (always keep tail at LOD0)
 2. **Semantic head:** Focus on content-relevant regions (query-aware)
 3. **Structural head:** Focus on boundaries (document starts, section headers)
 
@@ -853,8 +853,8 @@ def refine_gist(gist_old, working_context_states):
 **MegaContext Adaptation:**
 ```python
 # Training schedule
-phase_1: 1k token context, L0/L1 only (no L2)
-phase_2: 4k token context, introduce L2
+phase_1: 1k token context, LOD0/LOD1 only (no LOD2)
+phase_2: 4k token context, introduce LOD2
 phase_3: 8k token context, full hierarchy
 phase_4: Variable-length contexts (test generalization)
 ```
@@ -880,15 +880,15 @@ phase_4: Variable-length contexts (test generalization)
 ```python
 # Log focus decisions over time
 timeline: [0 ... 1M tokens]
-time_t: [L2][L2][L1][L1][L0][L0][L0]...
-time_t+K: [L2][L2][L2][L1][L0][L0][L0]...
+time_t: [LOD2][LOD2][LOD1][LOD1][LOD0][LOD0][LOD0]...
+time_t+K: [LOD2][LOD2][LOD2][LOD1][LOD0][LOD0][LOD0]...
 # Visualize LOD changes, identify patterns
 ```
 
 **Potential Patterns:**
 - Sequential expansion (moving attention window forward)
-- Content-triggered expansion (specific keywords trigger L1→L0)
-- Stable high-detail regions (keep important context at L0)
+- Content-triggered expansion (specific keywords trigger LOD1→LOD0)
+- Stable high-detail regions (keep important context at LOD0)
 
 **Use Cases:**
 - Debug pathological behaviors (excessive oscillation, fragmentation)
@@ -908,7 +908,7 @@ time_t+K: [L2][L2][L2][L1][L0][L0][L0]...
 
 ### What MegaContext Extends
 
-1. **Multi-resolution hierarchy:** L0/L1/L2 levels enable scalability beyond NTM's flat memory
+1. **Multi-resolution hierarchy:** LOD0/LOD1/LOD2 levels enable scalability beyond NTM's flat memory
 2. **Hard attention:** Efficient discrete actions rather than expensive soft attention
 3. **Scale:** MegaContext targets millions of tokens; NTM tested with ~100 memory locations
 4. **Hybrid controller:** LensNet (non-causal attention) + base LLM (causal generation) vs. NTM's single controller

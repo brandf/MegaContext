@@ -13,8 +13,8 @@ MegaContext decouples storage from attention, so positional signals must stay **
 
 In standard transformers the context window is contiguous and capped; [[Glossary#RoPE (Rotary Position Embedding)|RoPE]] or absolute embeddings only see local indices. MegaContext violates those assumptions:
 
-- **Teleported L0 tokens:** Blocks can be pulled from anywhere in the tree, so indices must reference global positions, not window offsets.
-- **Mixed [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|LOD]]:** Higher-level gists represent wide spans and should advertise positional uncertainty instead of sharp indices.
+- **Teleported LOD0 tokens:** Blocks can be pulled from anywhere in the tree, so indices must reference global positions, not window offsets.
+- **Mixed [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD]]:** Higher-level gists represent wide spans and should advertise positional uncertainty instead of sharp indices.
 - **Unbounded history:** The system must eventually disambiguate billions of tokens without wrapping or aliasing.
 
 Therefore positional logic has to ingest span metadata from the working view, stay in sync with tree offsets ([[Node Metadata]]), and cooperate with the frozen [[Base Runtime]].
@@ -34,8 +34,8 @@ The proof-of-concept keeps the base SmolLM3-3B checkpoint frozen and injects lig
 
 ### LOD-aware damping
 
-- L0 blocks keep σ=0 and use the stretched RoPE directly.
-- L1/L2 entries obtain span width from [[Working Context]] metadata; use it to compute a Gaussian attenuation factor `exp(-0.5 * (ω σ)^2)` that suppresses high-frequency rotary bands.
+- LOD0 blocks keep σ=0 and use the stretched RoPE directly.
+- LOD1/LOD2 entries obtain span width from [[Working Context]] metadata; use it to compute a Gaussian attenuation factor `exp(-0.5 * (ω σ)^2)` that suppresses high-frequency rotary bands.
 - Implemented as a post-process on rotary embedding vectors. Does not modify logits or residual streams.
 - Leaves the [[GistNet]] hierarchy untouched—the same gist vector feeds both positional variants.
 
@@ -60,7 +60,7 @@ These adaptations operate entirely inside the runtime embedding pass so allocati
 Once MegaContext trains end-to-end models (see [[Future Plan#Track B — Advanced Learning & Co-Optimization|Track B]]), we **add** Gaussian RoPE on top of the stretched RoPE + ALiBi foundation:
 
 - Each entry carries `(μ, σ)` describing the center and uncertainty of its span.
-- Rotary phases become expectations under `N(μ, σ²)`, automatically blurring high frequencies for coarse gists while retaining L0 precision.
+- Rotary phases become expectations under `N(μ, σ²)`, automatically blurring high frequencies for coarse gists while retaining LOD0 precision.
 - σ derives from span width plus system-learned noise so LensNet can negotiate detail vs. uncertainty signals.
 - Existing NTK scaling, ALiBi biases, and ultra-slow bands remain in place to guarantee billion-scale disambiguation; Gaussian RoPE augments them with an LOD-aware “positional dimension.”
 - Because σ affects every layer, we enable this only when the base model is trained jointly with MegaContext components.
@@ -74,7 +74,7 @@ The full stack keeps the very-long-context guarantees from the hybrid strategy w
 To drive both paths cleanly, the working-context materializer must expose:
 
 - **Global token index:** Absolute position counted from MegaContext ingest start.
-- **Span width:** Number of source L0 tokens represented by the entry.
+- **Span width:** Number of source LOD0 tokens represented by the entry.
 - **LOD tag:** Useful for debugging and instrumentation even if width is sufficient.
 - **Modality metadata:** Visual entries supply 2D extents `(width, height)` and per-axis σ values as described in [[Multimodal MegaContext]] so positional adapters can mix text and image signals seamlessly.
 

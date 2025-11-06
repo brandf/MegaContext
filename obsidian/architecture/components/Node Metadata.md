@@ -16,11 +16,11 @@ Each node in the [[MegaContext Tree]] stores or can compute the following metada
 | Field | Type | Meaning |
 |-------|------|---------|
 | `span_id` | `uint64` | Unique identifier for this span |
-| `level` | `uint8` | 0 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0]]), 1 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]]), 2 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L2]]), etc. |
+| `level` | `uint8` | 0 ([[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0]]), 1 ([[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD1]]), 2 ([[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD2]]), etc. |
 | `start_token` | `uint64` | Absolute position of first token in this span |
 | `end_token` | `uint64` | Absolute position of last token (exclusive) |
 | `parent_id` | `uint64` | Span ID of parent node (null for root) |
-| `child_ids` | `uint64[32]` | Span IDs of children (null for L0 leaves) |
+| `child_ids` | `uint64[32]` | Span IDs of children (null for LOD0 leaves) |
 | `data_offset` | `uint64` | Byte offset in storage file for this node's payload |
 | `timestamp` | `uint64` | Ingestion time (optional, for temporal decay in pruning) |
 | `access_count` | `uint32` | Number of times this span was in working context (telemetry) |
@@ -48,24 +48,24 @@ Each node in the [[MegaContext Tree]] stores or can compute the following metada
 
 **Example:**
 ```python
-# L0 span covering tokens [0:32)
+# LOD0 span covering tokens [0:32)
 span_id = 1000
 
-# L1 span covering tokens [0:32) compressed
-span_id = 1001  # Different from its L0 children
+# LOD1 span covering tokens [0:32) compressed
+span_id = 1001  # Different from its LOD0 children
 ```
 
 #### `level` (uint8)
-**Purpose:** Indicates the [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|level of detail (LOD)]] this node represents.
+**Purpose:** Indicates the [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|level of detail (LOD)]] this node represents.
 
 **Valid Values:**
-- `0` = L0 (raw tokens, no compression)
-- `1` = L1 (32:1 compression, covers 32 L0 tokens)
-- `2` = L2 (1024:1 compression, covers 1,024 L0 tokens)
+- `0` = LOD0 (raw tokens, no compression)
+- `1` = LOD1 (32:1 compression, covers 32 LOD0 tokens)
+- `2` = LOD2 (1024:1 compression, covers 1,024 LOD0 tokens)
 - `3+` = Future higher-level gists (32^n:1 compression)
 
 **Usage:**
-- Determines which storage file to read from (`L0.ctx`, `L1.ctx`, `L2.ctx`)
+- Determines which storage file to read from (`LOD0.ctx`, `LOD1.ctx`, `LOD2.ctx`)
 - Used by [[Focus Allocator]] to decide expand/collapse operations
 - Critical for maintaining the [[Glossary#Contiguity Invariant|contiguity invariant]]
 
@@ -88,13 +88,13 @@ span_id = 1001  # Different from its L0 children
 
 **Example:**
 ```python
-# First L1 gist
+# First LOD1 gist
 start_token = 0      # Covers tokens [0:32)
 
-# Second L1 gist
+# Second LOD1 gist
 start_token = 32     # Covers tokens [32:64)
 
-# First L2 gist
+# First LOD2 gist
 start_token = 0      # Covers tokens [0:1024)
 ```
 
@@ -110,9 +110,9 @@ start_token = 0      # Covers tokens [0:1024)
 ```python
 end_token = start_token + (32 ** level)
 
-# L0 node: covers 1 token
-# L1 node: covers 32 tokens
-# L2 node: covers 1024 tokens
+# LOD0 node: covers 1 token
+# LOD1 node: covers 32 tokens
+# LOD2 node: covers 1024 tokens
 ```
 
 **Usage:**
@@ -133,17 +133,17 @@ end_token = start_token + (32 ** level)
 - Immutable once assigned
 
 **Usage:**
-- Bottom-up tree traversal (e.g., "What L2 gist does this L0 token belong to?")
+- Bottom-up tree traversal (e.g., "What LOD2 gist does this LOD0 token belong to?")
 - Propagating gist updates during [[MegaContext Tree#Refreshing Gists|gist refresh]]
 - Validating tree structure integrity
 
 **Example:**
 ```python
-# 32 L0 nodes [0] through [31] all share the same parent
-parent_id = 1001  # L1 node covering [0:32)
+# 32 LOD0 nodes [0] through [31] all share the same parent
+parent_id = 1001  # LOD1 node covering [0:32)
 
-# 32 L1 nodes all point to their L2 parent
-parent_id = 2001  # L2 node covering [0:1024)
+# 32 LOD1 nodes all point to their LOD2 parent
+parent_id = 2001  # LOD2 node covering [0:1024)
 ```
 
 #### `child_ids` (uint64[32])
@@ -151,7 +151,7 @@ parent_id = 2001  # L2 node covering [0:1024)
 
 **Properties:**
 - Fixed size: always exactly 32 entries
-- `null` entries for L0 leaf nodes (no children)
+- `null` entries for LOD0 leaf nodes (no children)
 - Partially filled during tree growth (rightmost parent may have < 32 children)
 - Immutable once all 32 children are assigned
 
@@ -162,15 +162,15 @@ parent_id = 2001  # L2 node covering [0:1024)
 
 **Example:**
 ```python
-# L1 node covering tokens [0:32)
+# LOD1 node covering tokens [0:32)
 child_ids = [
-    1000,  # L0[0] "The"
-    1001,  # L0[1] "quick"
-    1002,  # L0[2] "brown"
-    ...    # 29 more L0 span IDs
+    1000,  # LOD0[0] "The"
+    1001,  # LOD0[1] "quick"
+    1002,  # LOD0[2] "brown"
+    ...    # 29 more LOD0 span IDs
 ]
 
-# L0 leaf node
+# LOD0 leaf node
 child_ids = [null, null, ..., null]  # No children
 ```
 
@@ -194,10 +194,10 @@ def compute_offset(level, start_token):
     block_index = start_token // block_size
 
     if level == 0:
-        # L0: each entry is 2 bytes (token ID)
+        # LOD0: each entry is 2 bytes (token ID)
         return block_index * 64  # 32 tokens × 2 bytes
     else:
-        # L1+: each entry is 2048 bytes (gist embedding)
+        # LOD1+: each entry is 2048 bytes (gist embedding)
         return block_index * 2048
 ```
 
@@ -228,7 +228,7 @@ def compute_offset(level, start_token):
 
 **Example:**
 ```python
-# L0 block ingested at 2024-01-15 10:30:00
+# LOD0 block ingested at 2024-01-15 10:30:00
 timestamp = 1705318200
 
 # Calculate age
@@ -278,7 +278,7 @@ def load_into_working_context(span_id):
 **Properties:**
 - Starts at 0 or 1 (initial GistNet checkpoint)
 - Incremented each time [[GistNet]] is retrained and this gist is refreshed
-- Only relevant for L1+ nodes (L0 tokens don't have gists)
+- Only relevant for LOD1+ nodes (LOD0 tokens don't have gists)
 - Enables version coexistence during gradual refresh
 
 **Usage:**
@@ -352,8 +352,8 @@ tree_index: dict[uint64, NodeMetadata] = {}
 ### Disk-Backed Payloads
 
 **What Lives on Disk:**
-- L0: Token IDs (2 bytes each)
-- L1+: Gist embeddings (2048 bytes each in POC)
+- LOD0: Token IDs (2 bytes each)
+- LOD1+: Gist embeddings (2048 bytes each in POC)
 
 **Access Pattern:**
 1. Look up metadata in RAM index
@@ -393,7 +393,7 @@ def get_ancestors(span_id: uint64) -> list[NodeMetadata]:
 **Top-Down Traversal:**
 ```python
 def get_all_leaves(span_id: uint64) -> list[NodeMetadata]:
-    """Recursively get all L0 leaves under this node."""
+    """Recursively get all LOD0 leaves under this node."""
     node = tree_index[span_id]
 
     if node.level == 0:
@@ -431,12 +431,12 @@ def find_spans_in_range(start: uint64, end: uint64, level: uint8) -> list[NodeMe
 **Refresh After GistNet Retraining:**
 ```python
 def refresh_gists(new_gistnet_version: uint16):
-    """Update all L1+ gists with new GistNet checkpoint."""
+    """Update all LOD1+ gists with new GistNet checkpoint."""
 
-    # Start with L1 nodes
+    # Start with LOD1 nodes
     for span_id, meta in tree_index.items():
         if meta.level == 1:
-            # Fetch L0 children
+            # Fetch LOD0 children
             children_data = [load_payload(cid) for cid in meta.child_ids]
 
             # Recompute gist
@@ -448,7 +448,7 @@ def refresh_gists(new_gistnet_version: uint16):
             # Update version
             meta.gist_version = new_gistnet_version
 
-    # Propagate to L2+
+    # Propagate to LOD2+
     propagate_upward(level=2, new_gistnet_version)
 ```
 
@@ -553,7 +553,7 @@ class NodeMetadata:
 
 ## Examples
 
-### Example 1: L0 Token Node
+### Example 1: LOD0 Token Node
 
 ```python
 NodeMetadata(
@@ -561,16 +561,16 @@ NodeMetadata(
     level=0,
     start_token=64,
     end_token=65,           # Covers 1 token
-    parent_id=1032,         # Belongs to L1 [64:96)
+    parent_id=1032,         # Belongs to LOD1 [64:96)
     child_ids=[null] * 32,  # Leaf node
     data_offset=128,        # 64th token × 2 bytes
     timestamp=1705318200,
     access_count=5,
-    gist_version=0          # N/A for L0
+    gist_version=0          # N/A for LOD0
 )
 ```
 
-### Example 2: L1 Gist Node
+### Example 2: LOD1 Gist Node
 
 ```python
 NodeMetadata(
@@ -578,18 +578,18 @@ NodeMetadata(
     level=1,
     start_token=64,
     end_token=96,           # Covers 32 tokens
-    parent_id=2001,         # Belongs to L2 [0:1024)
+    parent_id=2001,         # Belongs to LOD2 [0:1024)
     child_ids=[
-        1000, 1001, 1002, ..., 1031  # 32 L0 children
+        1000, 1001, 1002, ..., 1031  # 32 LOD0 children
     ],
-    data_offset=4096,       # 2nd L1 gist × 2048 bytes
-    timestamp=1705318232,   # 32 seconds after L0
+    data_offset=4096,       # 2nd LOD1 gist × 2048 bytes
+    timestamp=1705318232,   # 32 seconds after LOD0
     access_count=12,
     gist_version=1          # GistNet-v1
 )
 ```
 
-### Example 3: L2 Root Node
+### Example 3: LOD2 Root Node
 
 ```python
 NodeMetadata(
@@ -599,9 +599,9 @@ NodeMetadata(
     end_token=1024,         # Covers 1024 tokens
     parent_id=null,         # Root node (no parent)
     child_ids=[
-        1000, 1032, 1064, ..., 1992  # 32 L1 children
+        1000, 1032, 1064, ..., 1992  # 32 LOD1 children
     ],
-    data_offset=0,          # First L2 gist
+    data_offset=0,          # First LOD2 gist
     timestamp=1705319000,
     access_count=50,        # Frequently accessed
     gist_version=2          # Updated to GistNet-v2
@@ -646,7 +646,7 @@ NodeMetadata(
 - [[Focus Allocator]] – Queries metadata for expand/collapse decisions based on span positions
 - [[Focus Allocator Strategies]] – Specific algorithms that use metadata for focus decisions
 - [[GistNet]] – Generates the gist payloads that metadata points to via data_offset
-- [[LensNet]] – Uses metadata to locate and load L1 gists for conditioning
+- [[LensNet]] – Uses metadata to locate and load LOD1 gists for conditioning
 
 ### Implementation Guides
 - [[POC Implementation]] – Practical implementation of metadata structures in the proof-of-concept
@@ -659,7 +659,7 @@ NodeMetadata(
 - [[GistNet Training]] – How gist_version metadata tracks training checkpoints
 
 ### Related Concepts
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)]] – Level hierarchy tracked in metadata
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)]] – Level hierarchy tracked in metadata
 - [[Glossary#Contiguity Invariant]] – Block alignment enforced through metadata positioning
 - [[substitutability]] – Design principle that metadata versioning helps maintain
 

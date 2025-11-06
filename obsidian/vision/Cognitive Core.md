@@ -25,7 +25,7 @@ Inspired by Andrej Karpathy's "cognitive core" concept—a compact reasoning eng
 
 ### Training the cognitive core
 
-1. **Curate & gist the knowledge base:** preprocess the corpus into block-aligned spans, compute multi-level gists with a dedicated [[GistNet]], and store them via the `{L0,L1,L2}.ctx` format.
+1. **Curate & gist the knowledge base:** preprocess the corpus into block-aligned spans, compute multi-level gists with a dedicated [[GistNet]], and store them via the `{LOD0,LOD1,LOD2}.ctx` format.
 2. **Warm start the controllers:** pretrain [[LensNet]] using counterfactual traces from a larger teacher model so the small core inherits a strong focusing policy; refresh [[GistNet]] on spans the policy touches most.
 3. **Alternating training loop:** during each batch, the base model observes an 8–32 k [[Working Context]] assembled by [[LensNet]]/[[Focus Allocator]] from the knowledge tree. Optimize the model on task NLL, then refresh [[LensNet]] and [[GistNet]] in alternating phases (see [[Training & Operations]]).
 4. **Encourage dependence on memory:** include tasks that require multi-hop reasoning across the knowledge tree; penalize ignoring relevant spans by comparing ΔNLL with/without expansions.
@@ -48,7 +48,7 @@ Inspired by Andrej Karpathy's "cognitive core" concept—a compact reasoning eng
 ### Curating the core knowledge corpus
 
 - **Segmented ordering:** group documents by domain or task (e.g., coding, scientific literature, product docs). Within each segment, order files so high-level gists correspond to coherent themes; for code, a chain like `README → design notes → module docs → source files` gives [[LensNet]] clear zoom targets.
-- **Granularity & bridges:** keep base blocks contiguous, but insert "bridge" gists when cross-document reasoning is common (API description ↔ implementation). These bridges live at higher levels (L3/L4) and help [[LensNet]] jump across related materials.
+- **Granularity & bridges:** keep base blocks contiguous, but insert "bridge" gists when cross-document reasoning is common (API description ↔ implementation). These bridges live at higher levels (LOD3/L4) and help [[LensNet]] jump across related materials.
 - **Metadata enrichment:** tag each span with domain, file path, language, timestamp, recency, and trust scores. Feed these as features into [[LensNet]] so focus policies can prefer fresher or context-matching knowledge.
 - **Quality control:** deduplicate near-identical spans before gist extraction; monitor gist variance to detect noisy inputs. Track provenance IDs for every gist so hallucinations can be traced back to the original source and corrected.
 - **Incremental updates:** append new partitions instead of reprocessing the entire tree. Because offsets are deterministic, you can rebuild affected gists in place and avoid full re-ingest. Version each partition so rollbacks or audits remain manageable.

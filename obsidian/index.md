@@ -42,7 +42,7 @@ MegaContext aims to enable:
 
 ### Core [[Components]]
 
-- **MegaContext gist tree** — built incrementally as text streams in (every 32 tokens → L1 gist; every 32 L1 gists → L2 gist; etc.)
+- **MegaContext gist tree** — built incrementally as text streams in (every 32 tokens → LOD1 gist; every 32 LOD1 gists → LOD2 gist; etc.)
 - **[[Working Context]]** — contiguous window over the tree; total token cost is capped by `W_max`
 - **[[GistNet]]** — a lightweight network that compresses local spans (e.g., 32→1) into **[[Glossary#Gist / Gist Embedding|gists]]** that act as [[Glossary#Substitutability|substitutable]] stand-ins for their source tokens. Stacking gists-of-gists yields a hierarchical, lossy representation of the full MegaContext history
 - **[[LensNet]] + [[Focus Allocator]]** — [[LensNet]] scores each working-context entry (token [[Glossary#Embedding|embedding]] or gist) for [[Glossary#Expand|expansion]] or [[Glossary#Collapse|collapse]]; a block-aligned [[Focus Allocator]] applies those scores, streaming finer- or coarser-grained entries in and out while respecting contiguity and the budget

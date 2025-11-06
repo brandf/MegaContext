@@ -73,7 +73,7 @@ For each query token:
 2. **Approximate NN Search**:
    - Query FAISS index with approximate search (IVF, HNSW)
    - Retrieve k nearest neighbors (typically k=32-256)
-   - Use inner product or L2 distance
+   - Use inner product or LOD2 distance
 
 3. **Retrieved Context**:
    - Get corresponding value vectors for retrieved keys
@@ -304,8 +304,8 @@ Memorizing Transformers and MegaContext both:
 |-------------------------|-------------|---------|
 | External key-value memory | [[MegaContext Tree]] | Long-term storage |
 | k-NN retrieval | [[LensNet]] scoring + tree traversal | Relevance-based selection |
-| Local attention context | L0 tokens in [[Working Context]] | Recent high-res content |
-| Retrieved k-NN context | L1/L2 gists in Working Context | Older compressed content |
+| Local attention context | LOD0 tokens in [[Working Context]] | Recent high-res content |
+| Retrieved k-NN context | LOD1/LOD2 gists in Working Context | Older compressed content |
 | Gating mechanism | [[Focus Allocator]] budget management | Allocation of attention |
 | FAISS indexing | Tree structure navigation | Memory organization |
 | Intermediate layer keys | [[GistNet]] embeddings | Semantic representations |
@@ -364,7 +364,7 @@ class HybridLensNet(LensNet):
 - Potentially slow for very large trees
 
 **k-NN augmentation**:
-- Build FAISS index over all tree nodes (L1/L2 gists)
+- Build FAISS index over all tree nodes (LOD1/LOD2 gists)
 - Use for fast candidate selection
 - Refine candidates with LensNet for final selection
 
@@ -477,10 +477,10 @@ class MidLayerGistNet(GistNet):
 4. **No Hierarchical Structure**:
    - Flat memory = no multi-scale reasoning
    - All content at same level of detail
-   - **MegaContext advantage**: Multi-level abstraction (L0/L1/L2)
+   - **MegaContext advantage**: Multi-level abstraction (LOD0/LOD1/LOD2)
 
 5. **Fixed Similarity Metric**:
-   - k-NN uses fixed similarity (inner product, L2)
+   - k-NN uses fixed similarity (inner product, LOD2)
    - Can't learn task-specific notion of relevance
    - **MegaContext advantage**: LensNet learns relevance
 
@@ -654,7 +654,7 @@ class PrebuiltTreeLoader:
 - [[GistNet]] - MegaContext's learned compression (vs. k-NN's no compression)
 - [[LensNet]] - Learned focus scoring (vs. k-NN's similarity)
 - [[Focus Allocator]] - Budget management (vs. k-NN's gating)
-- [[Working Context]] - Mix of L0 and gists (vs. k-NN's local+retrieved)
+- [[Working Context]] - Mix of LOD0 and gists (vs. k-NN's local+retrieved)
 - [[MegaContext Tree]] - Hierarchical structure (vs. k-NN's flat memory)
 - [[Neural Turing Machines]] - Alternative memory-augmented architecture
 - [[DNC]] - Structured memory operations

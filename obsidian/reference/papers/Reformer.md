@@ -27,7 +27,7 @@ summary: Memory-efficient transformer using locality-sensitive hashing (LSH) for
 ## Relevance to MegaContext
 - **LSH for gist retrieval**: Rather than [[LensNet]] scoring every entry in the [[Working Context]], use LSH to quickly identify which gists are likely relevant to the current query. This converts O(W²) LensNet attention to O(W log W).
 - **Reversible [[GistNet]]**: Apply RevNet architecture to GistNet's compression layers to reduce memory during [[GistNet Training]]. Since we process 32→1→32→1, we can make both compression stages reversible, halving activation memory.
-- **Chunked compression**: When building L2 gists from 32 L1 gists, process in chunks of 8 L1s at a time rather than materializing full 32-block cross-attention matrices. Reduces peak memory during hierarchical compression.
+- **Chunked compression**: When building LOD2 gists from 32 LOD1 gists, process in chunks of 8 L1s at a time rather than materializing full 32-block cross-attention matrices. Reduces peak memory during hierarchical compression.
 - **Hash-based tree navigation**: Store LSH signatures for each gist node in the [[MegaContext Tree]]. When assembling [[Working Context]], hash the current query and retrieve gists with matching hashes, then apply [[Focus Allocator]] only to retrieved candidates.
 - **Memory-efficient staging context**: [[Staging Context]] with 100k entries would benefit enormously from reversible attention—current dense attention over staging would be prohibitively expensive.
 
@@ -35,7 +35,7 @@ summary: Memory-efficient transformer using locality-sensitive hashing (LSH) for
 - **Implement LSH attention for LensNet-G**: When [[LensNet]] operates over the large [[Staging Context]], use LSH to bucket entries by semantic similarity. Only compute full attention scores within top-k buckets, reducing compute by 10-50×.
 - **Reversible GistNet layers**: Rewrite [[GistNet Architecture Details]] to use reversible residuals around the self-attention and cross-attention blocks. Reduces training memory for GistNet by ~40-60%.
 - **Hash-augmented node metadata**: Add LSH hash codes (e.g., 64-bit signatures) to [[Node Metadata]] for each gist. During [[Working Context Assembly]], filter candidates using hash similarity before running expensive ΔNLL computations.
-- **Chunked L2 generation**: Modify [[GistNet Training]] pipeline to generate L2 gists in chunks—compress 32 L1s in 4 passes of 8 L1s each, accumulating cross-attention incrementally. Enables deeper compression hierarchy (L3, L4) without memory explosion.
+- **Chunked LOD2 generation**: Modify [[GistNet Training]] pipeline to generate LOD2 gists in chunks—compress 32 L1s in 4 passes of 8 L1s each, accumulating cross-attention incrementally. Enables deeper compression hierarchy (LOD3, L4) without memory explosion.
 - **Shared QK in LensNet**: Simplify [[LensNet]] by using shared query/key projections for self-attention over working context. Reduces parameter count by 33% and aligns with Reformer's stability findings.
 
 ## Limitations & Risks
@@ -54,7 +54,7 @@ summary: Memory-efficient transformer using locality-sensitive hashing (LSH) for
 - **Memory Efficient Attention (xformers)** - Practical implementation reference for chunked attention in PyTorch
 
 ## Open Questions for MegaContext
-- Can we combine LSH with our gist hierarchy—using coarse L2 hashes to prune search space before computing fine-grained L0 attention?
+- Can we combine LSH with our gist hierarchy—using coarse LOD2 hashes to prune search space before computing fine-grained LOD0 attention?
 - How to adapt LSH for temporal relevance? Standard LSH ignores position; we want recent tokens to be "closer" regardless of content similarity.
 - Should [[LensNet Training]] include hash-based negative sampling—train on mismatched hash buckets as hard negatives to improve focus discrimination?
 - What's the right granularity for reversible layers? Full reversible [[GistNet]] vs. selective reversibility only in deepest layers?

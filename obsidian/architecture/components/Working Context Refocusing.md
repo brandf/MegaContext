@@ -18,7 +18,7 @@ Query: "Show me login code"
    ↓
 LensNet: login regions → high relevance scores
    ↓
-Focus Allocator: Expand login from L1 → L0
+Focus Allocator: Expand login from LOD1 → LOD0
    ↓
 Model sees login at full detail
 
@@ -28,7 +28,7 @@ Query: "What about database schema?"
    ↓
 LensNet: login → low relevance, database → high relevance
    ↓
-Focus Allocator: Collapse login L0 → L1, Expand database L1 → L0
+Focus Allocator: Collapse login LOD0 → LOD1, Expand database LOD1 → LOD0
    ↓
 Model now sees database at full detail, login compressed
 ```
@@ -100,10 +100,10 @@ See [[POC Implementation]] for parameter values.
 User: "Show me the authentication code"
 
 Working Context:
-  [L0: auth_module tokens 0-256]     cost: 256 tokens
-  [L1: utils gist]                   cost: 1 token
-  [L1: database gist]                cost: 1 token
-  [L2: distant_code gist]            cost: 1 token
+  [LOD0: auth_module tokens 0-256]     cost: 256 tokens
+  [LOD1: utils gist]                   cost: 1 token
+  [LOD1: database gist]                cost: 1 token
+  [LOD2: distant_code gist]            cost: 1 token
                             Total: 259 tokens ≤ 8192 ✓
 ```
 
@@ -115,25 +115,25 @@ Model generates response about authentication.
 ```
 Entry                   Score    Interpretation
 ----------------------------------------------------
-auth_module L0          +0.1     Keep at L0 (still relevant)
-utils L1                +0.7     EXPAND! (became relevant)
-database L1             -0.3     Collapse (less relevant now)
-distant_code L2         -0.1     Keep at L2 (stay compressed)
+auth_module LOD0          +0.1     Keep at LOD0 (still relevant)
+utils LOD1                +0.7     EXPAND! (became relevant)
+database LOD1             -0.3     Collapse (less relevant now)
+distant_code LOD2         -0.1     Keep at LOD2 (stay compressed)
 ```
 
 **Focus Allocator actions:**
 ```
-1. Expand utils L1 → L0         (+31 tokens)
-2. Collapse database L1 → L2    (-31 tokens saved by higher compression)
+1. Expand utils LOD1 → LOD0         (+31 tokens)
+2. Collapse database LOD1 → LOD2    (-31 tokens saved by higher compression)
    Net budget change: 0 tokens
 ```
 
 **Updated Working Context:**
 ```
-  [L0: auth_module 0-256]        cost: 256 tokens
-  [L0: utils 256-288]            cost: 32 tokens (expanded!)
-  [L2: database gist]            cost: 1 token (collapsed!)
-  [L2: distant_code gist]        cost: 1 token
+  [LOD0: auth_module 0-256]        cost: 256 tokens
+  [LOD0: utils 256-288]            cost: 32 tokens (expanded!)
+  [LOD2: database gist]            cost: 1 token (collapsed!)
+  [LOD2: distant_code gist]        cost: 1 token
                         Total: 290 tokens ≤ 8192 ✓
 ```
 
@@ -145,26 +145,26 @@ User asks: "How does the database schema handle this?"
 ```
 Entry                   Score    Interpretation
 ----------------------------------------------------
-auth_module L0          -0.6     COLLAPSE! (no longer relevant)
-utils L0                -0.4     COLLAPSE! (less relevant)
-database L2             +0.9     EXPAND! (very relevant now)
-distant_code L2         +0.2     Keep at L2 (slight relevance)
+auth_module LOD0          -0.6     COLLAPSE! (no longer relevant)
+utils LOD0                -0.4     COLLAPSE! (less relevant)
+database LOD2             +0.9     EXPAND! (very relevant now)
+distant_code LOD2         +0.2     Keep at LOD2 (slight relevance)
 ```
 
 **Focus Allocator actions:**
 ```
-1. Expand database L2 → L1 → L0  (+31 tokens for L2→L1, then +31 for L1→L0)
-2. Collapse auth_module L0 → L1  (-31 tokens)
-3. Collapse utils L0 → L1        (-31 tokens)
+1. Expand database LOD2 → LOD1 → LOD0  (+31 tokens for LOD2→LOD1, then +31 for LOD1→LOD0)
+2. Collapse auth_module LOD0 → LOD1  (-31 tokens)
+3. Collapse utils LOD0 → LOD1        (-31 tokens)
    Net budget change: +62 - 62 = 0 tokens
 ```
 
 **Updated Working Context:**
 ```
-  [L1: auth_module gist]         cost: 1 token (collapsed!)
-  [L1: utils gist]               cost: 1 token (collapsed!)
-  [L0: database 0-32]            cost: 32 tokens (expanded!)
-  [L2: distant_code gist]        cost: 1 token
+  [LOD1: auth_module gist]         cost: 1 token (collapsed!)
+  [LOD1: utils gist]               cost: 1 token (collapsed!)
+  [LOD0: database 0-32]            cost: 32 tokens (expanded!)
+  [LOD2: distant_code gist]        cost: 1 token
                         Total: 35 tokens ≤ 8192 ✓
 ```
 
@@ -185,9 +185,9 @@ distant_code L2         +0.2     Keep at L2 (slight relevance)
 
 1. **Adapts to changing relevance**
    ```
-   T=0:   Topic A relevant → show at L0
-   T=100: Topic B relevant → expand B to L0, collapse A to L1
-   T=200: Back to topic A  → re-expand A to L0, collapse B
+   T=0:   Topic A relevant → show at LOD0
+   T=100: Topic B relevant → expand B to LOD0, collapse A to LOD1
+   T=200: Back to topic A  → re-expand A to LOD0, collapse B
    ```
 
 2. **Budget-aware optimization**
@@ -196,7 +196,7 @@ distant_code L2         +0.2     Keep at L2 (slight relevance)
    - LensNet learns optimal allocation
 
 3. **Reversible without information loss**
-   - Collapsing L0→L1 doesn't delete L0 tokens
+   - Collapsing LOD0→LOD1 doesn't delete LOD0 tokens
    - They remain in MegaContext Tree
    - Can re-expand if they become relevant again
 
@@ -216,7 +216,7 @@ distant_code L2         +0.2     Keep at L2 (slight relevance)
 | Input | Description |
 |-------|-------------|
 | `context` | Current Working Context entries (≈8k embeddings) |
-| `tail_gists` | Recent history (L2 root + 5 latest L1 gists) |
+| `tail_gists` | Recent history (LOD2 root + 5 latest LOD1 gists) |
 | `levels` | Current LOD of each entry (0/1/2) |
 | `spans` | Token coverage of each entry |
 | `positions` | Distance from decode cursor |
@@ -269,13 +269,13 @@ def refocus_working_context(working_context, lens_scores, W_max, N_diff=4):
         # Try expand if budget allows
         if expand_candidates and budget_allows_expansion(working_context, W_max):
             score, entry = expand_candidates.pop(0)
-            expand(entry)  # L1→L0 or L2→L1
+            expand(entry)  # LOD1→LOD0 or LOD2→LOD1
             actions.append(("expand", entry))
 
         # Balance with collapse
         if collapse_candidates:
             score, entry = collapse_candidates.pop(0)
-            collapse(entry)  # L0→L1 or L1→L2
+            collapse(entry)  # LOD0→LOD1 or LOD1→LOD2
             actions.append(("collapse", entry))
 
     return working_context, actions
@@ -284,7 +284,7 @@ def refocus_working_context(working_context, lens_scores, W_max, N_diff=4):
 ### Constraints
 
 1. **Budget invariant:** `sum(entry_costs) ≤ W_max` at all times
-2. **Legality:** Can't expand L0 further, can't collapse L2 higher (in POC)
+2. **Legality:** Can't expand LOD0 further, can't collapse LOD2 higher (in POC)
 3. **Cooldown:** Entry must wait 2 iterations before flipping expand→collapse
 4. **Block alignment:** All operations respect K=32 block boundaries
 
@@ -372,7 +372,7 @@ Working Context continuously adapts
 - **Continuous:** Happens every K tokens, not just at query time
 - **Stateful:** Remembers what was important before
 - **Bidirectional:** Can add detail (expand) or remove (collapse)
-- **Granular:** LOD control (L0/L1/L2), not binary include/exclude
+- **Granular:** LOD control (LOD0/LOD1/LOD2), not binary include/exclude
 
 See [[Comparisons#vs. RAG]] for detailed comparison.
 
@@ -383,11 +383,11 @@ See [[Comparisons#vs. RAG]] for detailed comparison.
 ### Pattern 1: Topic Shift
 
 ```
-T=0:    Topic A at L0, Topic B at L2
+T=0:    Topic A at LOD0, Topic B at LOD2
 T=100:  User shifts to topic B
-        → Collapse A (L0→L1), Expand B (L2→L0)
+        → Collapse A (LOD0→LOD1), Expand B (LOD2→LOD0)
 T=200:  Still on topic B
-        → A stays at L1, B stays at L0
+        → A stays at LOD1, B stays at LOD0
 ```
 
 **Trigger:** User explicitly changes topic
@@ -395,11 +395,11 @@ T=200:  Still on topic B
 ### Pattern 2: Zooming In
 
 ```
-T=0:    Overview at L1
+T=0:    Overview at LOD1
 T=50:   User asks for details
-        → Expand specific regions (L1→L0)
+        → Expand specific regions (LOD1→LOD0)
 T=100:  User asks for more details
-        → Expand additional regions (L1→L0)
+        → Expand additional regions (LOD1→LOD0)
 ```
 
 **Trigger:** Progressively deeper questions
@@ -407,11 +407,11 @@ T=100:  User asks for more details
 ### Pattern 3: Zooming Out
 
 ```
-T=0:    Detailed view at L0
+T=0:    Detailed view at LOD0
 T=50:   User satisfied, moves on
-        → Collapse details (L0→L1)
+        → Collapse details (LOD0→LOD1)
 T=100:  Focus shifts elsewhere
-        → Further collapse (L1→L2)
+        → Further collapse (LOD1→LOD2)
 ```
 
 **Trigger:** Loss of relevance over time
@@ -419,9 +419,9 @@ T=100:  Focus shifts elsewhere
 ### Pattern 4: Oscillation
 
 ```
-T=0:    Region A at L0
-T=50:   Collapse A (L0→L1)
-T=100:  Re-expand A (L1→L0)
+T=0:    Region A at LOD0
+T=50:   Collapse A (LOD0→LOD1)
+T=100:  Re-expand A (LOD1→LOD0)
 ```
 
 **Problem:** Unstable focus (noisy LensNet scores or low cooldown)

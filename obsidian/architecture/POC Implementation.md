@@ -32,11 +32,11 @@ See [[POC Plan]] for milestone roadmap and [[POC Scope]] for capability guardrai
 
 | Level | Compression | Coverage | Token Cost in [[Working Context\|WC]] |
 |-------|-------------|----------|--------------------------------------|
-| **L0** | 1:1 (no compression) | 1 token | 32 tokens per block |
-| **L1** | 32:1 | 32 L0 tokens | 1 token per [[gist]] |
-| **L2** | 1024:1 | 1,024 L0 tokens | 1 token per [[gist]] |
+| **LOD0** | 1:1 (no compression) | 1 token | 32 tokens per block |
+| **LOD1** | 32:1 | 32 LOD0 tokens | 1 token per [[gist]] |
+| **LOD2** | 1024:1 | 1,024 LOD0 tokens | 1 token per [[gist]] |
 
-**POC Limitation:** Two levels only (L0, L1, L2 root) - sufficient for moderate contexts.
+**POC Limitation:** Two levels only (LOD0, LOD1, LOD2 root) - sufficient for moderate contexts.
 
 **Total compression:** 32² = 1024× (with two layers)
 
@@ -61,7 +61,7 @@ See [[POC Plan]] for milestone roadmap and [[POC Scope]] for capability guardrai
 
 1. **[[frozen base model|Base LLM]]:** No fine-tuning during initial loop; LoRA is follow-up work
 2. **[[GistNet]] checkpoint:** Gists frozen to initial checkpoint during demo runs (no retraining)
-3. **Hierarchy depth:** Fixed at 2 levels (L0, L1, L2 root)
+3. **Hierarchy depth:** Fixed at 2 levels (LOD0, LOD1, LOD2 root)
 4. **Block size:** K=32 hardcoded (no variable-length blocks)
 5. **Storage:** RAM-resident (no disk I/O or memory-mapping in POC)
 
@@ -78,7 +78,7 @@ See [[POC Plan]] for milestone roadmap and [[POC Scope]] for capability guardrai
 
 Post-POC enhancements (see [[Future Plan]]):
 1. Disk-backed storage with memory-mapped files
-2. L3+ hierarchy levels for billion-token contexts
+2. LOD3+ hierarchy levels for billion-token contexts
 3. Incremental tree updates (rebuild only affected subtrees)
 4. Provenance tracking per node
 5. Soft deletes / pruning tiers (see [[MegaCuration]])
@@ -198,7 +198,7 @@ Loss = Loss_subst + 0.05 * Loss_contrast
 - **Two 32→1 layers** stacked hierarchically
 - Lower layer runs on token [[embedding|embeddings]]
 - Upper layer operates on lower-layer [[gist]] outputs
-- Result: 32² = 1024 tokens per L2 [[gist]]
+- Result: 32² = 1024 tokens per LOD2 [[gist]]
 
 ---
 
@@ -210,8 +210,8 @@ See [[LensNet]] for overview, [[LensNet Training]] for training, [[LensNet Scori
 
 | Parameter | POC Value | Notes |
 |-----------|-----------|-------|
-| Input embeddings | ≈8k entries | Mixed L0/L1/L2 from [[Working Context]] |
-| Conditioning [[gist|gists]] | 6 total | L2 root + 5 latest L1 [[gist|gists]] |
+| Input embeddings | ≈8k entries | Mixed LOD0/LOD1/LOD2 from [[Working Context]] |
+| Conditioning [[gist|gists]] | 6 total | LOD2 root + 5 latest LOD1 [[gist|gists]] |
 | Down-projection width | 512 (d_lens) | Bottleneck dimension |
 | Attention heads | 8 | |
 | Stacks | 1–3 dual cross-attention blocks | |
@@ -250,9 +250,9 @@ L_total = L_reg + 0.5 * L_rank + 0.1 * L_budget + L_illegal
 | Input | Shape | Purpose |
 |-------|-------|---------|
 | `context` | [N, d] | [[Working Context]] entry [[embedding|embeddings]] (≈8k) |
-| `tail_gists` | [6, d] | L2 root + 5 latest L1 [[gist|gists]] |
+| `tail_gists` | [6, d] | LOD2 root + 5 latest LOD1 [[gist|gists]] |
 | `levels` | [N] | 0/1/2 markers for legality masking |
-| `span_width` | [N] | L0 tokens represented per entry |
+| `span_width` | [N] | LOD0 tokens represented per entry |
 | `distance_to_cursor` | [N] | Block distance from decode cursor |
 
 ---
@@ -270,14 +270,14 @@ See [[Focus Allocator]] for algorithm, [[Focus Allocator Strategies]] for variat
 | **N_diff** | 4 | Max expand/collapse actions per iteration |
 | **cooldown_steps** | 2 | Min iterations before block can flip actions |
 | **lens_update_interval** | 32 tokens (K) | [[LensNet]] runs once per block |
-| **tail_gist_window** | 5 L1 + current L2 | Conditioning set for [[LensNet]] |
+| **tail_gist_window** | 5 LOD1 + current LOD2 | Conditioning set for [[LensNet]] |
 
 #### Constraints
 
 1. **Block alignment:** Every [[Working Context|WC]] entry covers exactly one full 32-token block at a single [[LOD]]
 2. **Action budget:** Apply at most N_diff=4 operations per iteration
 3. **Positional alignment:** [[Gist|Gists]] reuse absolute token indices for [[RoPE]]; occupy central token index of span
-4. **Legality:** L0 blocks can't expand further; L2 [[gist|gists]] can't collapse higher (in POC)
+4. **Legality:** LOD0 blocks can't expand further; LOD2 [[gist|gists]] can't collapse higher (in POC)
 
 #### Greedy Algorithm
 
@@ -299,13 +299,13 @@ def focus_allocator_step(working_context, lens_scores, W_max):
         # Prioritize expansions if budget available
         if expand_queue and current_budget_allows_expansion():
             score, entry = expand_queue.pop(0)
-            expand(entry)  # L1→L0 or L2→L1
+            expand(entry)  # LOD1→LOD0 or LOD2→LOD1
             actions_taken += 1
 
         # Balance with collapses
         if collapse_queue:
             score, entry = collapse_queue.pop(0)
-            collapse(entry)  # L0→L1 or L1→L2
+            collapse(entry)  # LOD0→LOD1 or LOD1→LOD2
             actions_taken += 1
 
     return working_context
@@ -325,9 +325,9 @@ See [[Working Context]] for overview, [[Working Context Assembly]] for materiali
 
 #### Entry Costs
 
-- **L0 block (32 tokens):** 32 tokens
-- **L1 [[gist]]:** 1 token (saves 31)
-- **L2 [[gist]]:** 1 token (saves 1023)
+- **LOD0 block (32 tokens):** 32 tokens
+- **LOD1 [[gist]]:** 1 token (saves 31)
+- **LOD2 [[gist]]:** 1 token (saves 1023)
 
 #### Budget Invariant
 
@@ -358,9 +358,9 @@ See [[MegaContext Tree]] for overview, [[Storage Format]] for binary layout, [[T
 
 | Level | Compression | Coverage | Entry Type |
 |-------|-------------|----------|------------|
-| **L0** | 1:1 | 1 token | Token ID (uint32) |
-| **L1** | 32:1 | 32 tokens | [[Gist]] vector (fp16) |
-| **L2** | 1024:1 | 1,024 tokens | [[Gist]] vector (fp16) |
+| **LOD0** | 1:1 | 1 token | Token ID (uint32) |
+| **LOD1** | 32:1 | 32 tokens | [[Gist]] vector (fp16) |
+| **LOD2** | 1024:1 | 1,024 tokens | [[Gist]] vector (fp16) |
 
 #### Tree Properties
 
@@ -374,9 +374,9 @@ See [[MegaContext Tree]] for overview, [[Storage Format]] for binary layout, [[T
 See [[Storage Format]] for complete details.
 
 **Files:**
-- `L0.ctx` - Raw token IDs (uint32)
-- `L1.ctx` - L1 [[gist]] vectors (fp16, dimension = embedding_dim)
-- `L2.ctx` - L2 [[gist]] vectors (fp16, dimension = embedding_dim)
+- `LOD0.ctx` - Raw token IDs (uint32)
+- `LOD1.ctx` - LOD1 [[gist]] vectors (fp16, dimension = embedding_dim)
+- `LOD2.ctx` - LOD2 [[gist]] vectors (fp16, dimension = embedding_dim)
 - `metadata.json` - Tree metadata and configuration
 
 **Header (64 bytes):**
@@ -529,7 +529,7 @@ test_base_model_forward_passes()
 
 - Keep [[gist]]-side components tensor-first
 - Prefer thin Python wrappers around PyTorch modules
-- Persist [[MegaContext Tree|MegaContext]] structures as **contiguous L0/L1/L2 tensors**
+- Persist [[MegaContext Tree|MegaContext]] structures as **contiguous LOD0/LOD1/LOD2 tensors**
 - Mirror on-disk layouts instead of dense Python object graphs
 
 ### Curriculum Training
@@ -541,7 +541,7 @@ test_base_model_forward_passes()
 ### Working Context Management
 
 **MegaContext wrapper:**
-- Owns contiguous L0/L1/L2 buffers
+- Owns contiguous LOD0/LOD1/LOD2 buffers
 - Encapsulates offsets/parent pointers
 - Provides iterators for enumerating legal window-sized views
 
@@ -559,8 +559,8 @@ See [[Invariants]] for comprehensive list. POC must maintain:
 1. **Budget Invariant:** `sum(entry_costs) ≤ W_max`
 2. **Contiguity Invariant:** `entry[i].end_token == entry[i+1].start_token`
 3. **Block Alignment Invariant:** All boundaries align with K=32 blocks
-4. **Level Consistency Invariant:** L0=32 tokens, L1=32 tokens (compressed), L2=1024 tokens
-5. **[[RoPE]] Invariant:** [[Gist|Gists]] use central position index; L0 uses actual positions
+4. **Level Consistency Invariant:** LOD0=32 tokens, LOD1=32 tokens (compressed), LOD2=1024 tokens
+5. **[[RoPE]] Invariant:** [[Gist|Gists]] use central position index; LOD0 uses actual positions
 
 ---
 

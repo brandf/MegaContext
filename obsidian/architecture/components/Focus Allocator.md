@@ -29,9 +29,9 @@ It bridges the gap between [[LensNet]]'s predictions and actual changes to what 
 ### Block-Aligned Operations
 
 The allocator works with 32-token blocks and their gist parents to preserve contiguity, using content-based addressing principles [1]:
-- **L0**: 32 raw tokens
-- **L1**: Single gist token representing 32 L0 tokens
-- **L2+**: Hierarchical gists covering 32 children at the previous level
+- **LOD0**: 32 raw tokens
+- **LOD1**: Single gist token representing 32 LOD0 tokens
+- **LOD2+**: Hierarchical gists covering 32 children at the previous level
 
 All [[Working Context]] entries must cover exactly one full block at a single [[LOD]].
 
@@ -72,7 +72,7 @@ The allocator enforces several critical [[Invariants]]:
 
 ### Hysteresis & Stability
 - **Action cooldown**: Block cannot flip expand↔collapse for `cooldown_steps` iterations (default: 2)
-- **Legality masks**: L0 blocks cannot expand; root-level blocks cannot collapse
+- **Legality masks**: LOD0 blocks cannot expand; root-level blocks cannot collapse
 - **Consistency checks**: Verify entries tile timeline without overlap and siblings share same LOD
 
 ### Block Alignment
@@ -123,7 +123,7 @@ The Focus Allocator uses several tunable parameters including expansion/collapse
 - [[LensNet]] - Provides utility scores
 - [[Working Context]] - Modified by allocator actions
 - [[GistNet]] - Defines block structure
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|LOD]] - Level of detail hierarchy
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD]] - Level of detail hierarchy
 
 ### Implementation & Constraints
 - [[Focus Allocator Strategies]] - Detailed strategy variants and future directions

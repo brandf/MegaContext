@@ -88,7 +88,7 @@ wandb.log({
 ---
 
 #### Residency Time
-**What:** How many iterations a block remains at a given level-of-detail (L0 expanded vs L1 gist) before being swapped.
+**What:** How many iterations a block remains at a given level-of-detail (LOD0 expanded vs LOD1 gist) before being swapped.
 
 **Why it matters:**
 - Prevents expand/collapse thrash—minimum residency (e.g., ≥3 iterations) enforced via cooldown.
@@ -129,7 +129,7 @@ wandb.log({
 **Collection:**
 ```python
 # In WorkingContext
-active_tokens = working_context.count_tokens()  # L0 + gist costs
+active_tokens = working_context.count_tokens()  # LOD0 + gist costs
 utilization = active_tokens / W_max
 
 wandb.log({
@@ -315,7 +315,7 @@ Serialized focus allocator decisions for replay and debugging.
   "step": 1024,
   "expanded": [42, 103],
   "collapsed": [7, 88],
-  "working_context": {"L0": [1, 2, 3], "L1": [42, 103]},
+  "working_context": {"LOD0": [1, 2, 3], "LOD1": [42, 103]},
   "latency_ms": 12.3
 }
 ```
@@ -428,7 +428,7 @@ print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 2. Load checkpoints: compare gist embeddings via cosine similarity to initial checkpoint.
 3. Validate labels: ensure ΔNLL labels refreshed after each JT1 (on-policy requirement).
 
-**Fix:** Add stability loss (L2 regularization) to [[GistNet]] or reduce JT1 learning rate.
+**Fix:** Add stability loss (LOD2 regularization) to [[GistNet]] or reduce JT1 learning rate.
 
 ---
 

@@ -128,8 +128,8 @@ Every K=32 tokens:
        negative = can be compressed (collapse)
 
   2. Focus Allocator applies top-scoring operations
-       Expand: L1 → L0 (add detail, costs +31 tokens)
-       Collapse: L0 → L1 (remove detail, saves -31 tokens)
+       Expand: LOD1 → LOD0 (add detail, costs +31 tokens)
+       Collapse: LOD0 → LOD1 (remove detail, saves -31 tokens)
 
   3. Budget maintained
        sum(entry_costs) ≤ W_max at all times
@@ -149,17 +149,17 @@ Every K=32 tokens:
 ```
 Turn 1: User asks about login code
   → LensNet scores login regions: +0.8
-  → Focus Allocator expands login from L1 → L0
+  → Focus Allocator expands login from LOD1 → LOD0
   → Model sees login in full detail
 
 Turn 2: User asks about database schema
   → LensNet scores login regions: -0.6 (no longer relevant)
-  → Focus Allocator collapses login from L0 → L1
+  → Focus Allocator collapses login from LOD0 → LOD1
   → Login still in tree, just compressed in Working Context
 
 Turn 3: User returns to login question
   → LensNet scores login regions: +0.7 (relevant again!)
-  → Focus Allocator expands login from L1 → L0
+  → Focus Allocator expands login from LOD1 → LOD0
   → No information lost, just re-expanded
 ```
 
@@ -173,25 +173,25 @@ See [[Examples]] for detailed walkthrough.
 
 ### How It Works
 
-The [[MegaContext Tree]] stores all content at L0 (full detail) permanently:
+The [[MegaContext Tree]] stores all content at LOD0 (full detail) permanently:
 
 ```
 MegaContext Tree (disk):
-  L0: [all tokens ever seen]
-  L1: [learned gists for L0 blocks]
-  L2: [learned gists for L1 blocks]
+  LOD0: [all tokens ever seen]
+  LOD1: [learned gists for LOD0 blocks]
+  LOD2: [learned gists for LOD1 blocks]
 
 Working Context (GPU):
-  Mix of L0/L1/L2 drawn from tree
+  Mix of LOD0/LOD1/LOD2 drawn from tree
 
-Collapse L0→L1:
-  - L0 tokens remain in tree
-  - Working Context shows L1 gist instead
+Collapse LOD0→LOD1:
+  - LOD0 tokens remain in tree
+  - Working Context shows LOD1 gist instead
   - Saves 31 tokens in budget
 
-Expand L1→L0:
-  - Fetch L0 tokens from tree
-  - Replace L1 gist in Working Context
+Expand LOD1→LOD0:
+  - Fetch LOD0 tokens from tree
+  - Replace LOD1 gist in Working Context
   - Costs 31 tokens in budget
   - Original information restored
 ```
@@ -208,7 +208,7 @@ Expand L1→L0:
 - Retrieved chunks are always full text
 
 **MegaContext:**
-- **Two-way lossless** (at L0 storage level)
+- **Two-way lossless** (at LOD0 storage level)
 - Compressed in [[Working Context]] but preserved in [[MegaContext Tree]]
 - Can expand/collapse any region dynamically
 
@@ -223,9 +223,9 @@ Without reversibility, you'd need to decide upfront what to compress permanently
 
 **Example:**
 ```
-T=0:   Topic is authentication → login code at L0
-T=100: Topic shifts to database → login collapsed to L1
-T=200: Bug in login mentioned → login re-expanded to L0
+T=0:   Topic is authentication → login code at LOD0
+T=100: Topic shifts to database → login collapsed to LOD1
+T=200: Bug in login mentioned → login re-expanded to LOD0
 ```
 
 The system doesn't need to predict the future—it adapts as the conversation unfolds.
@@ -372,7 +372,7 @@ All Together
 
 2. User asks question about login code
    → Dynamic Focus: LensNet scores login high
-   → Reversibility: Expand login from L1 → L0
+   → Reversibility: Expand login from LOD1 → LOD0
 
 3. Model generates answer
    → Substitutability: Distant code shown as gists
@@ -417,8 +417,8 @@ assert focus_changes > 0  # Should adapt over time
 ```python
 # Expand then collapse
 original_l0 = get_l0_block(tree, block_id=100)
-collapse(working_context, block_id=100)  # L0 → L1
-expand(working_context, block_id=100)    # L1 → L0
+collapse(working_context, block_id=100)  # LOD0 → LOD1
+expand(working_context, block_id=100)    # LOD1 → LOD0
 recovered_l0 = get_l0_block(tree, block_id=100)
 assert np.allclose(original_l0, recovered_l0)  # Lossless
 ```

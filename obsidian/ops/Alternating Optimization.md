@@ -80,7 +80,7 @@ where:
 
 #### Stability Loss (Optional)
 - **Purpose:** Prevent catastrophic drift between training steps
-- **Method:** L2 distance between current gist embeddings and previous checkpoint
+- **Method:** LOD2 distance between current gist embeddings and previous checkpoint
 - **Helps:** Maintain consistency as [[LensNet]] learns its policy
 
 #### Boundary Auxiliary Loss (Optional)
@@ -381,7 +381,7 @@ This feedback loop drives co-adaptation:
 - **Prevents:** Expand/collapse thrashing during JT2/JT3
 
 **Stability Regularization:**
-- Small L2 penalty on gist drift in JT1
+- Small LOD2 penalty on gist drift in JT1
 - Low learning rates for LoRA in JT3
 - Cosine LR schedules with warmup per phase
 

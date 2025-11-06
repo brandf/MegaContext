@@ -120,7 +120,7 @@ function decrement_cooldowns():
 ```
 
 **Legality masks** prevent invalid operations:
-- L0 blocks (raw tokens) cannot expand further
+- LOD0 blocks (raw tokens) cannot expand further
 - Maximum [[LOD]] blocks (root level) cannot collapse
 - Mixed-LOD siblings are rejected to maintain [[GistNet]] alignment
 
@@ -133,7 +133,7 @@ function decrement_cooldowns():
 | `N_diff` | 4 | Max actions per iteration (caps churn) |
 | `cooldown_steps` | 2 | Iterations before action reversal allowed |
 | `lens_update_interval` | 32 tokens | How often [[LensNet]] runs |
-| `tail_gist_window` | 5 L1 + 1 L2 | [[LensNet]] conditioning context |
+| `tail_gist_window` | 5 LOD1 + 1 LOD2 | [[LensNet]] conditioning context |
 
 ---
 

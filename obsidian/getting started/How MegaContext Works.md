@@ -44,7 +44,7 @@ MegaContext maintains **two separate contexts**:
 - **Location:** Disk (or RAM in [[POC Scope|POC]])
 - **Size:** Unbounded—can grow to millions or billions of tokens
 - **Content:** Complete interaction history stored as a hierarchical tree of [[Glossary#Gist / Gist Embedding|gists]]
-- **Structure:** 32-ary tree with multiple levels of detail ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0, L1, L2]], ...)
+- **Structure:** 32-ary tree with multiple levels of detail ([[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0, LOD1, LOD2]], ...)
 - **Role:** The "hard drive" of memory
 
 #### 2. [[Working Context]] (Active Attention)
@@ -62,23 +62,23 @@ See [[Architecture Details]] for the complete two-context design and invariants.
 
 Instead of storing everything at the same resolution, MegaContext builds a **hierarchy of summaries**:
 
-### Level 0 (L0): Raw Tokens
+### Level 0 (LOD0): Raw Tokens
 ```
 "The quick brown fox jumps over the lazy dog near the riverbank"
 ```
 Every individual token at full detail—highest cost, highest fidelity.
 
-### Level 1 (L1): 32→1 Gist
+### Level 1 (LOD1): 32→1 Gist
 ```
 [gist: "narrative about fox movement near water"]
 ```
 32 tokens compressed into a single learned [[Glossary#Embedding|embedding]] by [[GistNet]]—32× compression.
 
-### Level 2 (L2): 32→1 Gist of Gists
+### Level 2 (LOD2): 32→1 Gist of Gists
 ```
 [gist: "outdoor animal scene collection"]
 ```
-32 L1 [[Glossary#Gist / Gist Embedding|gists]] compressed into one L2 [[Glossary#Gist / Gist Embedding|gist]]—1024× total compression.
+32 LOD1 [[Glossary#Gist / Gist Embedding|gists]] compressed into one LOD2 [[Glossary#Gist / Gist Embedding|gist]]—1024× total compression.
 
 **Key property: [[Glossary#Substitutability|Substitutability]]**
 - [[Glossary#Gist / Gist Embedding|Gists]] are trained to be **drop-in replacements** for their tokens

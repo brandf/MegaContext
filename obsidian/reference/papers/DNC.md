@@ -197,9 +197,9 @@ Same erase-then-add mechanism as NTM.
 
 | DNC Component | MegaContext Analog | Parallel |
 |---------------|-------------------|----------|
-| **Memory Matrix M** | [[MegaContext Tree]] (L0/L1/L2 nodes) | External memory storage |
+| **Memory Matrix M** | [[MegaContext Tree]] (LOD0/LOD1/LOD2 nodes) | External memory storage |
 | **Read Heads** | [[LensNet]] + [[Working Context]] | Selective memory access |
-| **Write Head** | [[GistNet]] (creating L1/L2 nodes) | Memory compression/storage |
+| **Write Head** | [[GistNet]] (creating LOD1/LOD2 nodes) | Memory compression/storage |
 | **Temporal Links L** | Tree parent-child pointers + temporal ordering | Structural relationships |
 | **Usage Vector u** | Node metadata (access frequency, recency) | Memory management |
 | **Allocation Mechanism** | [[Focus Allocator]] budget management | Resource allocation |
@@ -467,7 +467,7 @@ def sharpen_focus_scores(scores, gamma=2.0):
 DNC memory locations can be overwritten (erase + add), but the temporal link matrix assumes a relatively stable memory structure. Frequent overwrites can degrade link quality.
 
 **MegaContext Context:**
-MegaContext tree is **append-only** at L0, but gists are recomputed during training. This misalignment means:
+MegaContext tree is **append-only** at LOD0, but gists are recomputed during training. This misalignment means:
 - Temporal links based on initial creation order may not reflect updated gist semantics
 - Gist refinement (updating existing nodes) breaks temporal order assumptions
 
@@ -560,7 +560,7 @@ Adding DNC-style temporal linking and usage tracking increases training complexi
 
 8. **"Hierarchical Neural Story Generation"** (2018, Fan et al.)
    - Multi-scale memory representations
-   - Conceptually similar to MegaContext's L0/L1/L2 hierarchy
+   - Conceptually similar to MegaContext's LOD0/LOD1/LOD2 hierarchy
 
 9. **"Transformer-XL"** (2019, Dai et al.)
    - Segment-level memory with relative positional encoding
@@ -616,18 +616,18 @@ Adding DNC-style temporal linking and usage tracking increases training complexi
 
 ### 4. Write Operations for Gist Refinement
 
-**Question**: DNC has explicit write heads that modify memory. Should MegaContext support **gist updates** (overwriting existing L1/L2 nodes)?
+**Question**: DNC has explicit write heads that modify memory. Should MegaContext support **gist updates** (overwriting existing LOD1/LOD2 nodes)?
 
 **Current Design**: MegaContext tree is append-only (immutable gists).
 
 **DNC-Inspired Alternative**:
-- Add **gist refinement** operation: Update an existing L1 gist based on new information
+- Add **gist refinement** operation: Update an existing LOD1 gist based on new information
 - Use allocation gate to decide: create new child gist vs. refine parent gist
 - Track **gist versions** (like DNC's temporal links) to maintain history
 
 **Use Cases**:
-- **Narrative correction**: Initial summary is vague, later context clarifies → refine L1 gist
-- **Incremental learning**: Long document is processed in chunks, each chunk refines the document-level L2 gist
+- **Narrative correction**: Initial summary is vague, later context clarifies → refine LOD1 gist
+- **Incremental learning**: Long document is processed in chunks, each chunk refines the document-level LOD2 gist
 - **Error recovery**: Initial gist had high ΔNLL, refinement improves substitutability
 
 **Risk**: Breaks immutability assumption, complicates training (how to backprop through gist updates?)
@@ -651,7 +651,7 @@ Adding DNC-style temporal linking and usage tracking increases training complexi
 **Risk**: Irreversible information loss (unlike DNC's reusable memory slots)
 
 **Mitigation**:
-- **Two-tier storage**: Keep L0 tokens in cold storage (disk/archive), prune only gists
+- **Two-tier storage**: Keep LOD0 tokens in cold storage (disk/archive), prune only gists
 - **Lazy reconstruction**: Recompute gists on-demand if pruned node is later requested
 - **Selective archiving**: Use reinforcement learning to decide which nodes to keep vs. prune
 
@@ -673,13 +673,13 @@ Adding DNC-style temporal linking and usage tracking increases training complexi
 
 ### 7. Allocation vs. Content-Based Gisting
 
-**Question**: When creating L2 gists from 32 L1 gists, should [[GistNet]] always create a fresh L2, or sometimes update an existing L2?
+**Question**: When creating LOD2 gists from 32 LOD1 gists, should [[GistNet]] always create a fresh LOD2, or sometimes update an existing LOD2?
 
 **DNC Write Addressing**: Uses allocation gate `g_a` to blend new allocation and content-based overwrite.
 
 **MegaContext Scenario**:
-- Document has 1024 L1 gists (32 L2 gists)
-- New chunk of 32 L1 gists arrives
+- Document has 1024 LOD1 gists (32 LOD2 gists)
+- New chunk of 32 LOD1 gists arrives
 - Options:
   1. **Always allocate**: Create L2_33 (new node)
   2. **Content-based update**: If new L1s are similar to existing L2_k, refine L2_k instead
@@ -695,7 +695,7 @@ Adding DNC-style temporal linking and usage tracking increases training complexi
 **Question**: DNC papers show attention weight visualizations (read/write patterns over time). How should MegaContext visualize focus dynamics?
 
 **Visualizations**:
-1. **Working context heatmap**: Show which nodes are expanded (L0/L1/L2) over time
+1. **Working context heatmap**: Show which nodes are expanded (LOD0/LOD1/LOD2) over time
 2. **Temporal link graph**: Display temporal connections between nodes
 3. **Focus trajectory**: Animate refocusing decisions as the base model processes tokens
 4. **Utility attribution**: Highlight which nodes contributed most to prediction quality

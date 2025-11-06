@@ -78,7 +78,7 @@ summary: Extends Perceiver with query-based decoding for arbitrary structured in
 ## Open Questions for MegaContext
 - Should we treat [[Working Context]] itself as a set of PerceiverIO-style output
   queries that "sample" the [[MegaContext Tree]], or maintain it as a flat token
-  buffer with mixed [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|LOD levels]]?
+  buffer with mixed [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD levels]]?
 - Can we implement **incremental query updates** so that repeated focus decisions
   reuse latents from prior steps, reducing redundant computation in the K=32 token
   update cycle?

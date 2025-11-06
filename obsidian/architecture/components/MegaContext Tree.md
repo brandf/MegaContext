@@ -9,9 +9,9 @@ The MegaContext Tree is the complete, append-only history of all tokens and thei
 
 ---
 
-- **Purpose:** Store unbounded context history at multiple levels of detail (L0, L1, L2, …).
+- **Purpose:** Store unbounded context history at multiple levels of detail (LOD0, LOD1, LOD2, …).
 - **Structure:** 32-ary tree where each parent gist compresses 32 children (tokens or lower-level gists) [2].
-- **Storage:** Persisted as binary files (`{L0,L1,L2}.ctx`) with deterministic offsets. See [[Storage Format]].
+- **Storage:** Persisted as binary files (`{LOD0,LOD1,LOD2}.ctx`) with deterministic offsets. See [[Storage Format]].
 - **Updates:** Incremental ingest as 32-token blocks arrive. See [[Tree Operations]].
 - **Interfaces:** Feeds [[Working Context]] assembly, [[LensNet]] conditioning, and [[Focus Allocator]] decisions.
 
@@ -20,12 +20,12 @@ The MegaContext Tree is the complete, append-only history of all tokens and thei
 
 ### What is the MegaContext Tree?
 
-The MegaContext Tree is a **hierarchical data structure** that stores the complete interaction or document history as a tree of [[Glossary#Gist / Gist Embedding|gists]]. Unlike traditional LLM context windows that are limited to a fixed size, the MegaContext Tree can grow unboundedly while providing different [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|levels of detail]] on demand.
+The MegaContext Tree is a **hierarchical data structure** that stores the complete interaction or document history as a tree of [[Glossary#Gist / Gist Embedding|gists]]. Unlike traditional LLM context windows that are limited to a fixed size, the MegaContext Tree can grow unboundedly while providing different [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|levels of detail]] on demand.
 
 Think of it like a pyramid:
-- **Base layer ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L0]]):** Every raw token ever seen
-- **Level 1 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L1]]):** Each group of 32 L0 tokens compressed into a single [[Glossary#Gist / Gist Embedding|gist]]
-- **Level 2 ([[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|L2]]):** Each group of 32 L1 gists compressed into a single gist (representing 1,024 L0 tokens) [2]
+- **Base layer ([[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD0]]):** Every raw token ever seen
+- **Level 1 ([[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD1]]):** Each group of 32 LOD0 tokens compressed into a single [[Glossary#Gist / Gist Embedding|gist]]
+- **Level 2 ([[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD2]]):** Each group of 32 LOD1 gists compressed into a single gist (representing 1,024 LOD0 tokens) [2]
 - **Level 3+ (future):** Additional layers for even coarser summaries
 
 At any moment, the [[Working Context]] draws from this tree, selecting which parts to show as raw tokens and which as compressed gists based on [[LensNet]]'s focus scores.
@@ -40,10 +40,10 @@ Each node in the MegaContext Tree represents a contiguous span of the original t
 
 | Level | Content | Compression Ratio | Token Coverage |
 |-------|---------|-------------------|----------------|
-| **L0** | Raw token embeddings | 1:1 (no compression) | 1 token per entry |
-| **L1** | [[GistNet]] 32→1 gist | 32:1 | 32 L0 tokens |
-| **L2** | [[GistNet]] 32→1 gist of gists | 1024:1 | 1,024 L0 tokens |
-| **L3+** | (Future) Higher-level gists | 32^n:1 | 32^n L0 tokens |
+| **LOD0** | Raw token embeddings | 1:1 (no compression) | 1 token per entry |
+| **LOD1** | [[GistNet]] 32→1 gist | 32:1 | 32 LOD0 tokens |
+| **LOD2** | [[GistNet]] 32→1 gist of gists | 1024:1 | 1,024 LOD0 tokens |
+| **LOD3+** | (Future) Higher-level gists | 32^n:1 | 32^n LOD0 tokens |
 
 #### Tree Properties
 
@@ -56,15 +56,15 @@ Each node in the MegaContext Tree represents a contiguous span of the original t
 #### Example Tree Fragment
 
 ```
-L2 [0:1024]
-├─ L1 [0:32]
-│  ├─ L0 [0] "The"
-│  ├─ L0 [1] "quick"
-│  ├─ L0 [2] "brown"
-│  └─ ... (29 more L0 tokens)
-├─ L1 [32:64]
-│  └─ ... (32 L0 tokens)
-└─ ... (30 more L1 gists)
+LOD2 [0:1024]
+├─ LOD1 [0:32]
+│  ├─ LOD0 [0] "The"
+│  ├─ LOD0 [1] "quick"
+│  ├─ LOD0 [2] "brown"
+│  └─ ... (29 more LOD0 tokens)
+├─ LOD1 [32:64]
+│  └─ ... (32 LOD0 tokens)
+└─ ... (30 more LOD1 gists)
 ```
 
 ---
@@ -93,7 +93,7 @@ The MegaContext Tree and [[Working Context]] serve complementary roles:
 |--------|------------------|---------------------|
 | **Scope** | Complete history (unbounded) | Fixed window (W_max tokens) |
 | **Location** | Disk (future) or RAM (POC) | GPU memory |
-| **Content** | All levels (L0, L1, L2) stored | Mixed levels selected dynamically |
+| **Content** | All levels (LOD0, LOD1, LOD2) stored | Mixed levels selected dynamically |
 | **Mutability** | Append-only, immutable nodes | Entries swap LOD every block |
 | **Purpose** | Long-term memory substrate | Immediate context for base LLM |
 
@@ -110,7 +110,7 @@ The MegaContext Tree and [[Working Context]] serve complementary roles:
 The MegaContext Tree is the **foundational data structure** that enables everything else:
 
 - **For [[GistNet]]:** Training data source and storage target for hierarchical gists
-- **For [[LensNet]]:** Provides tail gists (recent L1/L2) used as conditioning signals
+- **For [[LensNet]]:** Provides tail gists (recent LOD1/LOD2) used as conditioning signals
 - **For [[Focus Allocator]]:** Supplies candidate spans for expand/collapse operations
 - **For [[Runtime Loop]]:** Orchestrates ingest → gist → focus → decode cycle
 - **For telemetry:** Tracks access patterns, ΔNLL sensitivity, and pruning signals (see [[MegaCuration]])
@@ -134,7 +134,7 @@ The MegaContext Tree is the **foundational data structure** that enables everyth
 
 ### System Concepts
 - **[[Glossary#Gist / Gist Embedding|Gists]]** - Compressed embeddings stored at each tree level
-- **[[Glossary#L0 / L1 / L2 (Level of Detail / LOD)|LOD Levels]]** - Hierarchical detail levels in the tree
+- **[[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)|LOD Levels]]** - Hierarchical detail levels in the tree
 - **[[Glossary#Contiguity Invariant]]** - Block alignment guarantees for tree nodes
 - **[[MegaCuration]]** - Provenance tracking, pruning, and telemetry (future)
 

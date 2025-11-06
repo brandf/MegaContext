@@ -101,22 +101,22 @@ By separating these concerns, MegaContext can optimize each independently while 
 │  │   MEGACONTEXT TREE (DISK)    │   │ WORKING CONTEXT  │   │
 │  │                              │   │     (GPU)        │   │
 │  │  ┌─────────────────────┐    │   │                  │   │
-│  │  │      L3 Gists       │    │   │  [tok][tok][gist]│   │
+│  │  │      LOD3 Gists       │    │   │  [tok][tok][gist]│   │
 │  │  │  ○────○────○────○   │    │   │  [tok][gist][tok]│   │
 │  │  └────────┬────────────┘    │   │  [gist][tok][tok]│   │
 │  │           │                  │   │  [tok][tok][tok] │   │
 │  │  ┌────────┴────────────┐    │   │                  │   │
-│  │  │      L2 Gists       │    │   │  Budget: W_max   │   │
+│  │  │      LOD2 Gists       │    │   │  Budget: W_max   │   │
 │  │  │  ○─○─○─○─○─○─○─○    │◄───┼───┤  (8k-32k tokens) │   │
 │  │  └────────┬────────────┘    │   │                  │   │
 │  │           │                  │   └──────────────────┘   │
 │  │  ┌────────┴────────────┐    │            ▲              │
-│  │  │      L1 Gists       │    │            │              │
+│  │  │      LOD1 Gists       │    │            │              │
 │  │  │  ○○○○○○○○○○○○○○○○   │    │      ┌─────┴──────┐      │
 │  │  └────────┬────────────┘    │      │  LensNet + │      │
 │  │           │                  │      │   Focus    │      │
 │  │  ┌────────┴────────────┐    │      │ Allocator  │      │
-│  │  │   L0 Token Blocks   │    │      └────────────┘      │
+│  │  │   LOD0 Token Blocks   │    │      └────────────┘      │
 │  │  │  [32][32][32][32]   │    │                           │
 │  │  └─────────────────────┘    │                           │
 │  │                              │                           │
@@ -150,9 +150,9 @@ By separating these concerns, MegaContext can optimize each independently while 
 | **Purpose** | Long-term storage of complete history | Active processing window for inference |
 | **Storage Location** | Disk (RAM in POC) | GPU memory |
 | **Capacity** | Effectively unlimited (millions-billions of tokens) | Fixed budget: 8k-32k tokens |
-| **Structure** | Hierarchical tree (L0→L1→L2→L3...) | Flat, contiguous sequence |
+| **Structure** | Hierarchical tree (LOD0→LOD1→LOD2→LOD3...) | Flat, contiguous sequence |
 | **Content** | All tokens + all gists at all levels | Mixed: selected tokens and gists |
-| **Granularity** | Multi-resolution (32:1 compression per level) | Variable per entry (L0, L1, L2, etc.) |
+| **Granularity** | Multi-resolution (32:1 compression per level) | Variable per entry (LOD0, LOD1, LOD2, etc.) |
 | **Access Pattern** | Random access to any node | Sequential processing (left-to-right) |
 | **Mutability** | Append-only (grows monotonically) | Dynamic (refocused continuously) |
 | **Temporal Coverage** | Complete: every moment since conversation start | Selective: contiguous but variable detail |
@@ -186,10 +186,10 @@ Level 1:  ●●●●●●●●●●●●●●●●●●●●●●●�
 Level 0:  [32][32][32][32][32][32]... (raw token blocks)
 ```
 
-- **L0**: Raw token blocks (32 tokens each)
-- **L1**: Each gist summarizes 32 L0 blocks (1,024 tokens → 1 gist)
-- **L2**: Each gist summarizes 32 L1 gists (32,768 tokens → 1 gist)
-- **L3**: Each gist summarizes 32 L2 gists (1,048,576 tokens → 1 gist)
+- **LOD0**: Raw token blocks (32 tokens each)
+- **LOD1**: Each gist summarizes 32 LOD0 blocks (1,024 tokens → 1 gist)
+- **LOD2**: Each gist summarizes 32 LOD1 gists (32,768 tokens → 1 gist)
+- **LOD3**: Each gist summarizes 32 LOD2 gists (1,048,576 tokens → 1 gist)
 
 **Key Properties**:
 - Each node has at most 32 children
@@ -203,7 +203,7 @@ The Working Context is a **contiguous sequence** mixing different levels of deta
 
 ```
 Position: [0  ][1  ][2  ][3  ][4  ][5  ][6  ][7  ][8  ]
-Content:  [L0  ][L0  ][L1  ][L0  ][L2  ][L1  ][L0  ][L0  ][L0  ]
+Content:  [LOD0  ][LOD0  ][LOD1  ][LOD0  ][LOD2  ][LOD1  ][LOD0  ][LOD0  ][LOD0  ]
 Cost:     [32  ][32  ][1   ][32  ][1   ][1   ][32  ][32  ][32  ]
 Timeline: [0-31][32  ][64  ][96  ][128 ][160 ][192 ][224 ][256 ]
           |----Recent Context----|  |-Mid-| |----Distant Context---|
@@ -212,11 +212,11 @@ Timeline: [0-31][32  ][64  ][96  ][128 ][160 ][192 ][224 ][256 ]
 
 **Key Properties**:
 - Each entry covers exactly one time interval (no gaps, no overlaps)
-- Entries can be at different levels (L0, L1, L2, etc.)
+- Entries can be at different levels (LOD0, LOD1, LOD2, etc.)
 - Total token cost ≤ W_max (enforced by Focus Allocator)
 - Temporally contiguous (left-to-right = past-to-present)
-- Recent content typically at higher detail (L0)
-- Distant content typically at lower detail (L2, L3)
+- Recent content typically at higher detail (LOD0)
+- Distant content typically at lower detail (LOD2, LOD3)
 
 ---
 
@@ -229,18 +229,18 @@ Timeline: [0-31][32  ][64  ][96  ][128 ][160 ][192 ][224 ][256 ]
 New tokens (from user input or model generation) are written to the MegaContext Tree:
 
 ```
-Incoming tokens → L0 buffer (32 tokens) → GistNet → L1 gist
+Incoming tokens → LOD0 buffer (32 tokens) → GistNet → LOD1 gist
                                               ↓
-                  L1 buffer (32 gists) → GistNet → L2 gist
+                  LOD1 buffer (32 gists) → GistNet → LOD2 gist
                                               ↓
-                  L2 buffer (32 gists) → GistNet → L3 gist
+                  LOD2 buffer (32 gists) → GistNet → LOD3 gist
 ```
 
 **Process**:
 1. Buffer incoming tokens until 32 are collected
-2. GistNet compresses the 32-token block into a single L1 gist
-3. Store both the L0 block and L1 gist in the tree
-4. When 32 L1 gists accumulate, compress to L2
+2. GistNet compresses the 32-token block into a single LOD1 gist
+3. Store both the LOD0 block and LOD1 gist in the tree
+4. When 32 LOD1 gists accumulate, compress to LOD2
 5. Repeat hierarchically up the tree
 
 **Triggering**:
@@ -253,7 +253,7 @@ Incoming tokens → L0 buffer (32 tokens) → GistNet → L1 gist
 The Working Context is assembled by selecting entries from the MegaContext Tree:
 
 ```
-MegaContext Tree (select nodes) → Working Context Assembly → [L0][L1][L0][L2]...
+MegaContext Tree (select nodes) → Working Context Assembly → [LOD0][LOD1][LOD0][LOD2]...
                                          ↑
                               LensNet + Focus Allocator
                               (decides what to include)
@@ -288,13 +288,13 @@ Old Working Context → LensNet → Focus Scores → Focus Allocator → New Wor
 **Example Refocus Cycle**:
 
 ```
-Step T:   [L0][L0][L1][L1][L2][L0][L0]  (current WC)
+Step T:   [LOD0][LOD0][LOD1][LOD1][LOD2][LOD0][LOD0]  (current WC)
           ↓
 LensNet:  [+1][+2][-1][-2][+3][0 ][0 ]  (focus scores)
           ↓
 FA:       expand expand collapse collapse expand keep keep
           ↓
-Step T+1: [L0][L0][L0][L2][L3][L0][L0]  (updated WC)
+Step T+1: [LOD0][LOD0][LOD0][LOD2][LOD3][LOD0][LOD0]  (updated WC)
                   ^^^ ^^^ ^^^
                  (detail changed)
 ```
@@ -330,20 +330,20 @@ Step T+1: [L0][L0][L0][L2][L3][L0][L0]  (updated WC)
          │
          ▼
   ┌──────────────────────┐
-  │  MegaContext Tree    │  (append L0 block + L1 gist)
+  │  MegaContext Tree    │  (append LOD0 block + LOD1 gist)
   │  ┌───┐ ┌───┐ ┌───┐  │
-  │  │L3 │─│L2 │─│L1 │  │
+  │  │LOD3 │─│LOD2 │─│LOD1 │  │
   │  └───┘ └─┬─┘ └─┬─┘  │
   │          │     │     │
   │        ┌─┴─────┴─┐  │
-  │        │ L0 Blocks│  │
+  │        │ LOD0 Blocks│  │
   │        └─────────┘  │
   └──────────┬───────────┘
              │ (read selective entries)
              ▼
   ┌─────────────────────┐
   │  Working Context    │
-  │  [L0][L1][L0][L2]   │  ◄─────┐
+  │  [LOD0][LOD1][LOD0][LOD2]   │  ◄─────┐
   └──────────┬───────────┘        │
              │                    │
              ▼                    │ (refocus)
@@ -380,11 +380,11 @@ Step T+1: [L0][L0][L0][L2][L3][L0][L0]  (updated WC)
    └─> GistNet input: 32 token embeddings [e₁, e₂, ..., e₃₂]
 
 3. GistNet compresses
-   └─> L1 gist: single embedding [g₁]
+   └─> LOD1 gist: single embedding [g₁]
 
 4. Write to MegaContext Tree
-   ├─> L0 node: [e₁, e₂, ..., e₃₂] (32 embeddings)
-   └─> L1 node: [g₁] (1 embedding, parent of L0)
+   ├─> LOD0 node: [e₁, e₂, ..., e₃₂] (32 embeddings)
+   └─> LOD1 node: [g₁] (1 embedding, parent of LOD0)
 
 5. Update tree metadata
    ├─> ΔNLL: compression loss metric
@@ -406,16 +406,16 @@ Step T+1: [L0][L0][L0][L2][L3][L0][L0]  (updated WC)
 3. Focus Allocator processes scores
    ├─> For each positive score:
    │   ├─> Fetch children from MegaContext Tree
-   │   ├─> Replace L1 gist with 32 L0 blocks
+   │   ├─> Replace LOD1 gist with 32 LOD0 blocks
    │   └─> Check budget: cost ≤ W_max?
    │
    └─> For each negative score:
        ├─> Find parent in MegaContext Tree
-       ├─> Replace 32 L0 blocks with 1 L1 gist
+       ├─> Replace 32 LOD0 blocks with 1 LOD1 gist
        └─> Frees budget for other expansions
 
 4. New Working Context assembled
-   └─> [mix of L0, L1, L2, L3 entries]
+   └─> [mix of LOD0, LOD1, LOD2, LOD3 entries]
         ├─> Contiguous in time (no gaps)
         └─> Within budget (total cost ≤ W_max)
 ```
@@ -425,8 +425,8 @@ Step T+1: [L0][L0][L0][L2][L3][L0][L0]  (updated WC)
 ```
 1. Working Context fed to base LLM
    └─> Input: sequence of embeddings
-        ├─> L0 entries: raw token embeddings
-        └─> L1/L2/L3 entries: gist embeddings
+        ├─> LOD0 entries: raw token embeddings
+        └─> LOD1/LOD2/LOD3 entries: gist embeddings
         (LLM cannot distinguish - same embedding dimension)
 
 2. LLM runs attention
@@ -503,12 +503,12 @@ Step T+1: [L0][L0][L0][L2][L3][L0][L0]  (updated WC)
 **Example**:
 ```
 T=0:  "My cat's name is Fluffy. [9500 tokens about other topics]"
-      Working Context: [L3 gist] (low detail)
+      Working Context: [LOD3 gist] (low detail)
 
 T=9500: "What was my cat's name?"
-      LensNet detects query, scores L3 gist highly
-      Focus Allocator: L3 → L2 → L1 → L0
-      Working Context: [L0 tokens: "My cat's name is Fluffy"]
+      LensNet detects query, scores LOD3 gist highly
+      Focus Allocator: LOD3 → LOD2 → LOD1 → LOD0
+      Working Context: [LOD0 tokens: "My cat's name is Fluffy"]
 ```
 
 **Why Two Contexts Are Essential**:
@@ -523,15 +523,15 @@ T=9500: "What was my cat's name?"
 
 **Compression Cascade**:
 ```
-32 tokens → 1 L1 gist (97% compression, small ΔNLL)
-32 L1 gists → 1 L2 gist (97% compression, medium ΔNLL)
-32 L2 gists → 1 L3 gist (97% compression, higher ΔNLL)
+32 tokens → 1 LOD1 gist (97% compression, small ΔNLL)
+32 LOD1 gists → 1 LOD2 gist (97% compression, medium ΔNLL)
+32 LOD2 gists → 1 LOD3 gist (97% compression, higher ΔNLL)
 ```
 
 **Restoration**:
 ```
 Need more detail? Traverse tree:
-L3 gist → fetch 32 L2 children → fetch 32×32 L1 children → fetch 32×32×32 L0 tokens
+LOD3 gist → fetch 32 LOD2 children → fetch 32×32 LOD1 children → fetch 32×32×32 LOD0 tokens
 ```
 
 **Why Two Contexts Are Essential**:
@@ -581,32 +581,32 @@ Working Context ← mix of tokens + gists
 
 **Why Two Contexts Are Essential**:
 - GistNet learns to produce embeddings that "look like" base model tokens
-- Base LLM cannot tell the difference between L0 tokens and L1/L2/L3 gists
+- Base LLM cannot tell the difference between LOD0 tokens and LOD1/LOD2/LOD3 gists
 - Working Context is the "adapter layer" - provides abstraction
 - MegaContext Tree is GistNet's domain - invisible to base model
 - Separation allows independent optimization of each component
 
 ### 7. **Multi-Resolution Access** ✓
 
-**How**: Tree structure provides access at any granularity (L0, L1, L2, L3).
+**How**: Tree structure provides access at any granularity (LOD0, LOD1, LOD2, LOD3).
 
 **Access Patterns**:
 ```
-Coarse scan:  Read L3 gists (1 per 1M tokens) → fast overview
-Medium scan:  Read L2 gists (1 per 32k tokens) → section-level
-Fine scan:    Read L1 gists (1 per 1k tokens) → paragraph-level
-Full detail:  Read L0 tokens (all 32 tokens) → word-level
+Coarse scan:  Read LOD3 gists (1 per 1M tokens) → fast overview
+Medium scan:  Read LOD2 gists (1 per 32k tokens) → section-level
+Fine scan:    Read LOD1 gists (1 per 1k tokens) → paragraph-level
+Full detail:  Read LOD0 tokens (all 32 tokens) → word-level
 ```
 
 **Example Use Case**:
 ```
 Query: "Find all discussions about Python optimization"
 
-1. Scan all L3 gists (1000 in 1B-token history) → 1000 gists
-2. Identify 10 relevant L3 regions
-3. Scan their L2 children (10 × 32 = 320 gists)
-4. Identify 5 most relevant L2 regions
-5. Expand to L0 for detailed reading (5 × 1024 tokens = 5120 tokens)
+1. Scan all LOD3 gists (1000 in 1B-token history) → 1000 gists
+2. Identify 10 relevant LOD3 regions
+3. Scan their LOD2 children (10 × 32 = 320 gists)
+4. Identify 5 most relevant LOD2 regions
+5. Expand to LOD0 for detailed reading (5 × 1024 tokens = 5120 tokens)
 
 Total cost: 1000 + 320 + 5120 = 6440 tokens (vs. 1B tokens for full scan)
 ```
@@ -626,7 +626,7 @@ Total cost: 1000 + 320 + 5120 = 6440 tokens (vs. 1B tokens for full scan)
 **Purpose**: Persistent, hierarchical storage of complete conversation history.
 
 **Key Responsibilities**:
-- Store all tokens (L0) and all gists (L1, L2, L3, ...)
+- Store all tokens (LOD0) and all gists (LOD1, LOD2, LOD3, ...)
 - Maintain parent-child relationships
 - Support random access at any level
 - Track metadata (ΔNLL, timestamps, etc.)
@@ -652,8 +652,8 @@ Total cost: 1000 + 320 + 5120 = 6440 tokens (vs. 1B tokens for full scan)
 **Purpose**: Learned compression model that builds the tree hierarchy.
 
 **Key Responsibilities**:
-- Compress 32 tokens → 1 gist (L0 → L1)
-- Compress 32 gists → 1 gist (L1 → L2, L2 → L3, ...)
+- Compress 32 tokens → 1 gist (LOD0 → LOD1)
+- Compress 32 gists → 1 gist (LOD1 → LOD2, LOD2 → LOD3, ...)
 - Minimize ΔNLL (compression loss)
 - Align gists with base model embedding space
 - Train via self-supervised learning
@@ -759,9 +759,9 @@ LOOP (for each new token):
        └─> Add to buffer
 
     2. TREE UPDATE (every 32 tokens)
-       ├─> GistNet: compress 32 tokens → 1 L1 gist
-       ├─> Write L0 block + L1 gist to tree
-       └─> Recursively compress L1→L2, L2→L3, etc.
+       ├─> GistNet: compress 32 tokens → 1 LOD1 gist
+       ├─> Write LOD0 block + LOD1 gist to tree
+       └─> Recursively compress LOD1→LOD2, LOD2→LOD3, etc.
 
     3. REFOCUS (every decode step or every N steps)
        ├─> LensNet: score Working Context entries
@@ -783,23 +783,23 @@ END LOOP
 ```
 T=0: User: "Tell me about Paris"
      └─> Buffer: ["Tell", "me", "about", "Paris"]
-     └─> Working Context: [L0: "Tell", "me", "about", "Paris"]
+     └─> Working Context: [LOD0: "Tell", "me", "about", "Paris"]
      └─> LLM: "Paris is the capital..."
 
 T=32: Buffer full → GistNet compresses
-     └─> MC Tree: [L0: 32 tokens], [L1: gist_1]
-     └─> Working Context: [L0: recent 32 tokens]
+     └─> MC Tree: [LOD0: 32 tokens], [LOD1: gist_1]
+     └─> Working Context: [LOD0: recent 32 tokens]
 
 T=1000: User: "What about London?"
      └─> LensNet scores Paris discussion (low relevance)
-     └─> Focus Allocator: collapse L0 → L1
-     └─> Working Context: [L1: gist_Paris], [L0: recent tokens]
+     └─> Focus Allocator: collapse LOD0 → LOD1
+     └─> Working Context: [LOD1: gist_Paris], [LOD0: recent tokens]
      └─> More budget available for new London discussion
 
 T=1050: User: "Compare Paris and London"
      └─> LensNet scores Paris gist (high relevance)
-     └─> Focus Allocator: expand L1 → L0
-     └─> Working Context: [L0: Paris details], [L0: London details]
+     └─> Focus Allocator: expand LOD1 → LOD0
+     └─> Working Context: [LOD0: Paris details], [LOD0: London details]
      └─> LLM can compare with full context
 ```
 
@@ -809,11 +809,11 @@ T=1050: User: "Compare Paris and London"
 
 ### Key Terms
 
-- **L0**: Raw token blocks (32 tokens each)
-- **L1/L2/L3**: Gist levels (each compresses 32 children)
+- **LOD0**: Raw token blocks (32 tokens each)
+- **LOD1/LOD2/LOD3**: Gist levels (each compresses 32 children)
 - **Gist**: Single embedding that summarizes 32 child embeddings
-- **Entry**: One item in Working Context (can be L0, L1, L2, or L3)
-- **Cost**: Number of base tokens represented (L0=32, L1=1, L2=1, L3=1)
+- **Entry**: One item in Working Context (can be LOD0, LOD1, LOD2, or LOD3)
+- **Cost**: Number of base tokens represented (LOD0=32, LOD1=1, LOD2=1, LOD3=1)
 - **Budget (W_max)**: Maximum token cost for Working Context
 - **ΔNLL**: Compression loss (increase in perplexity due to gisting)
 - **Focus**: Expand entry to higher detail (replace gist with children)
@@ -825,15 +825,15 @@ T=1050: User: "Compare Paris and London"
 
 **MegaContext Tree Invariants**:
 1. **Append-only**: Nodes are never deleted or modified
-2. **Complete**: All L0 blocks are stored (no truncation)
+2. **Complete**: All LOD0 blocks are stored (no truncation)
 3. **Hierarchical**: Each non-leaf node has ≤32 children
-4. **Aligned**: L0 blocks start at multiples of 32
+4. **Aligned**: LOD0 blocks start at multiples of 32
 5. **Redundant**: Both compressed (gists) and original (tokens) are stored
 
 **Working Context Invariants**:
 1. **Contiguous**: Covers [start_pos, end_pos] without gaps
 2. **Budgeted**: ∑(entry_cost) ≤ W_max
-3. **Mixed**: Entries can be at any level (L0, L1, L2, L3)
+3. **Mixed**: Entries can be at any level (LOD0, LOD1, LOD2, LOD3)
 4. **Temporal**: Left-to-right = past-to-present
 5. **Aligned**: Each entry covers exactly one tree node's time span
 

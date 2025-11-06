@@ -87,9 +87,9 @@ GistNet forms the foundation of MegaContext's compression hierarchy:
 5. **Frees context budget** for new information in [[Working Context]]
 
 ```
-Tokens (32) → GistNet L1 → Gists (1)
+Tokens (32) → GistNet LOD1 → Gists (1)
              ↓
-Gists L1 (32) → GistNet L2 → Gists L2 (1)
+Gists LOD1 (32) → GistNet LOD2 → Gists LOD2 (1)
                               ↓
                     MegaContext Tree Storage
                               ↓

@@ -14,9 +14,9 @@ The Working Context is the **active memory** that the base LLM consumes at infer
 The Working Context is the **fixed-size attention window** that sits in GPU memory and gets fed directly into the frozen base model for inference. While the [[MegaContext Tree]] can grow unboundedly on disk (or RAM in the [[POC Architecture|POC]]), the working context must fit within a strict token budget.
 
 Think of it as the **"spotlight"** that illuminates different parts of your memory at different resolutions:
-- **High resolution (L0):** Raw tokens for the most relevant parts
-- **Medium resolution (L1):** 32:1 gists for moderately relevant regions
-- **Low resolution (L2):** 1024:1 gists for distant or less important context
+- **High resolution (LOD0):** Raw tokens for the most relevant parts
+- **Medium resolution (LOD1):** 32:1 gists for moderately relevant regions
+- **Low resolution (LOD2):** 1024:1 gists for distant or less important context
 
 This spotlight is **continuously refocused** by [[LensNet]] and [[Focus Allocator]] as new information arrives and priorities shift.
 
@@ -34,16 +34,16 @@ The working context contains entries at different LODs based on relevance:
 
 | Entry Type | Token Cost | Coverage |
 |------------|------------|----------|
-| **L0 block** | 32 tokens | 32 raw tokens |
-| **L1 gist** | 1 token | 32 tokens (32:1 compression) |
-| **L2 gist** | 1 token | 1,024 tokens (1024:1 compression) |
+| **LOD0 block** | 32 tokens | 32 raw tokens |
+| **LOD1 gist** | 1 token | 32 tokens (32:1 compression) |
+| **LOD2 gist** | 1 token | 1,024 tokens (1024:1 compression) |
 
 ### Contiguous Tiling
 Entries tile the [[MegaContext Tree]] timeline **without gaps or overlaps**, maintaining perfect temporal continuity:
 
 ```
 Timeline: [0 ─────────────────────────────────────────────────── T]
-Working Context: [L0: 0-32] [L1: 32-64] [L1: 64-96] [L0: 96-128] ...
+Working Context: [LOD0: 0-32] [LOD1: 32-64] [LOD1: 64-96] [LOD0: 96-128] ...
 ```
 
 This [[Glossary#Contiguity Invariant|contiguity]] ensures:

@@ -24,14 +24,14 @@ summary: Introduces sparse attention patterns (strided and fixed) to scale trans
 
 ## Relevance to MegaContext
 - **Direct inspiration for [[LensNet]]'s non-causal attention**: Sparse Transformers show that selective connectivity patterns can maintain quality while reducing cost—exactly what LensNet needs when scoring working-context entries.
-- **Strided attention aligns with gist hierarchy**: L1/L2 gists naturally form strided patterns when collapsed—attending to every 32nd or 1024th position. We can leverage this structural sparsity without additional masking overhead.
+- **Strided attention aligns with gist hierarchy**: LOD1/LOD2 gists naturally form strided patterns when collapsed—attending to every 32nd or 1024th position. We can leverage this structural sparsity without additional masking overhead.
 - **Fixed attention informs [[Focus Allocator]] strategies**: The idea that certain "hub" positions (in our case, recently accessed or high-utility gists) should be densely connected while distant regions use sparse sampling maps to our expand/collapse decisions.
 - **Memory-compute tradeoff insights**: Their gradient checkpointing approach is directly applicable to [[GistNet Training]], where we can recompute gist embeddings during backward pass rather than caching all intermediate states.
-- **Long-range dependencies**: Demonstrates that sparse patterns can capture dependencies across 16k+ tokens without full attention—validates our approach of using mixed LOD (L0/L1/L2) rather than requiring dense attention over all history.
+- **Long-range dependencies**: Demonstrates that sparse patterns can capture dependencies across 16k+ tokens without full attention—validates our approach of using mixed LOD (LOD0/LOD1/LOD2) rather than requiring dense attention over all history.
 
 ## What We Can Use
-- **Implement strided LensNet attention**: When LensNet scans the [[Working Context]], use strided patterns to attend to distant L2 gists while maintaining dense attention over recent L0 blocks. This reduces LensNet's O(W²) cost to O(W√W).
-- **Position-dependent attention in [[GistNet]]**: Early compression layers use local-only attention (fixed pattern) to build L1 gists, while later meta-gist layers use strided attention to aggregate across L1 blocks into L2.
+- **Implement strided LensNet attention**: When LensNet scans the [[Working Context]], use strided patterns to attend to distant LOD2 gists while maintaining dense attention over recent LOD0 blocks. This reduces LensNet's O(W²) cost to O(W√W).
+- **Position-dependent attention in [[GistNet]]**: Early compression layers use local-only attention (fixed pattern) to build LOD1 gists, while later meta-gist layers use strided attention to aggregate across LOD1 blocks into LOD2.
 - **Gradient checkpointing for training**: Apply their recomputation strategy during [[GistNet Training]] to reduce memory footprint by ~30-50%, allowing larger batch sizes or deeper compression networks.
 - **Multi-head pattern mixing**: Use different sparse patterns in different [[LensNet]] attention heads—one head uses strided for global context, another uses fixed for local detail—then merge focus scores.
 - **Adaptive stride scheduling**: Start with small strides during early training (more connectivity) and gradually increase stride as [[GistNet]] learns better substitutable compressions, reducing compute as quality improves.
@@ -40,7 +40,7 @@ summary: Introduces sparse attention patterns (strided and fixed) to scale trans
 - **Not truly adaptive**: Sparse patterns are fixed at architecture design time, not learned or adjusted based on content. MegaContext's content-aware focus allocation (via [[LensNet]]) is more flexible but also more complex to train.
 - **Requires specialized CUDA kernels**: Efficient implementation demands custom kernels for blocked sparse matmuls. Standard PyTorch/JAX operations can't exploit the sparsity without significant engineering effort.
 - **Pattern mismatch with data**: If the fixed stride doesn't align with actual dependency structure (e.g., k=128 but dependencies occur every 100 tokens), performance degrades. MegaContext must ensure gist boundaries align with semantic boundaries.
-- **Limited hierarchy**: Only 2-level factorization (local + global). MegaContext's 3-level hierarchy (L0/L1/L2) may need 3-way factorization to fully exploit sparsity.
+- **Limited hierarchy**: Only 2-level factorization (local + global). MegaContext's 3-level hierarchy (LOD0/LOD1/LOD2) may need 3-way factorization to fully exploit sparsity.
 - **Training instability**: Sparse patterns can create disconnected subgraphs early in training before the model learns to route information through hub positions. Requires careful initialization and learning rate warmup.
 
 ## Potential Follow-Up Reading
@@ -52,8 +52,8 @@ summary: Introduces sparse attention patterns (strided and fixed) to scale trans
 
 ## Open Questions for MegaContext
 - Should [[LensNet]] use fixed sparse patterns (cheaper, more predictable) or content-dependent patterns (current plan, more flexible)?
-- Can we combine strided attention in LensNet with our gist hierarchy—treating L2 gists as natural stride anchors that define the sparse pattern?
-- How to handle variable-length gist chains (some branches have L2, others only L1)? Fixed stride assumes uniform structure.
+- Can we combine strided attention in LensNet with our gist hierarchy—treating LOD2 gists as natural stride anchors that define the sparse pattern?
+- How to handle variable-length gist chains (some branches have LOD2, others only LOD1)? Fixed stride assumes uniform structure.
 - Should [[GistNet]]'s cross-attention during compression use sparse patterns, or is full attention necessary for high-quality gist generation?
 - Can we meta-learn the optimal stride schedule during [[Training & Operations]]—adjusting k based on observed ΔNLL@H distributions?
 

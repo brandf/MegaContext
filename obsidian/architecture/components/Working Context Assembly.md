@@ -51,8 +51,8 @@ end_token = total_tokens_in_tree
 
 **Considerations:**
 - Can't literally include all 1M tokens (budget: 8k)
-- Most recent tokens typically at L0 (full detail)
-- Older tokens typically at L1/L2 (compressed)
+- Most recent tokens typically at LOD0 (full detail)
+- Older tokens typically at LOD1/LOD2 (compressed)
 
 ---
 
@@ -69,10 +69,10 @@ For each position in the selected span, decide detail level.
 - List of `(span, level)` tuples:
   ```python
   [
-    (Span(0, 32), 0),      # L0 block
-    (Span(32, 64), 1),     # L1 gist
-    (Span(64, 96), 1),     # L1 gist
-    (Span(96, 1120), 2),   # L2 gist (covers 1024 tokens)
+    (Span(0, 32), 0),      # LOD0 block
+    (Span(32, 64), 1),     # LOD1 gist
+    (Span(64, 96), 1),     # LOD1 gist
+    (Span(96, 1120), 2),   # LOD2 gist (covers 1024 tokens)
     ...
   ]
   ```
@@ -85,17 +85,17 @@ def initial_lod_selection(start_token, end_token, W_max):
     """
     decisions = []
 
-    # Most recent 256 tokens at L0 (full detail)
+    # Most recent 256 tokens at LOD0 (full detail)
     recent_start = max(start_token, end_token - 256)
     for block_start in range(recent_start, end_token, 32):
         decisions.append((Span(block_start, block_start + 32), 0))
 
-    # Next 2048 tokens at L1 (medium compression)
+    # Next 2048 tokens at LOD1 (medium compression)
     mid_start = max(start_token, recent_start - 2048)
     for block_start in range(mid_start, recent_start, 32):
         decisions.append((Span(block_start, block_start + 32), 1))
 
-    # Remaining at L2 (heavy compression)
+    # Remaining at LOD2 (heavy compression)
     for block_start in range(start_token, mid_start, 1024):
         decisions.append((Span(block_start, block_start + 1024), 2))
 
@@ -112,20 +112,20 @@ Retrieve the selected nodes from [[MegaContext Tree]] storage.
 ```python
 class TreeStorage:
     def get_l0_block(self, block_id: int) -> np.ndarray:
-        """Fetch 32 token IDs from L0.ctx"""
+        """Fetch 32 token IDs from LOD0.ctx"""
         offset = 64 + (block_id * 32 * 4)  # Header + tokens
         self.l0_file.seek(offset)
         return np.fromfile(self.l0_file, dtype=np.uint32, count=32)
 
     def get_l1_gist(self, gist_id: int) -> torch.Tensor:
-        """Fetch L1 gist vector from L1.ctx"""
+        """Fetch LOD1 gist vector from LOD1.ctx"""
         offset = 64 + (gist_id * self.embedding_dim * 2)  # fp16
         self.l1_file.seek(offset)
         data = np.fromfile(self.l1_file, dtype=np.float16, count=self.embedding_dim)
         return torch.from_numpy(data)
 
     def get_l2_gist(self, gist_id: int) -> torch.Tensor:
-        """Fetch L2 gist vector from L2.ctx"""
+        """Fetch LOD2 gist vector from LOD2.ctx"""
         offset = 64 + (gist_id * self.embedding_dim * 2)  # fp16
         self.l2_file.seek(offset)
         data = np.fromfile(self.l2_file, dtype=np.float16, count=self.embedding_dim)
@@ -140,7 +140,7 @@ See [[Storage Format]] for binary layout details.
 
 Convert fetched data into embeddings in the model's embedding space.
 
-#### For L0 Tokens
+#### For LOD0 Tokens
 
 ```python
 def materialize_l0_embeddings(token_ids: np.ndarray,
@@ -159,7 +159,7 @@ def materialize_l0_embeddings(token_ids: np.ndarray,
     return embedding_layer(token_tensor)  # [32, d]
 ```
 
-#### For L1/L2 Gists
+#### For LOD1/LOD2 Gists
 
 ```python
 def materialize_gist_embeddings(gist_vector: torch.Tensor) -> torch.Tensor:
@@ -201,19 +201,19 @@ def assemble_working_context(tree: TreeStorage,
     entries = []
 
     for span, level in focus_decisions:
-        if level == 0:  # L0: raw tokens
+        if level == 0:  # LOD0: raw tokens
             block_id = span.start // 32
             token_ids = tree.get_l0_block(block_id)
             embs = materialize_l0_embeddings(token_ids, embedding_layer)  # [32, d]
             entries.append(embs)
 
-        elif level == 1:  # L1: gist
+        elif level == 1:  # LOD1: gist
             gist_id = span.start // 32
             gist = tree.get_l1_gist(gist_id)  # [d]
             embs = materialize_gist_embeddings(gist)  # [1, d]
             entries.append(embs)
 
-        elif level == 2:  # L2: gist
+        elif level == 2:  # LOD2: gist
             gist_id = span.start // 1024
             gist = tree.get_l2_gist(gist_id)  # [d]
             embs = materialize_gist_embeddings(gist)  # [1, d]
@@ -230,8 +230,8 @@ The base model needs position IDs for [[Glossary#RoPE (Rotary Position Embedding
 
 ### Rules
 
-- **L0 blocks:** Use actual sequential token positions
-- **L1/L2 gists:** Use central position of their span
+- **LOD0 blocks:** Use actual sequential token positions
+- **LOD1/LOD2 gists:** Use central position of their span
 
 ```python
 def compute_position_ids(focus_decisions: List[Tuple[Span, int]]) -> torch.Tensor:
@@ -244,11 +244,11 @@ def compute_position_ids(focus_decisions: List[Tuple[Span, int]]) -> torch.Tenso
     position_ids = []
 
     for span, level in focus_decisions:
-        if level == 0:  # L0: sequential positions
+        if level == 0:  # LOD0: sequential positions
             positions = list(range(span.start, span.end))
             position_ids.extend(positions)  # [32] positions
 
-        else:  # L1/L2: central position
+        else:  # LOD1/LOD2: central position
             central_pos = span.start + (span.end - span.start) // 2
             position_ids.append(central_pos)  # [1] position
 
@@ -356,9 +356,9 @@ def incremental_update(old_context, changes: List[Tuple[int, Span, int]]):
     new_embeddings = old_context.embeddings.clone()
 
     for idx, span, new_level in changes:
-        if new_level == 0:  # Expanded to L0
+        if new_level == 0:  # Expanded to LOD0
             new_embs = fetch_and_materialize_l0(span)  # [32, d]
-        else:  # Collapsed to L1/L2
+        else:  # Collapsed to LOD1/LOD2
             new_embs = fetch_and_materialize_gist(span, new_level)  # [1, d]
 
         # Splice into context
@@ -435,7 +435,7 @@ class GistCache:
 - [[GistNet]] — Produces the gist embeddings materialized during assembly
 
 ### Technical Details
-- [[Storage Format]] — Binary layout for fetching L0 tokens and L1/L2 gists from disk/RAM
+- [[Storage Format]] — Binary layout for fetching LOD0 tokens and LOD1/LOD2 gists from disk/RAM
 - [[Node Metadata]] — Metadata fields used to locate and validate tree nodes during fetch
 - [[Tree Operations]] — APIs for reading blocks and gists from the MegaContext Tree
 

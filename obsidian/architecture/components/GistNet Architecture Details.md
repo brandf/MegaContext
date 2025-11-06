@@ -569,8 +569,8 @@ With `d = 4096`, `d_internal = 512`, `n_heads = 8`:
 
 | Level | Blocks | Params per Block | Total |
 |-------|--------|------------------|-------|
-| L1 (32→1) | 32 shared | 0.5M | 0.5M (shared) |
-| L2 (32→1) | 1 | 0.5M | 0.5M |
+| LOD1 (32→1) | 32 shared | 0.5M | 0.5M (shared) |
+| LOD2 (32→1) | 1 | 0.5M | 0.5M |
 | **Total** | - | - | **~1M** |
 
 ---
@@ -667,7 +667,7 @@ STAGE 4: FINAL COMPRESSION (1×32 vector)
 │ └──────┬──────┘  └──────┬──────┘          └──────┬──────┘    │
 └────────┼─────────────────┼──────────────────────┼─────────────┘
          │                 │                       │
-         │ GistNet L1      │ GistNet L1            │ GistNet L1
+         │ GistNet LOD1      │ GistNet LOD1            │ GistNet LOD1
          │ (32→1)          │ (32→1)                │ (32→1)
          ↓                 ↓                       ↓
 ┌───────────────────────────────────────────────────────────────┐
@@ -679,8 +679,8 @@ STAGE 4: FINAL COMPRESSION (1×32 vector)
 └──┼───────┼───────┼──────────────────┼────────────────────────┘
    └───────┴───────┴──────────────────┘
                     │
-          GistNet L2 (32→1)
-          Treats L1 gists as "tokens"
+          GistNet LOD2 (32→1)
+          Treats LOD1 gists as "tokens"
                     ↓
 ┌───────────────────────────────────────────────────────────────┐
 │                  LEVEL 2: FINAL GIST                          │
@@ -706,24 +706,24 @@ Compression Factor: 32 × 32 = 1024×
 GistNet achieves **1024× compression** by stacking two 32→1 layers:
 
 ```
-Level 0 (L0): Raw tokens
+Level 0 (LOD0): Raw tokens
   └─ 1024 tokens divided into 32 spans of 32 tokens each
 
-Level 1 (L1): First-level gists
-  └─ 32 L1 gists (one per L0 span)
+Level 1 (LOD1): First-level gists
+  └─ 32 LOD1 gists (one per LOD0 span)
 
-Level 2 (L2): Second-level gist
-  └─ 1 L2 gist (aggregating all 32 L1 gists)
+Level 2 (LOD2): Second-level gist
+  └─ 1 LOD2 gist (aggregating all 32 LOD1 gists)
 ```
 
 ### Parameter Sharing
 
 | Component | Sharing Strategy | Rationale |
 |-----------|------------------|-----------|
-| L1 slot queries (Q₁, Q₂) | Shared across all 32 L1 blocks | Learn universal compression strategy |
-| L1 layer weights | Shared across all 32 L1 blocks | Parameter efficiency |
-| L2 slot queries | Independent from L1 | May need different strategy for gist→gist compression |
-| L2 layer weights | May share with L1 or specialize | Implementation choice |
+| LOD1 slot queries (Q₁, Q₂) | Shared across all 32 LOD1 blocks | Learn universal compression strategy |
+| LOD1 layer weights | Shared across all 32 LOD1 blocks | Parameter efficiency |
+| LOD2 slot queries | Independent from LOD1 | May need different strategy for gist→gist compression |
+| LOD2 layer weights | May share with LOD1 or specialize | Implementation choice |
 
 ---
 
@@ -889,9 +889,9 @@ class HierarchicalGistNet(nn.Module):
 | Operation | Complexity | Notes |
 |-----------|------------|-------|
 | Single 32-token span | O(32² × d) | Dominated by self-attention |
-| L1 compression (per span) | O(32² × d) | ~negligible vs base LLM |
-| L2 compression | O(32² × d) | Same as L1 |
-| Full 1024-token compression | O(32³ × d) | 32 L1 + 1 L2 operations |
+| LOD1 compression (per span) | O(32² × d) | ~negligible vs base LLM |
+| LOD2 compression | O(32² × d) | Same as LOD1 |
+| Full 1024-token compression | O(32³ × d) | 32 LOD1 + 1 LOD2 operations |
 
 **Comparison to Base LLM:**
 - Base LLM (1024 tokens): O(1024² × d) ≈ 1M × d operations
@@ -905,7 +905,7 @@ Based on NVIDIA L4 GPU, bf16 precision, `HuggingFaceTB/SmolLM3-3B`:
 | Operation | Time | Throughput |
 |-----------|------|------------|
 | Single 32-token span | <1 ms | >1000 spans/sec |
-| 1024-token compression (L1+L2) | ~10 ms | >100 blocks/sec |
+| 1024-token compression (LOD1+LOD2) | ~10 ms | >100 blocks/sec |
 | Batch of 32 spans (parallel) | ~5 ms | >6000 spans/sec |
 
 **Expected on A100:**
@@ -939,7 +939,7 @@ Based on NVIDIA L4 GPU, bf16 precision, `HuggingFaceTB/SmolLM3-3B`:
 - [[substitutability]] – Core design principle that drives architecture decisions
 - [[ΔNLL]] – Primary training metric used to validate architecture effectiveness
 - [[Glossary#Gist / Gist Embedding]] – The compressed representations this architecture produces
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)]] – Hierarchical levels this architecture compresses
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)]] – Hierarchical levels this architecture compresses
 
 ### Implementation Guides
 - [[POC Implementation]] – Practical implementation details and parameter choices

@@ -41,7 +41,7 @@ LensNet must understand *future queries* to know which past facts matter. Becaus
 
 1. LensNet runs independently of the frozen base LLM.
 2. It operates directly on the **[[Working Context|working context]] embeddings** (≈ 8k entries), not on live LLM hidden states.
-3. It conditions on a small **gist set** (`L2 + last 5 L1` gists, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.
+3. It conditions on a small **gist set** (`LOD2 + last 5 LOD1` gists, total ≈ 6) taken from the end of the context, which implicitly encodes the upcoming query/task.
 4. The model outputs one **signed focus score** `u_i` per entry:
     - `u_i > 0`: expand / focus (increase detail, go one level down)
     - `u_i < 0`: collapse / defocus (reduce detail, go one level up)
@@ -68,7 +68,7 @@ See [[LensNet Scoring]] for full inference details and [[LensNet Training]] for 
 - **Block-wise updates:** Runs once every K tokens, not per token
 - **Signed outputs:** Positive scores encourage expansion; negative scores encourage collapse
 - **Budget-aware:** Training includes zero-sum regularizers to maintain constant working-context size
-- **Legality-enforced:** Cannot expand L0 tokens or collapse L2 root; violations penalized in training and masked at inference
+- **Legality-enforced:** Cannot expand LOD0 tokens or collapse LOD2 root; violations penalized in training and masked at inference
 - **Compact:** ≈ 100k–200k parameters, < 3 ms per update @ 8k tokens
 
 ## Role in the System

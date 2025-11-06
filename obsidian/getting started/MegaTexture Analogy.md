@@ -6,7 +6,7 @@ summary: Explains how MegaContext is inspired by id Software's MegaTexture graph
 ## Analogy: MegaTexture → MegaContext
 
 - In graphics, **MegaTexture** (1) streams the visible portions of a vast texture mipmap into GPU memory at the appropriate resolution.
-- **MegaContext** mirrors that idea for language: instead of mipmap tiles, it maintains embeddings at multiple levels of detail (token L0, gist L1, gist L2, …), yielding effectively unbounded context for a frozen LLM.
+- **MegaContext** mirrors that idea for language: instead of mipmap tiles, it maintains embeddings at multiple levels of detail (token LOD0, gist LOD1, gist LOD2, …), yielding effectively unbounded context for a frozen LLM.
 
 ---
 

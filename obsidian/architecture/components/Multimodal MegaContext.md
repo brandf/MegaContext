@@ -31,7 +31,7 @@ To serve multimodal runs, we extend the [[MegaContext Tree]] and [[Positional En
 
 3. **Mipmap-style hierarchy**
    - Stack levels analogous to GPU texture mipmaps: each parent summarizes a 2×2 grid of child tiles, yielding quad-tree fan-out.
-   - Persist L0 (patch embeddings), L1 (tile gists), L2+ (mipmap gists) in parallel buffers within the MegaContext storage layout so they can be streamed independently.
+   - Persist LOD0 (patch embeddings), LOD1 (tile gists), LOD2+ (mipmap gists) in parallel buffers within the MegaContext storage layout so they can be streamed independently.
 
 4. **Cross-modal linking**
    - Attach references from gists back to aligned textual spans (captions, OCR tokens), enabling [[LensNet]] to co-reason across modalities when assigning focus scores.
@@ -58,7 +58,7 @@ Runtime integration inserts these signals alongside text positions before the ba
 
 - **Budget accounting:** Assign modality-aware costs (e.g., treat a visual tile gist as 1 token-equivalent for budget balance). Mixed batches of text and image entries remain contiguous in chronological order.
 - **Focus coordination:** [[LensNet]] extends its input schema to include modality flags, 2D extents, and cross-modal attention summaries, letting it compare textual relevance against visual signals.
-- **Expansion policy:** The [[Focus Allocator]] can refine a coarse visual gist into its child grid, similar to expanding text gists into L0 tokens, while respecting cooldowns and spatial contiguity.
+- **Expansion policy:** The [[Focus Allocator]] can refine a coarse visual gist into its child grid, similar to expanding text gists into LOD0 tokens, while respecting cooldowns and spatial contiguity.
 
 This keeps inference uniform: the base model still sees a single sequence, but entries carry modality-specific embeddings and positional metadata.
 

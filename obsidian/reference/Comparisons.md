@@ -40,9 +40,9 @@ Iteration 32: Read tokens [992k, 1M)    - can only answer about end
 **MegaContext 32k working context:**
 ```
 Working Context:
-- Relevant sections at L0 (full detail): 8k tokens
-- Related sections at L1 (32:1): 100 gists = 100 tokens
-- Distant content at L2 (1024:1): 800 gists = 800 tokens
+- Relevant sections at LOD0 (full detail): 8k tokens
+- Related sections at LOD1 (32:1): 100 gists = 100 tokens
+- Distant content at LOD2 (1024:1): 800 gists = 800 tokens
 Total: 8,900 tokens (under 32k budget)
 
 Coverage: All 1M tokens accessible at appropriate detail
@@ -101,9 +101,9 @@ Generate answer
 Query tokens appended to Working Context
 ↓
 LensNet scores all entries:
-  - UserAuth.py: +0.9 (expand to L0)
-  - Database: -0.2 (collapse to L2)
-  - Session code: +0.6 (keep at L1)
+  - UserAuth.py: +0.9 (expand to LOD0)
+  - Database: -0.2 (collapse to LOD2)
+  - Session code: +0.6 (keep at LOD1)
 ↓
 Focus Allocator applies scores:
   - Expand UserAuth regions: +124 tokens
@@ -155,10 +155,10 @@ Compressive Transformers [8] use fixed compression functions to store old contex
 | Metric | Compressive Transformer (Rae et al. 2019) | MegaContext |
 |--------|-------------------------------------------|-------------|
 | **Compression** | Fixed functions (mean pool, attention) | Learned ([[GistNet]]) |
-| **Hierarchy** | Two-level (active, compressed) | Multi-level (L0, L1, L2, …) |
+| **Hierarchy** | Two-level (active, compressed) | Multi-level (LOD0, LOD1, LOD2, …) |
 | **Focus control** | Static aging policy | Learned dynamic ([[LensNet]]) |
 | **Substitutability** | Approximate | Trained for low [[ΔNLL@H]] |
-| **Decompression** | Lossy, no recovery | Reversible (tree stores L0) |
+| **Decompression** | Lossy, no recovery | Reversible (tree stores LOD0) |
 | **Granularity** | Fixed compression windows | Block-aligned [[Glossary#K (Block Size)|K]]=32 |
 
 ### Conceptual Difference
@@ -206,8 +206,8 @@ Token 1000 attends to:
 **MegaContext:**
 ```
 Position 1000 in Working Context might be:
-  - L0 token 1000 (if relevant, full attention)
-  - L1 gist representing tokens [992, 1024) (if less relevant)
+  - LOD0 token 1000 (if relevant, full attention)
+  - LOD1 gist representing tokens [992, 1024) (if less relevant)
   - Not present at all (if distant)
 ```
 **Adaptive pattern** based on [[LensNet]] scores
@@ -237,8 +237,8 @@ Memorizing Transformers [7] use kNN-augmented retrieval over past keys/values.
 - Requires fast approximate NN search (FAISS, ScaNN)
 
 **MegaContext:**
-- L0: 4 MB (token IDs only)
-- L1 + L2: 132 MB ([[gist|gists]])
+- LOD0: 4 MB (token IDs only)
+- LOD1 + LOD2: 132 MB ([[gist|gists]])
 - Total: ~136 MB
 - Requires tree traversal (O(log N) depth)
 
@@ -254,7 +254,7 @@ Memorizing Transformers [7] use kNN-augmented retrieval over past keys/values.
 | **Granularity** | Token-level | Block-level (K=32) |
 | **Hierarchy** | Flat | Multi-level tree |
 | **Training** | Special landmark tokens trained | [[GistNet]] learns compression |
-| **Reversibility** | No (landmarks are tokens, not summaries) | Yes (tree stores L0) |
+| **Reversibility** | No (landmarks are tokens, not summaries) | Yes (tree stores LOD0) |
 
 ---
 

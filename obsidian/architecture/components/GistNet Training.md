@@ -321,7 +321,7 @@ optimizer = AdamW(
     lr=1e-4,                  # Base learning rate
     betas=(0.9, 0.999),       # Adam momentum terms
     eps=1e-8,                 # Numerical stability
-    weight_decay=0.01         # L2 regularization
+    weight_decay=0.01         # LOD2 regularization
 )
 ```
 
@@ -461,13 +461,13 @@ Not used for training, but helpful for debugging mode collapse.
 
 **8. Hierarchical Consistency**
 ```python
-# For 2-layer GistNet: L0 (32→1) and L1 (32×32→1)
+# For 2-layer GistNet: LOD0 (32→1) and LOD1 (32×32→1)
 g_L0 = gist_net_L0(tokens[0:32])
-g_L1 = gist_net_L1([g_L0_0, ..., g_L0_31])  # 32 L0 gists → 1 L1 gist
+g_L1 = gist_net_L1([g_L0_0, ..., g_L0_31])  # 32 LOD0 gists → 1 LOD1 gist
 
-# L1 gist should preserve L0 information
+# LOD1 gist should preserve LOD0 information
 delta_nll_L1 = evaluate_substitutability(g_L1, tokens[0:1024])
-# Target: L1 ΔNLL < 2.0 (allows some information loss at higher levels)
+# Target: LOD1 ΔNLL < 2.0 (allows some information loss at higher levels)
 ```
 
 ### Validation Protocol
@@ -558,7 +558,7 @@ for i in range(0, len(document_history), 32):
     g_L0 = gist_net_L0(embed(span))
     gists_L0.append(g_L0)
 
-# Layer 1: 1024→1 (32 L0 gists → 1 L1 gist)
+# Layer 1: 1024→1 (32 LOD0 gists → 1 LOD1 gist)
 for i in range(0, len(gists_L0), 32):
     span_gists = gists_L0[i:i+32]
     g_L1 = gist_net_L1(span_gists)
@@ -603,7 +603,7 @@ These gists are later consumed by [[LensNet]] and [[Focus Allocator]] during the
 - [[ΔNLL]] – Core evaluation metric: delta in negative log-likelihood for substitutability
 - [[substitutability]] – Foundational design principle that drives training objectives
 - [[Glossary#Gist / Gist Embedding]] – The compressed representations produced by training
-- [[Glossary#L0 / L1 / L2 (Level of Detail / LOD)]] – Hierarchical levels that GistNet trains for
+- [[Glossary#LOD0 / LOD1 / LOD2 (Level of Detail / LOD)]] – Hierarchical levels that GistNet trains for
 
 ### Implementation Guides
 - [[POC Implementation]] – Practical training setup and constraints for the proof-of-concept

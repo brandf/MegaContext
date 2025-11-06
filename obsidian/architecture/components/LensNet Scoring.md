@@ -23,17 +23,17 @@ These scores are **signed utilities** that balance exploration (expanding gists 
 LensNet operates on embeddings from two sources:
 
 1. **Context embeddings** (`N × d`): All ~8,000 entries currently in the [[Working Context]]
-   - Mix of L0 (raw tokens), L1 gists, and L2 gists
+   - Mix of LOD0 (raw tokens), LOD1 gists, and LOD2 gists
    - Down-projected to LensNet width `d_lens ≈ 512`
 
 2. **Tail gists** (`K × d`): Small conditioning set (default `K = 6`)
-   - L2 root gist (full document summary)
-   - Last 5 L1 gists (recent high-level summaries)
+   - LOD2 root gist (full document summary)
+   - Last 5 LOD1 gists (recent high-level summaries)
    - Encodes the upcoming query/task context
 
 3. **Auxiliary features** (per entry):
    - `levels`: 0/1/2 markers indicating tree level
-   - `span_width`: number of L0 tokens this entry represents
+   - `span_width`: number of LOD0 tokens this entry represents
    - `distance_to_cursor`: blocks from decode cursor
 
 ### Three-Stage Architecture
@@ -101,24 +101,24 @@ The output is one **signed focus score** per entry.
 
 A **positive score** indicates that expanding this entry will likely improve the base LLM's predictions:
 
-- For **L1 gists**: expand into constituent L0 tokens (≈256 tokens)
-- For **L2 gists**: expand into constituent L1 gists (covers larger span)
+- For **LOD1 gists**: expand into constituent LOD0 tokens (≈256 tokens)
+- For **LOD2 gists**: expand into constituent LOD1 gists (covers larger span)
 - **Intuition**: "We need more detail here to answer the upcoming query"
 
 ### What Negative Scores Mean
 
 A **negative score** indicates that collapsing this span into a gist will reduce token usage without harming predictions:
 
-- For **L0 token sequences**: collapse into their parent L1 gist
-- For **L1 gist sequences**: collapse into their parent L2 gist
+- For **LOD0 token sequences**: collapse into their parent LOD1 gist
+- For **LOD1 gist sequences**: collapse into their parent LOD2 gist
 - **Intuition**: "This detail isn't needed; we can summarize it"
 
 ### Legality Constraints
 
 Not all actions are legal:
 
-- **L0 tokens cannot expand** (already at finest detail)
-- **L2 root cannot collapse** (already at coarsest detail)
+- **LOD0 tokens cannot expand** (already at finest detail)
+- **LOD2 root cannot collapse** (already at coarsest detail)
 
 Illegal directions are **hard-masked to zero** at inference time.
 
@@ -131,9 +131,9 @@ The [[Focus Allocator]] receives signed scores from LensNet and applies them gre
 ```python
 # Prevent illegal actions
 if level[i] == 0:
-    scores[i] = min(scores[i], 0)  # L0 can't expand
+    scores[i] = min(scores[i], 0)  # LOD0 can't expand
 if level[i] == 2:
-    scores[i] = max(scores[i], 0)  # L2 can't collapse
+    scores[i] = max(scores[i], 0)  # LOD2 can't collapse
 ```
 
 ### 2. Sorting by Magnitude
@@ -178,7 +178,7 @@ To prevent repeated expand/collapse on the same span:
 
 During training, scores are supervised with **signed target utilities** `y_i`:
 
-- **Expandable items** (L1/L2 with children): positive `y_i > 0`
+- **Expandable items** (LOD1/LOD2 with children): positive `y_i > 0`
 - **Collapsible spans**: negative `y_i < 0`
 - Others: 0 or masked
 
@@ -226,7 +226,7 @@ elif neg_mass > pos_mass:
 
 ### Example 1: Recent Query-Relevant Section
 
-**Entry**: L1 gist covering "database schema definitions" (256 L0 tokens)
+**Entry**: LOD1 gist covering "database schema definitions" (256 LOD0 tokens)
 
 **Context**: Upcoming query is "What fields does the User table have?"
 
@@ -237,47 +237,47 @@ elif neg_mass > pos_mass:
 
 **Score**: `u_i = +4.2` (strong expand signal)
 
-**Action**: [[Focus Allocator]] expands this L1 gist into 256 L0 tokens, providing detailed schema information to the base LLM.
+**Action**: [[Focus Allocator]] expands this LOD1 gist into 256 LOD0 tokens, providing detailed schema information to the base LLM.
 
 ---
 
 ### Example 2: Irrelevant Historical Span
 
-**Entry**: L0 tokens from early document (boilerplate copyright notice, 128 tokens)
+**Entry**: LOD0 tokens from early document (boilerplate copyright notice, 128 tokens)
 
 **Context**: Document is long; working context is at capacity; query is about technical content far ahead
 
 **LensNet reasoning**:
 - Low attention from tail gists
 - Far from decode cursor
-- Legal to collapse (L0 tokens)
+- Legal to collapse (LOD0 tokens)
 
 **Score**: `u_i = -2.8` (collapse signal)
 
-**Action**: [[Focus Allocator]] collapses these 128 tokens into their parent L1 gist, freeing tokens for more relevant content.
+**Action**: [[Focus Allocator]] collapses these 128 tokens into their parent LOD1 gist, freeing tokens for more relevant content.
 
 ---
 
-### Example 3: L2 Root Gist
+### Example 3: LOD2 Root Gist
 
-**Entry**: L2 root gist (summarizes entire document)
+**Entry**: LOD2 root gist (summarizes entire document)
 
 **Context**: Always present in working context
 
 **LensNet reasoning**:
 - Provides global context
 - Cannot collapse (already at highest level)
-- May expand if we need more L1 detail
+- May expand if we need more LOD1 detail
 
 **Score**: `u_i = +0.3` (weak expand signal, but likely not high-priority)
 
-**Legality**: Can expand into constituent L1 gists, but cannot collapse further.
+**Legality**: Can expand into constituent LOD1 gists, but cannot collapse further.
 
 ---
 
-### Example 4: Mid-Document L1 Gist
+### Example 4: Mid-Document LOD1 Gist
 
-**Entry**: L1 gist covering "methodology section" (256 L0 tokens compressed)
+**Entry**: LOD1 gist covering "methodology section" (256 LOD0 tokens compressed)
 
 **Context**: Query is about results section; methodology not currently relevant
 
@@ -288,13 +288,13 @@ elif neg_mass > pos_mass:
 
 **Score**: `u_i = -0.1` (near-neutral, slight collapse bias)
 
-**Action**: Likely maintained as L1 gist (score magnitude too low to prioritize action).
+**Action**: Likely maintained as LOD1 gist (score magnitude too low to prioritize action).
 
 ---
 
 ### Example 5: Recently Decoded Context
 
-**Entry**: L0 tokens just decoded (last 128 tokens of generation)
+**Entry**: LOD0 tokens just decoded (last 128 tokens of generation)
 
 **Context**: Generation in progress; these tokens are part of model's immediate context
 
@@ -305,13 +305,13 @@ elif neg_mass > pos_mass:
 
 **Score**: `u_i = +0.05` (neutral-positive, protected from collapse)
 
-**Action**: Maintained as L0 tokens regardless of score.
+**Action**: Maintained as LOD0 tokens regardless of score.
 
 ---
 
 ### Example 6: Boundary Case—Just Above Threshold
 
-**Entry**: L1 gist with marginal relevance
+**Entry**: LOD1 gist with marginal relevance
 
 **Context**: Working context slightly over budget
 
@@ -355,7 +355,7 @@ Encourages balanced expand/collapse masses.
 ### 4️⃣ Legality Penalties
 
 ```
-L_illegal = alpha * sum_{L0} ReLU(u_i) + beta * sum_{L2} ReLU(-u_i)
+L_illegal = alpha * sum_{LOD0} ReLU(u_i) + beta * sum_{LOD2} ReLU(-u_i)
 ```
 
 Discourages impossible actions during training (alpha, beta ≈ 0.3).
