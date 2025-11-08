@@ -61,6 +61,15 @@ All scripts perform the following stages in order:
    ```
 6. **Hand-off**: capture report artifacts (`report/report.md`, WANDB link), checkpoint paths (`$NANOCHAT_BASE_DIR/base/...`), and outstanding issues in [[Lifecycle#Hand-off Checklist]] / [[PRD Progress Tracker]].
 
+### Post-run validation
+
+Before sharing a checkpoint or moving to downstream experiments:
+
+1. **Loss parity** — confirm `python -m scripts.base_eval` and `python -m scripts.chat_eval -- -i sft` report ΔNLL@H within the target bands (see table below). Re-run eval if WANDB shows gaps.
+2. **Report completeness** — ensure `report/report.md` includes tokenizer stats, base/mid/SFT metrics, and chat samples. Missing sections usually mean a stage exited early.
+3. **Checkpoint audit** — list `$NANOCHAT_BASE_DIR/base`, `/mid`, `/chat` and record the latest `step` values. Add these paths to the hand-off note.
+4. **Interactive smoke** — run `python -m scripts.chat_cli -p "Summarize MegaContext."` and paste the response (and latency) into the hand-off log. This catches config mismatches before others pull the run.
+
 ## 4. Telemetry Targets & Alerts
 
 | Metric | Target | Investigate when… | Notes |

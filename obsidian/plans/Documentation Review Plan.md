@@ -48,19 +48,19 @@ summary: Action plan for auditing and updating the MegaContext documentation set
 3. Ensure deeper docs (e.g., `How MegaContext Works`) summarize components + link out to the canonical notes instead of re-teaching every concept. *(Reading map + component quick reference added; revisit after nanochat migration if new sections are added.)*
 
 ### 6. Coverage Gaps (Mid/Post-Training & Runtime Ops) 🔄
-1. Add a “Lifecycle” page summarizing how MegaContext affects pre-training, mid-training refreshes (e.g., re-gisting after GistNet updates), post-training deployment, and inference telemetry. ✅
-2. Expand `obsidian/ops/Base Runtime.md` (or a new “Runtime Ops” page) with concrete steps for running inference today: commands, expected artifacts, troubleshooting, and how to roll new checkpoints into the tree. *(need more troubleshooting + validation detail)*
-3. Document how to validate migrations (smoke tests, parity checks) once the nanochat plan actually lands; for now, mark those sections as TODO so they don’t look complete.
+- [x] Add a “Lifecycle” page summarizing how MegaContext affects pre-training, mid-training refreshes (e.g., re-gisting after GistNet updates), post-training deployment, and inference telemetry.
+- [x] Expand `obsidian/ops/Base Runtime.md` with concrete steps for running inference today: commands, expected artifacts, troubleshooting, and how to roll new checkpoints into the tree.
+- [ ] Document how to validate migrations (smoke tests, parity checks) once the nanochat plan actually lands; for now, mark those sections as TODO so they don’t look complete.
 
 ### 7. Vision & Plans Cleanup 🔄
-1. Fix typos/duplication in `obsidian/vision/Vision.md`. ✅
-2. For each PRD, add a “Status: POR” label so it is obvious these govern the work, and add “Legacy” notes to the older phase documents. *(applied to some PRDs; need to finish the set + add badges to remaining ones, e.g., KV caching, PRD tracker).*
-3. Cross-link future-looking pages (`Future Plan`, `Realtime Scenarios`) back to the PRD index so readers can see how speculative ideas relate to the active roadmap.
+- [x] Fix typos/duplication in `obsidian/vision/Vision.md`.
+- [ ] For each PRD, add a “Status: POR” label so it is obvious these govern the work, and add “Legacy” notes to the older phase documents. *(Applied to some PRDs; need to finish the set + add badges to the remaining ones, e.g., KV caching, PRD tracker).*
+- [ ] Cross-link future-looking pages (`Future Plan`, `Realtime Scenarios`) back to the PRD index so readers can see how speculative ideas relate to the active roadmap.
 
 ### 8. Documentation QA / Polish (New)
-1. Run a vault-wide proofreading/link lint pass to catch typos, dead wikilinks, outdated TODO markers (e.g., missing diagrams such as `assets/module_stack.png`). ✅ (`tools/check_links.py` added + vault is currently clean; retain script for future runs.)
-2. Verify every command/config referenced in docs exists (or is flagged as planned) and add troubleshooting snippets where appropriate. *(Ops/Lifecycle/Base Runtime enriched; remaining commands tied to nanochat will be updated post-migration.)*
-3. Summarize recent changes or “last updated” metadata on key pages so readers can quickly gauge freshness. ❌ *Decision: skip to avoid unnecessary maintenance until the nanochat migration stabilizes the doc set.*
+- [x] Run a vault-wide proofreading/link lint pass to catch typos, dead wikilinks, outdated TODO markers (e.g., missing diagrams such as `assets/module_stack.png`). (`tools/check_links.py` added + vault is currently clean; retain script for future runs.)
+- [ ] Verify every command/config referenced in docs exists (or is flagged as planned) and add troubleshooting snippets where appropriate. *(Ops/Lifecycle/Base Runtime enriched; remaining commands tied to nanochat still need final verification.)*
+- [ ] Summarize recent changes or “last updated” metadata on key pages so readers can quickly gauge freshness. ❌ *Decision: skip until the nanochat migration stabilizes the doc set—revisit later if needed.*
 
 ---
 

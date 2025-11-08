@@ -23,8 +23,9 @@ Baseline decode demo for the frozen LLM runtime. Run this after training via `ru
    >>> Why is the sky blue?
    MegaContext: Rayleigh scattering ... [generated tokens]
    ```
-2. `report/report.md` is refreshed with the latest chat samples plus per-phase metrics.
+2. `report/report.md` is refreshed with the latest chat samples plus per-phase metrics (Base Loss, Mid Eval, Chat Eval, Samples).
 3. If WANDB is enabled, a run named `<WANDB_RUN>-chat` (or similar) appears with latency + allocator charts.
+4. The CLI prints the checkpoint + tokenizer it loaded (e.g., `Loaded base checkpoint: ~/.cache/nanochat/base/...`). Capture this in hand-off notes so other contributors can reproduce.
 
 If any of these artifacts are missing, see the troubleshooting section below.
 
@@ -42,10 +43,12 @@ If any of these artifacts are missing, see the troubleshooting section below.
 
 ---
 ## Troubleshooting
-- **`scripts.chat_cli` cannot find checkpoints:** confirm `~/.cache/nanochat/base` (or the `NANOCHAT_BASE_DIR` override) contains artifacts from a recent run. Re-run `run10.sh` if empty.
-- **WANDB authentication errors:** set `WANDB_API_KEY` before launching the CLI/eval scripts or specify `WANDB_MODE=offline`.
-- **Latent mismatches across runs:** ensure the CLI uses the same `--max_seq_len` and tokenizer as training (the defaults match run10/speedrun). Rebuild tokenizer via `python -m scripts.tok_train` if necessary.
-- **Unstable generations / empty output:** inspect `report/report.md` for swap spikes; retrain LensNet/mid stages if residency drops below 80 %.
+- **`scripts.chat_cli` cannot find checkpoints:** confirm `~/.cache/nanochat/base` (or the `NANOCHAT_BASE_DIR` override) contains recent artifacts. Use `ls $NANOCHAT_BASE_DIR/*` to verify. Re-run `run10.sh` if empty.
+- **WANDB authentication errors:** set `WANDB_API_KEY` before launching the CLI/eval scripts or specify `WANDB_MODE=offline`. Runs fall back to DummyWandb if the key is missing.
+- **Model/tokenizer mismatch:** ensure CLI output shows the same tokenizer hash that was trained in the run (`tok_train_step=...`). If not, rebuild via `python -m scripts.tok_train` and rerun `scripts.tok_eval`.
+- **Latent mismatches across runs:** confirm the CLI uses the same `--max_seq_len` and `--device_batch_size` defaults as training. Override via flags if needed.
+- **Unstable generations / empty output:** inspect `report/report.md` for swap spikes; retrain LensNet/mid stages if residency drops below 80 %. Also re-run `python -m scripts.chat_eval -- -i sft` to ensure eval metrics are healthy.
+- **No `report/report.md` update:** rerun `python -m nanochat.report generate` after the CLI session. Missing sections often indicate earlier training stage failures; check logs under `$NANOCHAT_BASE_DIR/report`.
 
 Escalate persistent runtime issues by attaching the failing log + config to the relevant PRD or [[Migration Status]] entry.
 
