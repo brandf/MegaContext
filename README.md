@@ -21,35 +21,22 @@ For the best editing/contributing experience, use the Obsidian client - open the
 
 ## Runtime Requirements & Setup
 
-- Python 3.11 (matches the upstream [nanochat](https://github.com/karpathy/nanochat) toolchain we plan to import)
-- CUDA-capable GPU with CUDA 12.x drivers (tested with PyTorch 2.2+ / cu121 builds)
+Baseline requirements (matches upstream nanochat):
 
-### Local (Linux/macOS)
-1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and ensure `python3.11` is available.
-2. Run `uv venv` followed by `uv sync` to install the runtime and development dependencies.
-3. Launch Jupyter with `uv run jupyter lab` and open [`notebooks/megacontext.ipynb`](./notebooks/megacontext.ipynb).
+- Python 3.11 + CUDA 12.x drivers
+- `uv` for dependency management (`uv venv && uv sync --extra gpu`)
+- WANDB/HF tokens exported before long runs
 
-### Google Colab
-1. Open the notebook via the badge above or [this link](https://colab.research.google.com/github/brandf/MegaContext/blob/main/notebooks/megacontext.ipynb).
-2. Select a GPU runtime (`Runtime → Change runtime type → T4/L4/A100`).
-3. Run the **Quick Start** bootstrap cell at the top of the notebook; it clones the repo, installs dependencies, and wires up widget support.
-4. Launch the **0. Setup Console** cell to choose the experiment config, artifact/data roots, logging, tokens, resume checkpoint, and reproducibility seed in one place.
-5. Continue with `1. Dataset Preparation` → `2. Configure GistNet Training` → `3. Build Lightning Components` → `4. Launch Training`.
+The detailed operating guide (env prep, telemetry, troubleshooting) lives in [`obsidian/ops/Training & Operations.md`](./obsidian/ops/Training%20&%20Operations.md). Use it as the single source of truth. Quick reference:
 
-The bootstrap script is idempotent—rerun it whenever you reconnect to a fresh Colab session.
+| Scenario | Command |
+| --- | --- |
+| Single GPU (32 GB class) | `bash run10.sh --gpu 5090` |
+| Single H100 | `bash run10.sh --gpu h100` |
+| $100 tier (8×H100) | `bash speedrun.sh` |
+| $1000 tier (8×H100) | `bash run1000.sh` |
 
-### Artifact Storage & Resuming Runs
-- Point `MEGACONTEXT_ARTIFACT_ROOT` to mounted network storage (e.g. Novita.ai volumes) before launching the notebook. All checkpoints, logs, and summaries flow there by default.
-- Use `MEGACONTEXT_DATA_ROOT` if you want dataset shards on a different mount than the git checkout.
-- The **Setup Console** cell lets you override paths interactively; it creates directories as needed and surfaces available checkpoints.
-- Pick `Do not resume` for a fresh run or choose any `.ckpt` discovered under the artifact root directly from the console.
-- Reproducibility defaults to seed `42`; set `MEGACONTEXT_SEED` to pin a different seed per experiment.
-- Set `MEGACONTEXT_FORCE_REINSTALL=1` before running the bootstrap cell if you need to rebuild the editable install in-place (otherwise cached installs are reused to avoid Colab restarts).
-- Set `MEGACONTEXT_FORCE_DATA_REBUILD=1` when you need to regenerate dataset shards even if Arrow files already exist.
-
-### Current vs. Upcoming Workflow
-- **Today:** All experimentation and training flows through `notebooks/megacontext.ipynb`. Treat the notebook as the source of truth for commands, configs, and telemetry until further notice.
-- **In flight:** We plan to pull in the nanochat training CLI so the same requirements (Python 3.11, CUDA 12.x, PyTorch 2.2+) stay consistent. Follow the [PRD stack](./obsidian/plans/PRDs/index.md) for status updates; until that migration lands, commands referencing `nanochat.*` are considered future work.
+These scripts run tokenizer → base → mid → chat SFT end-to-end, drop checkpoints in `~/.cache/nanochat`, and generate `report/report.md`. For chat/web demos after training, follow [[Base Runtime]](./obsidian/ops/Base%20Runtime.md).
 
 ---
 
@@ -68,7 +55,7 @@ The bootstrap script is idempotent—rerun it whenever you reconnect to a fresh 
     + Read [Megacontext Documentation](https://brandf.github.io/MegaContext/)
   - Follow [SETUP.md](./SETUP.md) instruction in a linux environment (Python 3.11 + CUDA 12.x as noted above).
     + Such as a rented GPU from https://novita.ai
-  - Use the Jupyter [notebook](./notebooks/megacontext.ipynb) for training until the nanochat workflow is merged.
+  - Use the nanochat scripts (`run10.sh`, `speedrun.sh`, `run1000.sh`, or the component-level `scripts/*.py` modules) for training and evaluation.
 
 ---
 

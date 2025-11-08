@@ -5,9 +5,7 @@ summary: Onboarding guide for running MegaContext on the nanochat fork, covering
 ---
 # Nanochat Integration Guide
 
-Use this note when cloning, configuring, and contributing to the nanochat-based implementation tracked in [[Migration Plan - Nanochat Integration]]. It complements the PRDs by explaining how to run the new stack locally and how to keep parity with upstream nanochat releases.
-
-> **Status:** Planning only. The nanochat fork has not been imported into this repository yet, so the commands/configs below are illustrative targets. Use the research notebook flow until the migration work in the PRDs lands.
+Use this note when cloning, configuring, and contributing to the nanochat-based implementation tracked in [[Migration Plan - Nanochat Integration]]. It complements the PRDs by explaining how to run the new stack locally and how to keep parity with upstream nanochat releases. For day-to-day runbooks (env prep, script matrix, telemetry targets) defer to [[Training & Operations]] and treat that doc as the canonical reference.
 
 ## Branching & repositories
 
@@ -17,19 +15,20 @@ Use this note when cloning, configuring, and contributing to the nanochat-based 
 
 ## Environment setup
 
-1. Install [`uv`](https://docs.astral.sh/uv/) and create an environment next to the fork: `uv venv` then `uv sync`.
-2. Enable editable installs for MegaContext modules: `uv pip install -e .` so local edits propagate into the nanochat CLI.
-3. Export telemetry tokens (`WANDB_API_KEY`, `HF_TOKEN`) before running; scripts respect the same env vars described in [[Training & Operations]] and [[Telemetry]].
-4. Configure dataset and artifact roots exactly as in the notebooks by setting `MEGACONTEXT_DATA_ROOT` and `MEGACONTEXT_ARTIFACT_ROOT`.
+1. Install [`uv`](https://docs.astral.sh/uv/) and create an environment next to the fork: `uv venv` then `uv sync --extra gpu`.
+2. Activate the venv (`source .venv/bin/activate`) so `python`/`torchrun` resolve inside the repo.
+3. Export telemetry tokens (`WANDB_API_KEY`, `HF_TOKEN`) plus `NANOCHAT_BASE_DIR` (defaults to `~/.cache/nanochat`) before running; scripts respect the same env vars described in [[Training & Operations]] and [[Telemetry]].
+4. Keep the repo itself editable via `uv pip install -e .` if you rely on local modules outside the `nanochat` package.
 
 ## Key commands
 
 | Purpose | Command | Notes |
 |---------|---------|-------|
-| Vanilla nanochat sanity run (planned) | `uv run python -m nanochat.train --compile=False --out_dir artifacts/nanochat_baseline` | Use once the fork is pulled in and baseline configs exist. |
-| MegaContext end-to-end run (planned) | `uv run python -m nanochat.train --config configs/megacontext_e2e.yaml --context_config configs/wc/prd.yaml` | Tracks the [[MegaContext End-to-End Training]] PRD; configs will land with the migration. |
-| MegaPrediction decode demo (planned) | `uv run python -m nanochat.chat --config configs/megaprediction_demo.yaml` | Exercises the shared wLOD readout defined in [[MegaPrediction Training]] once implemented. |
-| Legacy smoke test (current) | `uv run python -m tools.decode_demo --config configs/SampleText_TinyGPT2.yaml` | Continue using this command until the nanochat CLI is available. |
+| Single-GPU validation | `bash run10.sh --gpu 5090` | Downloads tokenizer/data, runs base/mid/SFT on BF16 consumer GPUs (~3 B tokens). |
+| Single-GPU (H100) | `bash run10.sh --gpu h100` | Doubles device batch size, halves iteration count for the same token budget. |
+| $100 tier | `bash speedrun.sh` | 8×H100, depth‑20 run mirroring upstream nanochat speedrun. |
+| $1000 tier | `bash run1000.sh` | 8×H100 depth‑32 training with tuned device batch + accumulation. |
+| Chat / eval | `python -m scripts.chat_cli -p "Hello world"`<br>`python -m scripts.chat_eval -- -i sft` | Use after any training script to sanity-check checkpoints from `~/.cache/nanochat`. |
 
 ## CI & telemetry expectations
 
@@ -41,5 +40,5 @@ Use this note when cloning, configuring, and contributing to the nanochat-based 
 ## Open questions / TODOs
 
 - Expose MegaAttention mask options as CLI flags (link to [[MegaAttention Training]]).
-- Document the migration-ready dataset builder once the Arrow → nanochat binarization bridge is committed.
+- Document the migration-ready dataset builder once the Arrow → nanochat binarization bridge is committed (currently handled by `python -m nanochat.dataset` inside the scripts).
 - Add screenshots/logs of the preferred W&B dashboard for the PRD stack so new contributors can benchmark their runs quickly.

@@ -1,31 +1,30 @@
 ---
 tags:
   - ops
-summary: Runbook for the base runtime decode demo covering command execution, telemetry outputs, and expected behavior.
+summary: Runbook for the nanochat-based chat CLI / web demo, covering command execution, telemetry outputs, and expected behavior.
 ---
-Baseline decode demo for the frozen LLM runtime. Run this after provisioning assets via `uv run python tools/bootstrap_env.py`. The nanochat bootstrap described in [[Migration Plan - Nanochat Integration]] is not yet wired into this repository—treat it as forward-looking documentation.
+Baseline decode demo for the frozen LLM runtime. Run this after training via `run10.sh`, `speedrun.sh`, or `run1000.sh` so the `~/.cache/nanochat` directory contains checkpoints. Refer to [[Training & Operations]] if you need to re-create the environment or rerun the training scripts.
 
 ---
 
-- **Command (current):** `uv run python -m tools.decode_demo --config configs/SampleText_TinyGPT2.yaml`
-- **Command (planned):** `uv run python -m nanochat.chat --config configs/megacontext_demo.yaml` — enable once the nanochat fork is imported and the config lands per [[Migration Plan - Nanochat Integration]].
-- **Prompt source:** uses the sample corpus installed during bootstrap; update the config for custom prompts or datasets.
-- **Telemetry:** CLI prints the generated continuation and logs structured events to `artifacts/run_logs/<run>-<timestamp>.log`.
-- **Weights & Biases:** export `MEGACONTEXT_ENABLE_WANDB=1` (optionally `WANDB_MODE=online`) before running to stream metrics; otherwise W&B initialization is skipped.
+- **Command (CLI):** `python -m scripts.chat_cli -p "Why is the sky blue?"`
+- **Command (web UI):** `python -m scripts.chat_web`
+- **Batch eval:** `python -m scripts.chat_eval -- -i sft`
+- **Prompt source:** CLI accepts inline prompts via `-p` or reads from stdin interactively; eval pulls standard datasets baked into nanochat.
+- **Telemetry:** CLI prints responses and logs structured events through nanochat’s report generator + WANDB instrumentation.
+- **Weights & Biases:** export `WANDB_RUN=<name>` or `MEGACONTEXT_ENABLE_WANDB=1` before training so later CLI/eval runs attach to the same project.
 - **Maintenance:** refresh this note when runtime flags, configs, or expected outputs change.
 
 ---
 
 ## Expected Output
-1. CLI prints the continuation to stdout (prefixed with `MegaContext>`). Example:
+1. CLI prints the continuation to stdout (prefixed with `>>>`). Example:
    ```text
-   MegaContext> Once upon a time ... [generated tokens]
+   >>> Why is the sky blue?
+   MegaContext: Rayleigh scattering ... [generated tokens]
    ```
-2. A log file `artifacts/run_logs/<config>-<timestamp>.log` is created containing:
-   - prompt metadata (token count, budget)
-   - swap rate / residency per allocator tick
-   - ΔNLL-style telemetry if enabled
-3. If WANDB is enabled, a run named `decode_demo/<timestamp>` appears with latency + allocator charts.
+2. `report/report.md` is refreshed with the latest chat samples plus per-phase metrics.
+3. If WANDB is enabled, a run named `<WANDB_RUN>-chat` (or similar) appears with latency + allocator charts.
 
 If any of these artifacts are missing, see the troubleshooting section below.
 
@@ -43,16 +42,15 @@ If any of these artifacts are missing, see the troubleshooting section below.
 
 ---
 ## Troubleshooting
-- **Command fails with “config not found”:** ensure `configs/SampleText_TinyGPT2.yaml` exists (run `ls configs`). Copy it before editing; keep a known-good config for smoketests.
-- **No log file produced:** verify the `artifacts/run_logs/` directory exists and that the process has write permissions. Rerun with `MEGACONTEXT_ENABLE_WANDB=0` to rule out WANDB-related hangs.
-- **Model download/auth errors:** supply valid Hugging Face credentials via the notebook Setup Console or set `HF_TOKEN` in the shell before running the decode script.
-- **Unstable generations / empty output:** inspect the log for residency <80 % or repeated collapse actions; rerun training JT cycles to refresh LensNet if necessary.
+- **`scripts.chat_cli` cannot find checkpoints:** confirm `~/.cache/nanochat/base` (or the `NANOCHAT_BASE_DIR` override) contains artifacts from a recent run. Re-run `run10.sh` if empty.
+- **WANDB authentication errors:** set `WANDB_API_KEY` before launching the CLI/eval scripts or specify `WANDB_MODE=offline`.
+- **Latent mismatches across runs:** ensure the CLI uses the same `--max_seq_len` and tokenizer as training (the defaults match run10/speedrun). Rebuild tokenizer via `python -m scripts.tok_train` if necessary.
+- **Unstable generations / empty output:** inspect `report/report.md` for swap spikes; retrain LensNet/mid stages if residency drops below 80 %.
 
 Escalate persistent runtime issues by attaching the failing log + config to the relevant PRD or [[Migration Status]] entry.
 
 ---
 ## Notes
 
-- [[Training & Operations]] outlines shared logging conventions and acceptance criteria for runtime demos, now tied to [[MegaContext End-to-End Training]] checkpoints.
-- Keep this runbook in sync with `tools/bootstrap_env.py` and `tools/decode_demo.py` whenever new flags or telemetry outputs are introduced.
-- Hook the nanochat command into [[MegaPrediction Training]]'s gist-first inference path once the shared readout head lands.
+- [[Training & Operations]] outlines shared logging conventions and acceptance criteria for runtime demos, tied to [[MegaContext End-to-End Training]] checkpoints produced by the nanochat scripts.
+- Hook the nanochat chat/eval commands into [[MegaPrediction Training]]'s gist-first inference path once the shared readout head lands.

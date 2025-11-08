@@ -1,213 +1,90 @@
 ---
 tags:
   - ops
-summary: Alternating optimization, instrumentation, and validation practices for GistNet, LensNet, and runtime components.
+summary: End-to-end operating guide for the nanochat-based training flow (tokenizer → base pretrain → mid → chat SFT) plus telemetry expectations and troubleshooting tips.
 ---
-Rotate through [[GistNet]], [[LensNet]], and LoRA [1] updates while collecting telemetry that keeps ΔNLL, swap rates, and latency within targets. **Today these loops still run inside `notebooks/megacontext.ipynb`**; the nanochat-based trainer described in [[MegaContext End-to-End Training]] is planned work tracked in the [[MegaContext PRD Index]].
+# Training & Operations
 
----
+MegaContext now trains entirely through the nanochat pipeline. The legacy JT1/JT2/JT3 notebook loop is retired—every run goes through the tokenizer + base + mid + chat-SFT stack invoked by `run10.sh`, `speedrun.sh`, or `run1000.sh`. Treat this note as the **single source of truth** for operational details; other docs should link here instead of duplicating instructions.
 
-- **Legacy alternating phases:** JT1 ([[GistNet]]), JT2 ([[LensNet]]), JT3 (LoRA) — replaced in practice by the integrated loop described in [[MegaContext End-to-End Training]].
-- **On-policy labeling:** regenerate ΔNLL utilities after each [[GistNet]] update.
-- **Telemetry:** log loss@H, swap rate, residency, latency for every block.
-- **Validation:** acceptance criteria tie to ΔNLL degradation ≤0.1 at `W_max=8k`.
-- **Tooling:** rely on `uv run pytest`, W&B logging, and artifacts directories for repeatability.
+## 1. Environment & Dependencies
 
-See [[Lifecycle]] for the step-by-step checklist that ties setup, JT phases, and runtime hand-offs together.
+1. Install [uv](https://docs.astral.sh/uv/) and Python 3.11.
+2. Create the venv and install GPU deps:
+   ```bash
+   uv venv
+   uv sync --extra gpu
+   source .venv/bin/activate
+   ```
+3. Export credentials and cache roots before training:
+   ```bash
+   export WANDB_API_KEY=...
+   export HF_TOKEN=...
+   export NANOCHAT_BASE_DIR=/fast/storage/nanochat  # defaults to ~/.cache/nanochat
+   ```
+4. (Optional) run `uv run pytest --maxfail=1 --disable-warnings` and `uv run ruff check` before long jobs to catch obvious regressions.
 
----
-### Colab Runtime Setup
+Everything else (Rust tokenizer build, dataset downloads, torchrun invocations) is handled by the scripts below.
 
-- Switch the notebook runtime to a GPU before launching the bootstrap cell (`Runtime → Change runtime type → GPU`).
-- Execute the **Quick Start** bootstrap cell in [`notebooks/megacontext.ipynb`](../../notebooks/megacontext.ipynb) to clone the repo, install dependencies, and enable widget support inside Colab.
-- The package targets Python 3.11 to stay compatible with the nanochat toolchain; restart and rerun the bootstrap cell whenever the VM resets.
-- Keep WANDB and Hugging Face tokens handy—enter them via the widgets block to persist credentials for the current session.
-- Use the **0. Setup Console** cell to select configs, tokens, storage roots, logging mode, resume checkpoints, and seeds before kicking off dataset prep or training.
-- Set `MEGACONTEXT_FORCE_DATA_REBUILD=1` if you need to regenerate dataset shards even when Arrow outputs are already present; otherwise the notebook reuses cached data.
+## 2. Choose a Training Recipe
 
-### Resuming Interrupted Runs
+| Scenario | Command | Notes |
+| --- | --- | --- |
+| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
+| Single H100 (80 GB) | `bash run10.sh --gpu h100` | Doubles device batch size, halves iteration count for the same token budget. |
+| $100 speed tier | `bash speedrun.sh` | 8×H100, depth 20 (Karpathy’s “best $100” recipe). |
+| $1000 tier | `bash run1000.sh` | 8×H100, depth 32 with tuned accumulation. |
 
-- Mount durable storage (e.g. Novita.ai network volumes) and point `MEGACONTEXT_ARTIFACT_ROOT` at it before starting; checkpoints and summaries land under `gistnet/`.
-- After reconnecting, rerun the bootstrap + storage cells, then pick the most recent `.ckpt` in **Checkpoints & Resume** to continue training.
-- `MEGACONTEXT_DATA_ROOT` keeps dataset shards on the same persistent volume; rerunning dataset prep simply validates existing files.
-- Use `MEGACONTEXT_SEED` to fix randomness per experiment so resumed runs stay deterministic.
+All scripts perform the following stages in order:
+1. Install uv deps + Rust tokenizer (via `maturin`).
+2. Download tokenizer shards and the full pretraining corpus.
+3. Train the tokenizer (`scripts.tok_train` + `scripts.tok_eval`).
+4. Run base pretraining (`scripts.base_train` + eval/loss).
+5. Run midtraining + chat SFT + chat eval.
+6. Generate `report/report.md` with metrics and sample outputs.
 
----
-## Notebook Workflow Checklist (Current Implementation)
+## 3. Operating Checklist
 
-1. **Prep shell environment**
-   - `uv venv && uv sync`
-   - Export `MEGACONTEXT_DATA_ROOT`, `MEGACONTEXT_ARTIFACT_ROOT`, WANDB/HF tokens.
-   - (Optional) `uv run python tools/bootstrap_env.py` to fetch demo assets outside the notebook.
-2. **Launch and configure the notebook**
-   - `uv run jupyter lab` → open `notebooks/megacontext.ipynb`.
-   - Run **Quick Start** and **0. Setup Console**: verifies CUDA, lets you pick configs, toggles WANDB.
-3. **Run the JT cycle**
-   - JT1 cell: `megacontext.gistnet.lightning.build_gistnet_experiment`.
-   - JT2 cell: LensNet counterfactual labeling/training block.
-   - JT3 (if enabled): LoRA fine-tuning block.
-4. **Log and checkpoint**
-   - Set `MEGACONTEXT_ENABLE_WANDB=1` before starting training cells.
-   - After each phase, save checkpoints under `artifacts/<run_name>/phase_<n>.ckpt` and jot metrics in the notebook “JT Summary” cell.
-5. **Hand-off**
-   - Update [[Lifecycle#Hand-off Checklist]] and [[PRD Progress Tracker]] with status/next steps.
-   - Capture any anomalies (ΔNLL drift, swap spikes, CUDA faults) in the Troubleshooting table below.
+1. **Prep shell** (see section 1), ensure `WANDB_RUN` is set if you want consistent logging.
+2. **Launch script** appropriate to your hardware.
+3. **Monitor**:
+   - `tail -f report/log.txt` (if running inside `screen`/`tmux`).
+   - WANDB dashboard for ΔNLL@H, swap rate, residency, MFU.
+   - `nvidia-smi` for memory/utilization sanity.
+4. **Resume if interrupted**: re-run the same script with the same `WANDB_RUN`. The scripts load checkpoints from `NANOCHAT_BASE_DIR` and continue.
+5. **Evaluate & demo** once the script finishes:
+   ```bash
+   python -m scripts.base_eval
+   python -m scripts.chat_eval -- -i sft
+   python -m scripts.chat_cli -p "Describe MegaContext in 2 sentences."
+   python -m scripts.chat_web  # optional UI
+   ```
+6. **Hand-off**: capture report artifacts (`report/report.md`, WANDB link), checkpoint paths (`$NANOCHAT_BASE_DIR/base/...`), and outstanding issues in [[Lifecycle#Hand-off Checklist]] / [[PRD Progress Tracker]].
 
-This loop repeats until ΔNLL@`H` stabilizes within target bounds and swap rates behave; then move to inference validation per [[Base Runtime]] / [[Lifecycle]].
+## 4. Telemetry Targets & Alerts
 
-| Stage | Command(s) | Notes |
-|-------|------------|-------|
-| Bootstrap env | `uv venv && uv sync`<br>`uv run python tools/bootstrap_env.py` | Second command seeds demo assets + sample configs. |
-| Launch notebook | `uv run jupyter lab` | Open `notebooks/megacontext.ipynb`; run Quick Start + Setup Console. |
-| JT1 (GistNet) | Notebook JT1 cell (`megacontext.gistnet.lightning.build_gistnet_experiment`) | Uses config selected in Setup Console; checkpoints stored under `artifacts/<run>/gistnet`. |
-| JT2 (LensNet) | Notebook JT2 cell | Requires fresh gist tree; emits counterfactual labels + WANDB metrics. |
-| JT3 (LoRA) | Notebook JT3 cell (optional) | Skip if experiment does not enable adapters. |
-| Decode smoke test | `uv run python -m tools.decode_demo --config configs/SampleText_TinyGPT2.yaml` | Run after each full JT cycle; compare logs vs. [[Base Runtime]] expectations. |
+| Metric | Target | Investigate when… | Notes |
+| --- | --- | --- | --- |
+| ΔNLL@H (base + mid + SFT) | ≤ 0.10 at `W_max=8k` | Sustained increase >0.15 or monotonic drift | Indicates gist compression drift or stale tokenizer. Rebuild tokenizer (`python -m scripts.tok_train`) and rerun base. |
+| Swap rate | 0.05–0.20 | >0.25 or oscillation between 0/1 | Lens/controller instability. Inspect `report/report.md` swap plots; consider re-running midtraining. |
+| Residency | 90–100 % | <80 % | Allocator collapsing too aggressively; verify Lens logits and budget constraints. |
+| MFU per GPU | 45–55 % | <40 % | Check `--device_batch_size`, accumulation steps, and host I/O stalls. |
+| WANDB heartbeat | steady | Missing for >15 min | Ensure networking available; scripts fall back to DummyWandb if `WANDB_RUN=dummy`. |
 
----
-## Overview
+## 5. Troubleshooting
 
-MegaContext uses **alternating optimization** [similar to GAN training] to co-train [[GistNet]], [[LensNet]], and lightweight base-model adapters without full end-to-end backprop through the discrete [[Focus Allocator]].
+- **`torchrun` OOM:** Lower `--device_batch_size` (edit script or run component command directly), free VRAM, or switch to the 5090 profile.
+- **Tokenizer build fails (maturin):** ensure Rust toolchain installed by the script (`rustup`). Delete `rustbpe/target` and rerun.
+- **Dataset download slow/stuck:** runs spawn background download (`nanochat.dataset`). Check `~/.cache/nanochat/dataset_download.log`; resume by rerunning the script (it skips completed shards).
+- **Report not generated:** check for earlier script failures; rerun `python -m nanochat.report generate` once training completes.
+- **CLI/eval can’t find checkpoints:** confirm `NANOCHAT_BASE_DIR` matches the training run. List directories under `$NANOCHAT_BASE_DIR` to verify.
+- **Telemetry flat-lines:** open WANDB run, confirm metrics are updating; if not, ensure `WANDB_RUN` wasn’t left at `dummy` and that internet access is available.
 
-### Why Alternating Optimization?
+## 6. Related References
 
-**Goal:** Let all three modules co-adapt while maintaining stability and computational efficiency.
+- [[Lifecycle]] — broader project checklist (setup → train → evaluate → hand-off).
+- [[Base Runtime]] — chat CLI / web demo instructions.
+- [[Telemetry]] — detailed metric definitions and logging hooks.
+- [[MegaContext End-to-End Training]] — PRD describing planned extensions on top of the nanochat stack.
 
-**Challenge:** Full end-to-end training would require backprop through:
-- Discrete [[Focus Allocator]] decisions (non-differentiable)
-- Long sequence unrolls (prohibitively expensive)
-- Coupled multi-module dependencies
-
-**Solution:** Short alternating phases where some modules are frozen while others learn from on-policy signals produced by the frozen parts. This:
-- Stabilizes joint training without end-to-end gradients
-- Produces supervision/targets from current policy state
-- Allows modules to co-evolve through multiple cycles
-- Maintains computational tractability
-
-### Training Modules
-
-- **[[GistNet]]** (`Gist`) — 32→1 compression, two levels; substitutability objective [2].
-- **[[LensNet]]** (`LensNet`) — dual cross-attn (8k→6→8k); signed focus scores.
-- **Base-LoRA** (`LoRA`) [1] — tiny adapters on the base LLM to improve gist compatibility.
-- **[[Focus Allocator]]** — remains discrete and greedy (no relaxation).
-
----
-## High-Level Workflow
-
-```
-Cycle N:
-  ┌─────────────────────────────────────────────────────┐
-  │ JT1: Update GistNet (fix LensNet + LoRA)            │
-  │   → On-policy substitutability on replaced spans    │
-  │   → Make gists better drop-in replacements          │
-  └─────────────────────────────────────────────────────┘
-                          ↓
-  ┌─────────────────────────────────────────────────────┐
-  │ JT2: Update LensNet (fix GistNet + LoRA)            │
-  │   → Generate counterfactual ΔNLL labels             │
-  │   → Learn better focusing policy                    │
-  └─────────────────────────────────────────────────────┘
-                          ↓
-  ┌─────────────────────────────────────────────────────┐
-  │ JT3: Update LoRA (fix GistNet + LensNet)            │
-  │   → Task NLL with discrete Working Context          │
-  │   → Adapt base to "like" gist tokens                │
-  └─────────────────────────────────────────────────────┘
-                          ↓
-  Repeat for 3-5 cycles → Validation → Stop when stable
-```
-
----
-## Training Phases (Brief)
-
-### Phase JT1 — Update GistNet
-**Fix:** `LensNet`, `LoRA` | **Update:** `Gist`
-
-With the current focusing policy fixed, make gists better drop-in replacements for exactly the places the policy cares about.
-- Build/refresh [[MegaContext Tree]] with current `Gist`
-- Run `LensNet` + [[Focus Allocator]] to form [[Working Context]]
-- Optimize on **substitutability loss** (KL or ΔNLL@`H`) for replaced spans
-
-### Phase JT2 — Update LensNet
-**Fix:** `Gist`, `LoRA` | **Update:** `LensNet`
-
-Given the current gists, learn a better focusing policy.
-- Generate counterfactual labels (ΔNLL/ΔKL for expand/collapse candidates)
-- Train with signed regression + ranking + budget regularizer
-- Update-every-`K` cadence (Lens runs once per block)
-
-### Phase JT3 — Update Base-LoRA
-**Fix:** `Gist`, `LensNet` | **Update:** `LoRA` (small ranks)
-
-Slightly adapt the base to work well with gist tokens and current working-context geometry.
-- Task NLL@`H` with discrete [[Working Context]]
-- Weak substitutability keep-alive loss
-- Target input embeddings + first/last 2 attention blocks
-
----
-## Schedule & Hyperparameters
-
-- **Cycle length:** JT1 → JT2 → JT3 = one cycle. Repeat 3–5 cycles.
-- **Step counts per phase:**
-  - JT1 ([[GistNet]]): 2–4k steps
-  - JT2 ([[LensNet]]): 2–4k steps
-  - JT3 (LoRA): 1–2k steps
-- **Batching:** mixed long-context tasks; block size `K=32`; horizon `H=64`
-- **Checkpoints:** save after each phase; early-stop on validation Loss@`H` vs token budget
-
----
-## Troubleshooting & Telemetry Targets
-
-| Metric / Symptom | Target band | Investigate when… | Remediation |
-|------------------|-------------|-------------------|-------------|
-| ΔNLL@`H` (JT1) | ≤ 0.10 at `W_max=8k` | Increases for 2+ cycles or spikes >0.15 | Rebuild `{LOD0,LOD1,LOD2}.ctx`, verify dataset changes, ensure bf16 precision + deterministic seeds. |
-| Swap rate | 0.05–0.20 | >0.25 or oscillates across JT2 runs | Tighten `τ_expand/τ_collapse`, raise cooldown, inspect LensNet logits for saturation. |
-| Residency (token budget usage) | 90–100 % | <80 % | Confirm Focus Allocator isn’t over-collapsing; check working-context assembly for gaps or mis-sized spans. |
-| WANDB gaps | n/a | Metrics missing from dashboards | Ensure `MEGACONTEXT_ENABLE_WANDB=1`, check firewall, re-run logging cells. |
-| CUDA OOM / notebook crash | n/a | JT cells die mid-run | Reduce batch/window sizes, call `torch.cuda.empty_cache()`, close extra notebooks using the GPU. |
-| Smoke test fails | n/a | `tools.decode_demo` exits non-zero or produces empty output | Check latest JT2 run, rerun inference with `MEGACONTEXT_ENABLE_WANDB=0` to rule out logging stalls, inspect `artifacts/run_logs/...` for allocator thrash. |
-
-Common fixes:
-- **“CUDA not available” in Quick Start:** restart kernel, verify `nvidia-smi` from terminal, re-run Quick Start/Setup Console.
-- **LensNet loss explodes:** regenerate counterfactual labels after every GistNet refresh; stale gist trees create inconsistent supervision.
-- **Telemetry flat-lines:** confirm WANDB is online and that the notebook cell emitting metrics hasn’t been skipped.
-- **Smoke test logs missing or empty:** ensure a full JT cycle completed beforehand, confirm `artifacts/run_logs/` is writable, and rerun `tools.decode_demo` with `MEGACONTEXT_ENABLE_WANDB=0` to isolate WANDB hangs.
-
-See [[Lifecycle#Validation & Troubleshooting]] for the broader end-to-end checklist.
-
----
-## When to Stop
-
-- Validation Loss@`H` vs budget improves then plateaus across cycles
-- Swap rate stabilizes; no ping-pong
-- Ablations: freezing any one of {[[GistNet]], [[LensNet]], LoRA} causes measurable drop
-
-**Outcome:** All three modules co-learn without the cost/fragility of full end-to-end training.
-
----
-## Related Pages
-
-### Detailed Documentation
-- **[[MegaContext End-to-End Training]]** — Full details on EM-style training, phase procedures, stability tips, and failure modes
-- **[[Telemetry]]** — Instrumentation, metrics, artifact handling, and validation checklist
-- **[[POC Implementation]]** — POC acceptance criteria and example walkthroughs
-
-### Component Training
-- **[[GistNet Training]]** — Substitutability objectives, architecture details, and loss functions
-- **[[LensNet Training]]** — Signed regression, ranking, budget regularization, and counterfactual labeling
-
-### System Components
-- **[[GistNet]]** — 32→1 compression encoder
-- **[[LensNet]]** — Non-causal focus scorer
-- **[[Focus Allocator]]** — Discrete greedy allocation policy
-- **[[MegaContext Tree]]** — Hierarchical storage structure
-- **[[Working Context]]** — Active token buffer assembly
-
-## References
-
-1. **LoRA** (Hu et al., 2021) — [[reference/papers/LoRA.md|Analysis]] — Low-rank adaptation used in GistNet/LensNet training
-2. **Knowledge Distillation** (Hinton et al., 2015) — [[reference/papers/Knowledge Distillation.md|Analysis]] — Teacher-student framework for GistNet training
-
-See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.
-
-**Note on alternating optimization:** This training approach is similar to techniques used in GAN training (Goodfellow et al., 2014), where generators and discriminators are trained alternately. In MegaContext, we alternate between updating compression (GistNet), focusing (LensNet), and adaptation (LoRA) modules, allowing them to co-evolve without expensive end-to-end gradients through discrete allocation decisions.
+Use this doc as the source of truth for day-to-day operations. Anything referencing JT cycles or notebooks belongs in `obsidian/_old/` now.

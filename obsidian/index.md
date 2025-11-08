@@ -38,12 +38,10 @@ See [[MegaTexture Analogy]] for the complete explanation.
 ---
 ## Quick Start (Today)
 
-1. **Read:** skim this page, then dive into [[How MegaContext Works]] for the full walkthrough.
-2. **Environment:** follow `README.md` / `SETUP.md` (Python 3.11, CUDA 12.x, PyTorch 2.2+).
-3. **Notebook workflow:** run `uv run jupyter lab`, open `notebooks/megacontext.ipynb`, and follow the Quick Start + JT cycle in [[Training & Operations]] / [[Lifecycle]].
-4. **Decode demo:** `uv run python -m tools.decode_demo --config configs/SampleText_TinyGPT2.yaml` per [[Base Runtime]].
-
-The nanochat CLI is tracked in [[Migration Plan - Nanochat Integration]]; until that lands, treat the notebook as the canonical runtime.
+1. **Read:** skim this page, then dive into [[How MegaContext Works]].
+2. **Environment:** follow `README.md` / `SETUP.md` for Python 3.11 + CUDA 12.x prerequisites.
+3. **Train:** use the matrix in [[Training & Operations]]—it’s the source of truth for `run10.sh`, `speedrun.sh`, `run1000.sh`, telemetry expectations, and troubleshooting.
+4. **Evaluate / chat:** follow [[Base Runtime]] for CLI/web demos once checkpoints land in `~/.cache/nanochat`.
 
 ---
 ## Documentation Navigation
@@ -66,7 +64,7 @@ There’s a lot of ground to cover—use these hubs to find the level you need:
 - [[Future Plan]] / [[Grand Vision]] — longer-term research ideas
 
 **Execution & Operations**
-- [[Training & Operations]], [[Lifecycle]], [[Base Runtime]] — how to run the notebook flow today
+- [[Training & Operations]], [[Lifecycle]], [[Base Runtime]] — nanochat-based training, eval, and runtime guidance
 - [[Telemetry]], [[Performance Sketch]], [[Ops]] — instrumentation and performance envelopes
 
 **Reference**
@@ -79,8 +77,8 @@ There’s a lot of ground to cover—use these hubs to find the level you need:
 ## Project Status
 
 Active work now follows the PRD stack rather than the legacy “Phase 0–4” plan. The near-term focus is:
-- Implement the [[MegaContext PRD Index|POR PRDs]] (End-to-End Training, MegaAttention, MegaPrediction, Cognitive-Core, Hierarchical KV caching).
-- Migrate the runtime from the research notebook into the nanochat fork per [[Migration Plan - Nanochat Integration]] / [[Migration Status]].
+- Implement the [[MegaContext PRD Index|POR PRDs]] (End-to-End Training, MegaAttention, MegaPrediction, Cognitive-Core, Hierarchical KV caching) on top of the landed nanochat fork.
+- Scale single-GPU ideas (e.g., `run10.sh`) into the larger `speedrun.sh` / `run1000.sh` trajectories and keep telemetry flowing through [[MegaContext Tree|tree-aware]] metrics.
 
 Use the PRD index for requirements and the migration tracker for execution progress.
 
