@@ -2,8 +2,6 @@
 
 *A system architecture for virtualized LLM memory.*
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/brandf/MegaContext/blob/main/notebooks/megacontext.ipynb)
-
 ---
 
 ## TL;DR — MegaContext
