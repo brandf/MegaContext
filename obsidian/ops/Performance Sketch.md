@@ -277,7 +277,7 @@ See [[Realtime Scenarios]] for full details. Summary:
 
 ### Research Milestone Targets
 
-Per [[Research Paper Plan]] Phase 4, benchmark targets include:
+Per [[Research Papers]] roadmap (Paper 0–1 ramping toward Paper 2), benchmark targets include:
 
 | Metric | Target | Baseline (Full Context) | Baseline (RAG) |
 |--------|--------|------------------------|----------------|

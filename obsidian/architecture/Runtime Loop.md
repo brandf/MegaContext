@@ -27,7 +27,7 @@ The streaming runtime keeps a frozen base LLM within a fixed working window whil
 
 ## Demo targets
 - Near-term goal: a dedicated `tools/run_poc_loop` entry point (TBD) streams a synthetic session, showing expansion/collapse while maintaining budget invariants ([[MegaContext End-to-End Training]], [[POC Architecture]]). Until then, use the nanochat trainer or unit tests to exercise individual components.
-- Research milestone: benchmarking harnesses compare MegaContext runs against baselines and track swap rate, loss, and latency ([[Research Paper Plan]] Phase 4).
+- Research milestone: benchmarking harnesses compare MegaContext runs against baselines and track swap rate, loss, and latency ([[Research Papers]] sequence, see Paper 2).
 
 ### Focus heuristics
 - **Greedy but bounded:** Hysteresis and cooldowns prevent thrashing when spans hover near the decision boundary.

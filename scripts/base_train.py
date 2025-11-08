@@ -90,7 +90,8 @@ get_max_memory = torch.cuda.max_memory_allocated if device_type == "cuda" else l
 # wandb logging init
 use_dummy_wandb = run == "dummy" or not master_process
 wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat", name=run, config=user_config)
-mc_controller = None
+    mc_controller = None
+    positional_cache = None
 
 # Tokenizer will be useful for evaluation, also we need the vocab size
 tokenizer = get_tokenizer()
@@ -211,7 +212,7 @@ for step in range(num_iterations + 1):
     flops_so_far = num_flops_per_token * total_batch_size * step
     if mc_controller is not None:
         try:
-            mc_controller.process_batch(x.detach(), step, context="train")
+            positional_cache = mc_controller.process_batch(x.detach(), step, context="train")
         except Exception as exc: # pragma: no cover - guard against optional path regressions
             print0(f"[MegaContext] controller error at step {step}: {exc}")
 
@@ -299,7 +300,8 @@ for step in range(num_iterations + 1):
     t0 = time.time()
     for micro_step in range(grad_accum_steps):
         with autocast_ctx:
-            loss = model(x, y)
+            cos_sin_override = positional_cache if mc_controller is not None else None
+            loss = model(x, y, cos_sin_override=cos_sin_override)
         train_loss = loss.detach() # for logging
         loss = loss / grad_accum_steps # each .backward() is a grad sum => normalize loss here
         loss.backward()

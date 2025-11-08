@@ -94,4 +94,4 @@ This milestone captures post-paper ambitions: scaling MegaContext for production
 - **E.3 Documentation Portal**
   - Launch a docs site (mkdocs or similar) consolidating architecture guides, API references, tutorials, and research insights.
 
-These tracks are intentionally broad; teams should prioritize based on community demand, resource availability, and outcomes of the [[Research Paper Plan|research paper]] milestone.
+These tracks are intentionally broad; teams should prioritize based on community demand, resource availability, and outcomes of the [[Research Papers|research-paper roadmap]] milestone.

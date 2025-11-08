@@ -241,7 +241,7 @@ class GPT(nn.Module):
                 group["initial_lr"] = group["lr"]
         return optimizers
 
-    def forward(self, idx, targets=None, kv_cache=None, loss_reduction='mean'):
+    def forward(self, idx, targets=None, kv_cache=None, loss_reduction='mean', cos_sin_override=None):
         B, T = idx.size()
 
         # Grab the rotary embeddings for the current sequence length (they are of shape (1, seq_len, 1, head_dim))
@@ -250,7 +250,10 @@ class GPT(nn.Module):
         assert self.cos.dtype == torch.bfloat16, "Rotary embeddings must be in bfloat16"
         # if kv cache exists, we need to offset the rotary embeddings to the current position in the cache
         T0 = 0 if kv_cache is None else kv_cache.get_pos()
-        cos_sin = self.cos[:, T0:T0+T], self.sin[:, T0:T0+T] # truncate cache to current sequence length
+        if cos_sin_override is not None:
+            cos_sin = cos_sin_override
+        else:
+            cos_sin = self.cos[:, T0:T0+T], self.sin[:, T0:T0+T]
 
         # Forward the trunk of the Transformer
         x = self.transformer.wte(idx)

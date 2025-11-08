@@ -13,9 +13,6 @@ Collects milestone plans spanning various phases of this project.
 - [[Implementation Roadmap]]
     - Phase-by-phase implementation plan derived from the PRDs (Nanochat stack).
     - Shows how components map to features, interfaces, telemetry, and deliverables for each phase.
-- [[Research Paper Plan]]
-    - Research-grade system and publication.
-    - Robust compression, advanced focus modeling, storage/streaming, benchmarking, paper packaging.
 - [[Future Plan]]
     - Long-horizon platform and research initiatives.
     - Platform maturation, advanced learning, application showcases, research extensions, tooling & DX.
@@ -30,6 +27,6 @@ Collects milestone plans spanning various phases of this project.
 |--------|--------|---------------|-------|
 | Product requirements (POR) | ✅ Active | [[MegaContext PRD Index]] | Governs current engineering scope (End-to-End Training, MegaAttention, MegaPrediction, Cognitive-Core, KV caching). |
 | Nanochat migration | 🔄 Planned | [[Migration Plan - Nanochat Integration]] + [[TODO]] | Tracks work to replace `src/megacontext/...` with the nanochat fork; `TODO` lists the current actionable items. |
-| Legacy POC / Research plans | 🗂 Historical | [[Research Paper Plan]], [[POC Architecture]], `_old/` notes | Useful for background, but superseded by the PRDs—cross-check before using requirements. |
+| Legacy POC / Research plans | 🗂 Historical | [[POC Architecture]], `_old/` notes | Useful for background, but superseded by the PRDs—cross-check before using requirements. |
 
 Whenever you add new plans, note which stream they belong to so contributors can quickly identify whether a document is authoritative, in-flight, or archival.

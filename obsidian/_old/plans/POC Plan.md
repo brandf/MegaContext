@@ -89,7 +89,7 @@ This milestone isolates the minimum "hot path" required to demonstrate MegaConte
 - Task 4.1: Create a minimal benchmark script comparing (a) baseline LLM, (b) MegaContext-enabled run on a single synthetic task; report loss, swap rate, and latency.
 - Task 4.2: Record a short walkthrough (structured log or screenshots) showing focus reallocations in the demo run.
 - Task 4.3: Update `README.md` with a [[POC Architecture]] summary: [[Architecture Details]] sketch, command sequence, expected outcomes, troubleshooting.
-- Task 4.4: Ensure `docs/poc_results.md` captures metrics, figures, and lessons learned leading into the next milestone per the [[Research Paper Plan]] and [[Future Plan]].
+- Task 4.4: Ensure `docs/poc_results.md` captures metrics, figures, and lessons learned leading into the next milestone per the [[Research Papers]] plan and [[Future Plan]].
 - Task 4.5: Document multimodal readiness: summarize the placeholder ingest path, positional expectations, and next-step gaps referencing [[Multimodal MegaContext]] and [[Positional Encoding]].
 
 **Exit criteria:** Demo artifacts prove that MegaContext can retain context beyond the [[Working Context]] window with manageable complexity per the [[POC Scope]], unlocking the [[Training & Operations]] and [[Performance Sketch]] goals for the PAPER milestone.

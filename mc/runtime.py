@@ -78,7 +78,7 @@ class MCController:
         tokens: torch.Tensor,
         step: int,
         context: str = "train",
-    ) -> None:
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
         with torch.no_grad():
             emb = self.embed(tokens.to(self.device))
             tree = MegaContextTree.from_embeddings(
@@ -97,13 +97,12 @@ class MCController:
                 wc.replace(plan)
             self.telemetry.log_tree(step, tree)
             self.telemetry.log_focus(step, len(plans))
-            if self.gaussian_rope is not None:
-                cos, sin = self.gaussian_rope.build(
+            positional = None
+            if self.positional_encoder is not None:
+                cos, sin = self.positional_encoder(
                     wc.get_positions(),
                     wc.get_lod_tensor(),
                     device=self.device,
                 )
-                self.telemetry.report.log(
-                    section="Gaussian RoPE",
-                    data={"cos_std": float(cos.std().cpu()), "sin_std": float(sin.std().cpu())},
-                )
+                positional = (cos, sin)
+            return positional
