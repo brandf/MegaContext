@@ -18,5 +18,3 @@ Single source of truth for current work items across the documentation plan and 
 | 2 | Legacy snapshot & archival | ✅ | Notebooks and phase docs moved to `_old/`; README/index now point to nanochat flow. |
 | 3 | Core MegaContext scaffolding | ✅ | MegaContext Tree + Working Context wiring merged; scripts (`run10.sh`, `speedrun.sh`, `run1000.sh`) run end-to-end. |
 | 4 | PRD feature layering (E2E, MegaAttention, MegaPrediction) | 🔄 | MegaAttention + MegaPrediction telemetry hooked in; Cognitive-Core + KV caching still in-flight. |
-| 5 | Migration & validation | 🔄 | Need deterministic smoke tests, WANDB parity dashboards, and documentation sign-off. |
-| 6 | Upstream parity & maintenance | ⏳ | Define rebase cadence & CI guardrails once Phases 4–5 stabilize. |
