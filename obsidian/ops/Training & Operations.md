@@ -39,10 +39,12 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 
 | Scenario | Command | Notes |
 | --- | --- | --- |
-| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
-| Single H100 (80 GB) | `bash run10.sh --gpu h100` | Doubles device batch size, halves iteration count for the same token budget. |
-| $100 speed tier | `bash speedrun.sh` | 8×H100, depth 20 (Karpathy’s “best $100” recipe). |
-| $1000 tier | `bash run1000.sh` | 8×H100, depth 32 with tuned accumulation. |
+| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--gistnet simple|slot] [--lensnet simple|slot] [--allocator simple|...]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
+| Single H100 (80 GB) | `bash run10.sh --gpu h100 [--mc] ...` | Doubles device batch size, halves iteration count for the same token budget. |
+| $100 speed tier | `bash speedrun.sh [--mc] ...` | 8×H100, depth 20 (Karpathy’s “best $100” recipe). |
+| $1000 tier | `bash run1000.sh [--mc] ...` | 8×H100, depth 32 with tuned accumulation. |
+
+`--mc` toggles the Phase 1 MegaContext instrumentation (tree/working-context/controller) without altering the default nanochat flow. Leave it off to reproduce the upstream baselines.
 
 All scripts perform the following stages in order:
 1. Install uv deps + Rust tokenizer (via `maturin`).

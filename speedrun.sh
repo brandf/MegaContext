@@ -3,6 +3,48 @@
 # This script is the "Best ChatGPT clone that $100 can buy",
 # It is designed to run in ~4 hours on 8XH100 node at $3/GPU/hour.
 
+MC_ENABLED=0
+GISTNET_TYPE="simple"
+LENSNET_TYPE="simple"
+ALLOCATOR_TYPE="simple"
+POSITIONAL_TYPE="gaussian"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --mc)
+            MC_ENABLED=1
+            ;;
+        --gistnet)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --gistnet" >&2; exit 1; }
+            GISTNET_TYPE="$1"
+            ;;
+        --lensnet)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --lensnet" >&2; exit 1; }
+            LENSNET_TYPE="$1"
+            ;;
+        --allocator)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --allocator" >&2; exit 1; }
+            ALLOCATOR_TYPE="$1"
+            ;;
+        --positional)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --positional" >&2; exit 1; }
+            POSITIONAL_TYPE="$1"
+            ;;
+        -h|--help)
+            echo "Usage: bash speedrun.sh [--mc]"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
 # 1) Example launch (simplest):
 # bash speedrun.sh
 # 2) Example launch in a screen session (because the run takes ~4 hours):
@@ -86,7 +128,7 @@ wait $DATASET_DOWNLOAD_PID
 NPROC_PER_NODE=8
 
 # pretrain the d20 model
-torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- --depth=20 --run=$WANDB_RUN
+torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- --depth=20 --run=$WANDB_RUN --mc_enabled="$MC_ENABLED" --gistnet_type="$GISTNET_TYPE" --lensnet_type="$LENSNET_TYPE" --allocator_type="$ALLOCATOR_TYPE" --positional_type="$POSITIONAL_TYPE"
 # evaluate the model on a larger chunk of train/val data and draw some samples
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_loss
 # evaluate the model on CORE tasks

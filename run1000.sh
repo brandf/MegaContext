@@ -4,6 +4,48 @@
 # Designed to run end-to-end for $1000/24 ~= 41.6 hours on an 8XH100 node
 # A bit sparser on comments, see speedrun.sh for more detail
 
+MC_ENABLED=0
+GISTNET_TYPE="simple"
+LENSNET_TYPE="simple"
+ALLOCATOR_TYPE="simple"
+POSITIONAL_TYPE="gaussian"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --mc)
+            MC_ENABLED=1
+            ;;
+        --gistnet)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --gistnet" >&2; exit 1; }
+            GISTNET_TYPE="$1"
+            ;;
+        --lensnet)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --lensnet" >&2; exit 1; }
+            LENSNET_TYPE="$1"
+            ;;
+        --allocator)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --allocator" >&2; exit 1; }
+            ALLOCATOR_TYPE="$1"
+            ;;
+        --positional)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --positional" >&2; exit 1; }
+            POSITIONAL_TYPE="$1"
+            ;;
+        -h|--help)
+            echo "Usage: bash run1000.sh [--mc]"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
 # all the setup stuff
 export OMP_NUM_THREADS=1
 export NANOCHAT_BASE_DIR="$HOME/.cache/nanochat"
@@ -74,7 +116,7 @@ python -m scripts.tok_eval
 # Number of processes/GPUs to use
 NPROC_PER_NODE=8
 
-torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- --depth=32 --device_batch_size=8 --run=$WANDB_RUN
+torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- --depth=32 --device_batch_size=8 --run=$WANDB_RUN --mc_enabled="$MC_ENABLED" --gistnet_type="$GISTNET_TYPE" --lensnet_type="$LENSNET_TYPE" --allocator_type="$ALLOCATOR_TYPE" --positional_type="$POSITIONAL_TYPE"
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_loss
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_eval
 

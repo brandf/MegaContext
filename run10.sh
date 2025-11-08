@@ -7,7 +7,7 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash run10.sh [--gpu 5090|h100]
+Usage: bash run10.sh [--gpu 5090|h100] [--mc]
 
 Defaults to --gpu h100. Both profiles run on a single GPU but dial batch size
 and iteration count to match the available VRAM / throughput.
@@ -15,12 +15,40 @@ EOF
 }
 
 GPU_PROFILE="h100"
+MC_ENABLED=0
+GISTNET_TYPE="simple"
+LENSNET_TYPE="simple"
+ALLOCATOR_TYPE="simple"
+POSITIONAL_TYPE="gaussian"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --gpu" >&2; exit 1; }
             GPU_PROFILE="$1"
+            ;;
+        --mc)
+            MC_ENABLED=1
+            ;;
+        --gistnet)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --gistnet" >&2; exit 1; }
+            GISTNET_TYPE="$1"
+            ;;
+        --lensnet)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --lensnet" >&2; exit 1; }
+            LENSNET_TYPE="$1"
+            ;;
+        --allocator)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --allocator" >&2; exit 1; }
+            ALLOCATOR_TYPE="$1"
+            ;;
+        --positional)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --positional" >&2; exit 1; }
+            POSITIONAL_TYPE="$1"
             ;;
         -h|--help)
             usage
@@ -63,6 +91,7 @@ echo "Run10 profile: $GPU_PROFILE"
 echo "Depth: $DEPTH  |  Seq len: $MAX_SEQ_LEN"
 echo "Device batch: $DEVICE_BATCH_SIZE  |  Total batch: $TOTAL_BATCH_SIZE tokens"
 echo "Iterations: $NUM_ITERATIONS"
+echo "MegaContext enabled: $MC_ENABLED"
 
 # -----------------------------------------------------------------------------
 # Environment + dependencies
@@ -113,7 +142,12 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --device_batch_size="$DEVICE_BATCH_SIZE" \
     --total_batch_size="$TOTAL_BATCH_SIZE" \
     --num_iterations="$NUM_ITERATIONS" \
-    --run="$WANDB_RUN"
+    --run="$WANDB_RUN" \
+    --mc_enabled="$MC_ENABLED" \
+    --gistnet_type="$GISTNET_TYPE" \
+    --lensnet_type="$LENSNET_TYPE" \
+    --allocator_type="$ALLOCATOR_TYPE" \
+    --positional_type="$POSITIONAL_TYPE"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

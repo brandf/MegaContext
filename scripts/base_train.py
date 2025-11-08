@@ -27,6 +27,13 @@ from nanochat.checkpoint_manager import save_checkpoint
 from nanochat.loss_eval import evaluate_bpb
 from nanochat.engine import Engine
 from scripts.base_eval import evaluate_model
+
+try:
+    from mc.config import MCConfig
+    from mc.runtime import MCController
+except ImportError:  # pragma: no cover - optional dependency during early development
+    MCController = None
+    MCConfig = None
 print_banner()
 
 # -----------------------------------------------------------------------------
@@ -60,6 +67,12 @@ core_metric_max_per_task = 500 # examples per task in estimating the core metric
 sample_every = 2000 # every how many steps to sample from the model
 # Output
 model_tag = "" # optionally override the model tag for the output checkpoint directory name
+# MegaContext (phase 1 integration)
+mc_enabled = 0 # set to 1 to enable MegaContext instrumentation
+gistnet_type = "simple"
+lensnet_type = "simple"
+allocator_type = "simple"
+positional_type = "gaussian"
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -77,6 +90,7 @@ get_max_memory = torch.cuda.max_memory_allocated if device_type == "cuda" else l
 # wandb logging init
 use_dummy_wandb = run == "dummy" or not master_process
 wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat", name=run, config=user_config)
+mc_controller = None
 
 # Tokenizer will be useful for evaluation, also we need the vocab size
 tokenizer = get_tokenizer()
@@ -111,6 +125,20 @@ with torch.device("meta"):
     model = GPT(model_config)
 model.to_empty(device=device)
 model.init_weights()
+if mc_enabled:
+    if MCController is None or MCConfig is None:
+        raise ImportError("mc package is required when --mc_enabled=1")
+        mc_config = MCConfig(
+            embed_dim=model_config.n_embd,
+            max_seq_len=max_seq_len,
+            device=str(device),
+            gistnet_type=gistnet_type,
+            lensnet_type=lensnet_type,
+            allocator_type=allocator_type,
+            num_heads=num_heads,
+            positional_type=positional_type,
+        )
+    mc_controller = MCController(model, mc_config)
 orig_model = model # original, uncompiled model, for saving raw model state_dict
 model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
 num_params = sum(p.numel() for p in model.parameters())
@@ -181,6 +209,11 @@ total_training_time = 0 # total wall-clock time of training
 for step in range(num_iterations + 1):
     last_step = step == num_iterations
     flops_so_far = num_flops_per_token * total_batch_size * step
+    if mc_controller is not None:
+        try:
+            mc_controller.process_batch(x.detach(), step, context="train")
+        except Exception as exc: # pragma: no cover - guard against optional path regressions
+            print0(f"[MegaContext] controller error at step {step}: {exc}")
 
     # once in a while: evaluate the val bpb (all ranks participate)
     if last_step or step % eval_every == 0:

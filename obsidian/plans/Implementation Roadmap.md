@@ -9,6 +9,30 @@ summary: Phase-oriented implementation roadmap that translates the POR PRDs into
 
 - **Implementation philosophy:** Keep tensor-first data structures—Python classes exist only to manage tensor ops. Avoid “heap fluff” (deep Python object graphs or repeated conversions) so future disk/streaming backends can reuse the same interfaces without refactors.
 
+```mermaid
+flowchart LR
+    subgraph Nanochat
+        A[run10/speedrun/run1000]
+        BT[base_train.py]
+    end
+    subgraph MC["MegaContext (mc/)"]
+        Controller[MCController]
+        GistNet -->|encode_block| MCT[MegaContextTree]
+        MCT -->|tensor views| WC[WorkingContext]
+        WC -->|embeddings| LensNet
+        LensNet -->|logits| Alloc[FocusAllocator]
+        Alloc -->|ReplacementPlan| WC
+    end
+
+    A --> BT -->|--mc_enabled| Controller
+    Controller -->|embeddings| GistNet
+    Controller --> MCT
+    Controller --> WC
+    Controller --> LensNet
+    Controller --> Alloc
+    Controller -->|telemetry| Report[nanochat.report]
+```
+
 ---
 
 ## Phase 1 — Baseline End-to-End (GistNet + LensNet + Focus Allocator + Gaussian RoPE)
@@ -19,7 +43,7 @@ Goal: produce a fully nanochat-native training loop that mirrors the legacy POC 
 - **[[GistNet]] compression (32→1, 1024→1)** wired into the nanochat tokenizer/model code.
 - **[[LensNet]] focus scoring** with ΔNLL supervision and the existing [[Focus Allocator]] thresholds.
 - **[[Working Context]] + [[MegaContext Tree]] (in-memory)** with deterministic ingestion and serialization.
-- **[[Positional Encoding#Gaussian RoPE stack|Gaussian RoPE positional encoding]]** integrated into the base model to stabilize long-horizon reasoning.
+- **[[Positional Encoding#Gaussian RoPE stack|Gaussian RoPE positional encoding]]** integrated via `mc/positional.py` so MegaContext windows respect global positions/LOD-derived variance.
 - **Nanochat report + WANDB telemetry** covering ΔNLL@H, swap rate, residency, MFU (per [[Telemetry]]).
 
 ### Feature Breakdown
@@ -32,7 +56,7 @@ Goal: produce a fully nanochat-native training loop that mirrors the legacy POC 
 3. **LensNet + Focus Allocator** (per [[LensNet]], [[Focus Allocator]])
    - Add focus-score heads, ΔNLL target extraction, and on-policy perturbations.
    - Hook allocator choices into the Working Context builder.
-4. **In-Memory MegaContext Tree** (align with [[MegaContext Tree]] / [[Working Context]] design notes)
+4. **In-Memory MegaContext Tree** (align with [[MegaContext Tree]] / [[Working Context]] design notes + [[Positional Encoding#Gaussian RoPE stack]] for global positions)
    - Define the core MegaContext Tree interface (tensor-backed, minimal Python wrapper) so disk/streaming backends can drop in later.
    - Deterministic ingestion from raw context → LOD hierarchies with unit tests for expansion/collapse semantics.
 5. **Training/Eval Scripts**
