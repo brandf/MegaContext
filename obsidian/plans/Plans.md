@@ -10,6 +10,9 @@ Collects milestone plans spanning various phases of this project.
 - [[MegaContext PRD Index]]
     - Active PRD stack (MegaContext End-to-End Training, MegaAttention, MegaPrediction, Cognitive-Core, KV caching).
     - Defines requirements for the small end-to-end models, runtime upgrades, and serving features.
+- [[Implementation Roadmap]]
+    - Phase-by-phase implementation plan derived from the PRDs (Nanochat stack).
+    - Shows how components map to features, interfaces, telemetry, and deliverables for each phase.
 - [[Research Paper Plan]]
     - Research-grade system and publication.
     - Robust compression, advanced focus modeling, storage/streaming, benchmarking, paper packaging.

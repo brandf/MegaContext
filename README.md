@@ -15,6 +15,7 @@ For the complete narrative, start with [`obsidian/index.md`](./obsidian/index.md
 
 - Public site: [brandf.github.io/MegaContext](https://brandf.github.io/MegaContext/)
 - Obsidian vault: `obsidian/`
+- Implementation roadmap: `obsidian/plans/Implementation Roadmap.md`
 - Current work tracker: `obsidian/TODO.md`
 
 ---
