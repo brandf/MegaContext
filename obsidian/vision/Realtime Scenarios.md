@@ -3,7 +3,7 @@ tags:
   - vision
 summary: Estimates storage needs for a real-time MegaContext powered robot that lives for 10 years
 ---
-> **Context:** Exploratory sizing only. For active requirements and implementation work, see the [[MegaContext PRD Index]]; this page illustrates a potential future deployment.
+> **Context:** Exploratory sizing only. For active requirements and implementation work, see the [[MegaContext PRD Index]] and the current task list in `TODO.md`; this page illustrates a potential future deployment.
 
 ## Long-term storage example: 24/7 robot (10 years)
 

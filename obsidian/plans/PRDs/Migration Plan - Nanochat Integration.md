@@ -6,7 +6,7 @@ summary: Migration roadmap for re-platforming MegaContext development onto the n
 ---
 # Migration Plan — nanochat Integration
 
-> **Status:** Migration program (in-flight). Use this plan alongside [[Migration Status]] to track progress; notebook instructions remain canonical until these phases complete.
+> **Status:** Migration program (in-flight). Use this plan alongside `TODO.md` (single source for outstanding tasks) and [[Training & Operations]] for the active workflow.
 
 Goal: move the active MegaContext implementation from notebooks + PyTorch Lightning experiments onto the [nanochat](https://github.com/karpathy/nanochat) repository, layering the new PRD-driven architecture on top while keeping the upstream baseline intact.
 

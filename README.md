@@ -13,9 +13,9 @@ For the complete narrative, start with [`obsidian/index.md`](./obsidian/index.md
 
 ## Documentation
 
-You can view/read the documentation [here](https://brandf.github.io/MegaContext/).
-
-For the best editing/contributing experience, use the Obsidian client - open the vault in the `obsidian/` folder.
+- Public site: [brandf.github.io/MegaContext](https://brandf.github.io/MegaContext/)
+- Obsidian vault: `obsidian/`
+- Current work tracker: `obsidian/TODO.md`
 
 ---
 

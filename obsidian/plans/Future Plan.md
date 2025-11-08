@@ -5,7 +5,7 @@ summary: Post-paper roadmap covering platform maturation, advanced learning, app
 ---
 Long-range roadmap for scaling MegaContext beyond the research paper milestone.
 
-> **Context:** Everything here is speculative/post-paper. For active near-term work, follow the POR in [[MegaContext PRD Index]] and the nanochat migration trackers; only reference this document when planning long-range initiatives.
+> **Context:** Everything here is speculative/post-paper. For active near-term work, follow the POR in [[MegaContext PRD Index]] and the nanochat migration tasks tracked in `TODO.md`.
 
 ---
 

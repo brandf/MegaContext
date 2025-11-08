@@ -5,6 +5,8 @@ summary: Comprehensive POC implementation guide consolidating all parameters, co
 ---
 # POC Implementation Guide
 
+> **Status:** Historical reference for the notebook-era prototype. Use [[Training & Operations]] and `TODO.md` for the nanochat workflow; this page remains for context when porting legacy assumptions.
+
 This document consolidates ALL POC-specific implementation details, parameters, configurations, and constraints. When implementing POC components, this is the **single source of truth** for:
 - Parameter values
 - Simplifications vs full vision
@@ -124,13 +126,8 @@ uv sync
 # Run tests
 uv run pytest --maxfail=1 --disable-warnings
 
-# Train GistNet (Lightning)
+# Legacy notebook workflow (deprecated)
 uv run jupyter lab  # run notebooks/megacontext.ipynb and customise phases
-
-# Run POC loop
-# (planned) uv run python -m tools.run_poc_loop --config configs/Gutenberg_SmolLM3.yaml
-
-# Demo decode
 uv run python -m tools.decode_demo --config configs/SampleText_TinyGPT2.yaml
 ```
 
