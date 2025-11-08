@@ -3,6 +3,8 @@ tags:
   - plans
 summary: Stepwise guide for delivering the MegaContext proof-of-concept milestone through five phases.
 ---
+> **Status:** Archived POC plan for historical reference. The nanochat workflow and POR requirements now live in [[Training & Operations]] + [[MegaContext PRD Index]]; use this document only for context.
+
 Proof-of-concept milestone covering repository readiness through demo documentation.
 
 ---

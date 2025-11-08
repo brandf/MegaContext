@@ -3,6 +3,8 @@ tags:
   - plans
 summary: Milestone plan for producing a research-grade MegaContext system and publication through five development phases.
 ---
+> **Status:** Historical milestone. Use for background only; active POR lives in [[MegaContext PRD Index]] and in-flight tasks track under [[TODO]].
+
 Research milestone advancing compression, focus modeling, storage, benchmarking, and publication packaging.
 
 ---

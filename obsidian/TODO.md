@@ -5,10 +5,9 @@ Single source of truth for current work items across the documentation plan and 
 ## Documentation & PRD Polish
 
 - [x] Document migration validation flow (see [[Training & Operations#Post-run validation]] and [[Lifecycle]]).
-- [ ] Add “Status: POR” badges to every PRD and tag the remaining legacy phase docs as historical reference (e.g., KV caching, PRD tracker, migration plan). *Need a quick pass on any stragglers under `obsidian/plans/PRDs/` + legacy phase notes.*
+- [x] Add “Status: POR” badges to every PRD and tag the remaining legacy phase docs as historical reference (e.g., KV caching, PRD tracker, migration plan).
 - [x] Cross-link future-looking pages (e.g., `obsidian/plans/Future Plan.md`, `obsidian/vision/Realtime Scenarios.md`) back to `obsidian/plans/PRDs/index.md` so readers can see how speculative ideas relate to the active roadmap.
 - [ ] Verify each documented command/config exists (or is explicitly marked planned) and add troubleshooting snippets where needed—focus on nanochat scripts, chat eval commands, and telemetry hooks.
-- [ ] (Deferred) Add “Last updated” metadata to top-level ops/docs once the nanochat workflow stabilizes.
 
 ## Validation, Testing & Telemetry
 

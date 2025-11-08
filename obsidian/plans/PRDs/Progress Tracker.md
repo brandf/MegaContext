@@ -1,10 +1,11 @@
----
 tags:
   - plans
   - prd
 summary: Snapshot of each active PRD with current status, blockers, and next milestones.
 ---
 # PRD Progress Tracker
+
+> **Status:** Plan of record (POR) tracker. Update this table whenever PRD implementation work lands so it stays authoritative.
 
 Use this table to keep the major MegaContext PRDs in sync. Update the status column when you land changes in code or documentation; populate blockers so the next contributor can pick up immediately.
 
