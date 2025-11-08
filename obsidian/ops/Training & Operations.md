@@ -26,6 +26,15 @@ MegaContext now trains entirely through the nanochat pipeline. The legacy JT1/JT
 
 Everything else (Rust tokenizer build, dataset downloads, torchrun invocations) is handled by the scripts below.
 
+### Command map
+
+- **Training scripts (repo root):** `run10.sh`, `speedrun.sh`, `run1000.sh`.
+- **Component entrypoints (`scripts/`):** `base_train.py`, `mid_train.py`, `chat_sft.py`, `chat_eval.py`, `base_eval.py`, `tok_train.py`, `tok_eval.py`.
+- **Runtime tools (`scripts/`):** `chat_cli.py`, `chat_web.py`.
+- **Legacy commands:** anything under `tools/` (e.g., `tools.decode_demo`) is historical and documented only inside [[POC Implementation Guide]] / `_old/`.
+
+If you discover a missing script or new entrypoint, add it here and update `obsidian/TODO.md` so the rest of the docs stay consistent.
+
 ## 2. Choose a Training Recipe
 
 | Scenario | Command | Notes |

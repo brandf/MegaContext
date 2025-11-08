@@ -7,12 +7,7 @@ Single source of truth for current work items across the documentation plan and 
 - [x] Document migration validation flow (see [[Training & Operations#Post-run validation]] and [[Lifecycle]]).
 - [x] Add “Status: POR” badges to every PRD and tag the remaining legacy phase docs as historical reference (e.g., KV caching, PRD tracker, migration plan).
 - [x] Cross-link future-looking pages (e.g., `obsidian/plans/Future Plan.md`, `obsidian/vision/Realtime Scenarios.md`) back to `obsidian/plans/PRDs/index.md` so readers can see how speculative ideas relate to the active roadmap.
-- [ ] Verify each documented command/config exists (or is explicitly marked planned) and add troubleshooting snippets where needed—focus on nanochat scripts, chat eval commands, and telemetry hooks.
-
-## Validation, Testing & Telemetry
-
-- [ ] Implement automated smoke tests that run `bash run10.sh --gpu 5090` in a dry-run or truncated mode plus `bash speedrun.sh` on an 8×H100 node to ensure configs stay runnable.
-- [ ] Mirror WANDB dashboards (ΔNLL@H, swap rate, residency, MFU) for the nanochat scripts and attach them to the documentation before removing the remaining notebook artifacts.
+- [x] Verify each documented command/config exists (or is explicitly marked planned) and add troubleshooting snippets where needed—focus on nanochat scripts, chat eval commands, and telemetry hooks.
 
 ## Nanochat Migration Phases (from [[Migration Plan - Nanochat Integration]])
 
