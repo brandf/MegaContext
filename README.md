@@ -1,3 +1,86 @@
+# MegaContext — Learned Context Compression & Focus for Frozen LLMs
+
+*A system architecture for virtualized LLM memory.*
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/brandf/MegaContext/blob/main/notebooks/megacontext.ipynb)
+
+---
+
+## TL;DR — MegaContext
+MegaContext virtualizes an LLM’s context window by pairing an unbounded MegaContext Tree with a fixed-size Working Context. Learned components (GistNet, LensNet, Focus Allocator) keep the GPU budget constant while swapping detail in and out of focus.
+
+For the complete narrative, start with [`obsidian/index.md`](./obsidian/index.md) and then read [`obsidian/getting started/How MegaContext Works.md`](./obsidian/getting%20started/How%20MegaContext%20Works.md). This README focuses on repo logistics and runtime setup.
+
+---
+
+## Documentation
+
+You can view/read the documentation [here](https://brandf.github.io/MegaContext/).
+
+For the best editing/contributing experience, use the Obsidian client - open the vault in the `obsidian/` folder.
+
+---
+
+## Runtime Requirements & Setup
+
+- Python 3.11 (matches the upstream [nanochat](https://github.com/karpathy/nanochat) toolchain we plan to import)
+- CUDA-capable GPU with CUDA 12.x drivers (tested with PyTorch 2.2+ / cu121 builds)
+
+### Local (Linux/macOS)
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and ensure `python3.11` is available.
+2. Run `uv venv` followed by `uv sync` to install the runtime and development dependencies.
+3. Launch Jupyter with `uv run jupyter lab` and open [`notebooks/megacontext.ipynb`](./notebooks/megacontext.ipynb).
+
+### Google Colab
+1. Open the notebook via the badge above or [this link](https://colab.research.google.com/github/brandf/MegaContext/blob/main/notebooks/megacontext.ipynb).
+2. Select a GPU runtime (`Runtime → Change runtime type → T4/L4/A100`).
+3. Run the **Quick Start** bootstrap cell at the top of the notebook; it clones the repo, installs dependencies, and wires up widget support.
+4. Launch the **0. Setup Console** cell to choose the experiment config, artifact/data roots, logging, tokens, resume checkpoint, and reproducibility seed in one place.
+5. Continue with `1. Dataset Preparation` → `2. Configure GistNet Training` → `3. Build Lightning Components` → `4. Launch Training`.
+
+The bootstrap script is idempotent—rerun it whenever you reconnect to a fresh Colab session.
+
+### Artifact Storage & Resuming Runs
+- Point `MEGACONTEXT_ARTIFACT_ROOT` to mounted network storage (e.g. Novita.ai volumes) before launching the notebook. All checkpoints, logs, and summaries flow there by default.
+- Use `MEGACONTEXT_DATA_ROOT` if you want dataset shards on a different mount than the git checkout.
+- The **Setup Console** cell lets you override paths interactively; it creates directories as needed and surfaces available checkpoints.
+- Pick `Do not resume` for a fresh run or choose any `.ckpt` discovered under the artifact root directly from the console.
+- Reproducibility defaults to seed `42`; set `MEGACONTEXT_SEED` to pin a different seed per experiment.
+- Set `MEGACONTEXT_FORCE_REINSTALL=1` before running the bootstrap cell if you need to rebuild the editable install in-place (otherwise cached installs are reused to avoid Colab restarts).
+- Set `MEGACONTEXT_FORCE_DATA_REBUILD=1` when you need to regenerate dataset shards even if Arrow files already exist.
+
+### Current vs. Upcoming Workflow
+- **Today:** All experimentation and training flows through `notebooks/megacontext.ipynb`. Treat the notebook as the source of truth for commands, configs, and telemetry until further notice.
+- **In flight:** We plan to pull in the nanochat training CLI so the same requirements (Python 3.11, CUDA 12.x, PyTorch 2.2+) stay consistent. Follow the [PRD stack](./obsidian/plans/PRDs/index.md) for status updates; until that migration lands, commands referencing `nanochat.*` are considered future work.
+
+---
+
+## Development & Contribution
+
+### Agents
+  - follow the conventions in `AGENTS.md` for directory layout, testing, linting, and communication.
+  - otherwise use the same workflow as a human contributor
+
+### Humans
+  - Background information:
+    + Watch Karpathy videos
+      * [Intro to LLMs](https://www.youtube.com/watch?v=zjkBMFhNj_g)
+      * [Deep Dive into LLMs](https://www.youtube.com/watch?v=7xTGNNLPyMI)
+      * [Zero to Hero](https://www.youtube.com/watch?v=VMj-3S1tku0&list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ)
+    + Read [Megacontext Documentation](https://brandf.github.io/MegaContext/)
+  - Follow [SETUP.md](./SETUP.md) instruction in a linux environment (Python 3.11 + CUDA 12.x as noted above).
+    + Such as a rented GPU from https://novita.ai
+  - Use the Jupyter [notebook](./notebooks/megacontext.ipynb) for training until the nanochat workflow is merged.
+
+---
+
+# License
+
+MIT [License](./LICENSE). PRs welcome.
+
+---
+This is a fork of:
+
 # nanochat
 
 ![nanochat logo](dev/nanochat.png)

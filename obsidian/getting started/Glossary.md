@@ -1,0 +1,210 @@
+---
+tags:
+  - getting-started
+summary: A comprehensive reference defining all key terms and concepts used throughout the MegaContext system.
+---
+# Glossary
+
+A comprehensive reference of key terms used throughout the MegaContext system.
+
+---
+
+## A
+
+### ALiBi (Attention with Linear Biases)
+Position-aware attention tweak that adds per-head linear biases `m_h (j - i)` to attention logits. Provides unbounded monotonic distance priors when paired with [[Glossary#RoPE (Rotary Position Embedding)|RoPE]] and is useful in MegaContext for preserving global ordering across billion-scale offsets. See [[Positional Encoding]] and [[Base Runtime]].
+
+### Absolute Position Index
+Global index assigned to each LOD0 token inside the [[MegaContext Tree]]. Used to disambiguate teleported spans when materializing the [[Working Context]] and to compute Gaussian positional variance. See [[Working Context Assembly]].
+
+### Adaptive Focus Router
+Planned gating module that selects which [[Multi-headed Focus#Multi-Head Focus (MHF)|multi-head working contexts]] to evaluate for the current query. Trained using LensNet utility statistics and downstream ΔNLL signals to balance accuracy against compute. See [[Multi-headed Focus]].
+
+---
+
+## B
+
+### Block Alignment
+The constraint that all operations in the MegaContext system respect fixed-size blocks (K = 32 tokens in the POC). Every working-context entry covers exactly one full block at a single level of detail. When expanding or collapsing, the [[Focus Allocator]] maintains block boundaries to preserve the contiguity invariant and enable proper RoPE positioning. See [[Architecture Details#Key terms & invariants]].
+
+### Block Size (K)
+The number of new tokens processed per update, fixed at K = 32 in the proof of concept. This determines:
+- The granularity at which tokens are buffered before creating gists
+- The compression ratio of [[GistNet]] (32→1)
+- The update cadence for the [[Focus Allocator]]
+See [[Architecture Details#Key terms & invariants]].
+
+---
+
+## C
+
+### Collapse
+The operation of reducing detail by replacing raw LOD0 tokens with their LOD1 gist, or LOD1 gists with their LOD2 parent. Initiated when [[LensNet]] assigns negative focus scores to a region. Collapses refund token budget, allowing other regions to expand. The inverse of [[#Expand]]. See [[Focus Allocator]].
+
+### Contiguity Invariant
+A fundamental property of the working context: entries must tile the MegaContext history without gaps or overlaps, maintaining temporal continuity even as individual spans switch between different levels of detail. When swapping LODs, the system preserves the exact mapping to the original timeline. See [[Architecture Details#Key terms & invariants]].
+
+### Counterfactual Labeling
+A training technique where [[LensNet]] learns from hypothetical "what if" scenarios. For each entry, the system computes ΔNLL@H for both expanding and collapsing actions, creating signed target utilities (positive for expand, negative for collapse) that teach the model which focus changes reduce prediction error. See [[LensNet#Training objectives]].
+
+---
+
+## D
+
+### ΔNLL (Delta Negative Log-Likelihood)
+The change in negative log-likelihood (prediction error) when replacing a region of tokens with its gist. Used as the primary training signal for [[GistNet]] to learn substitutable compressions. Measured over a horizon H to capture downstream prediction quality. See [[#ΔNLL@H]].
+
+### ΔNLL@H (Delta NLL at Horizon)
+The change in negative log-likelihood measured over a specific lookahead horizon H tokens. Core metric for:
+- Training [[GistNet]] to produce substitutable gists
+- Generating counterfactual labels for [[LensNet]]
+- Evaluating compression quality
+
+Horizon defaults: 64 for narrative, 96 for agent turns, 128 for code. Lower ΔNLL@H means better substitutability. See [[Architecture Details#Key terms & invariants]].
+
+### DeGistNet
+Shorthand for the inverse of [[GistNet]]—a lightweight decoder that reconstructs finer levels of detail (e.g., LOD1 from LOD2) during speculative planning. MegaPrediction uses DeGistNet-style passes to refine coarse drafts before committing them to the MegaContext Tree. See [[MegaPrediction]].
+
+---
+
+## E
+
+### Expand
+The operation of increasing detail by replacing a gist with its constituent elements (LOD1→LOD0 or LOD2→LOD1). Initiated when [[LensNet]] assigns positive focus scores to a region. Expansions consume token budget, requiring corresponding collapses elsewhere to maintain W_max. The inverse of [[#Collapse]]. See [[Focus Allocator]].
+
+---
+
+## F
+
+### Focus Allocator
+A greedy, hysteresis-aware planner that converts [[LensNet]]'s signed utilities into legal expand/collapse actions. Maintains block alignment, enforces budget constraints, and prevents oscillation through cooldown mechanisms. Operates on priority queues with configurable thresholds (τ_expand, τ_collapse) and applies at most N_diff actions per iteration. See [[Focus Allocator]].
+
+### Focus Score
+A signed scalar value emitted by [[LensNet]] for each working-context entry:
+- Positive scores (> τ_expand) indicate the entry should be expanded to finer detail
+- Negative scores (< -τ_collapse) indicate the entry should be collapsed to coarser detail
+- Near-zero scores suggest the current level of detail is appropriate
+
+The [[Focus Allocator]] converts these scores into actual expand/collapse operations. See [[LensNet]].
+
+### Base Model
+The underlying large language model (e.g., SmolLM3-3B in the POC) whose parameters remain fixed during MegaContext training and operation.  Only [[GistNet]], [[LensNet]], and a small LoRA for base model adaptation are trained; the base model is used as-is for both prediction and teacher signal generation. This allows MegaContext to work with any pretrained LLM without fine-tuning. See [[Architecture Details]].
+
+---
+
+## G
+
+### Gist / Gist Embedding
+A single learned vector in the base model's embedding dimension (d) that substitutes for a fixed span of tokens or lower-level gists. Generated by [[GistNet]] through 32→1 compression with self-attention and cross-attention refinement. Gists are:
+- **Substitutable**: can replace their source tokens in the working context with minimal ΔNLL
+- **Hierarchical**: LOD1 gists compress 32 LOD0 tokens; LOD2 gists compress 32 LOD1 gists (1024× total)
+- **Aligned**: positioned at the central token index for RoPE compatibility
+See [[GistNet]].
+
+### GistNet
+A lightweight neural network (32→1→32→1 architecture) that compresses fixed-length token spans into single gist embeddings aligned with the base model's embedding space. Uses alternating self-attention and cross-attention with learned slot queries. Trained to minimize ΔNLL@H, ensuring gists can substitute for their source tokens without degrading prediction quality. Forms the backbone of the [[MegaContext Tree]]. See [[GistNet]].
+
+### Gaussian RoPE
+Generalization of rotary embeddings where each span outputs a positional distribution `N(μ, σ²)`. High-frequency bands attenuate by `exp(-0.5 (ω σ)^2)`, letting coarse gists express temporal uncertainty while LOD0 tokens retain sharp indices. Planned for end-to-end MegaContext models. See [[Positional Encoding]] and [[Future Plan#Track B — Advanced Learning & Co-Optimization]].
+
+---
+
+## H
+
+### Horizon (H)
+The lookahead range (in tokens) used when computing ΔNLL or task losses during training. Determines how far ahead the model looks when evaluating whether a gist substitution preserves prediction quality. Defaults:
+- 64 tokens for narrative text
+- 96 tokens for mixed agent turns
+- 128 tokens for code
+
+See [[Architecture Details#Key terms & invariants]].
+
+### NTK Scaling
+Technique for stretching rotary positional embeddings by scaling input indices prior to the sine/cosine transform. Extends usable context lengths (e.g., 8× stretch → ~250k tokens) without modifying learned weights, making it the first step in MegaContext’s positional retrofit. See [[Positional Encoding]].
+
+---
+
+## L
+
+### LOD0 / LOD1 / LOD2 (Level of Detail / LOD)
+Hierarchical compression levels in the MegaContext system:
+- **LOD0**: Raw token embeddings (base level, highest detail)
+- **LOD1**: 32→1 gist compressing 32 LOD0 tokens
+- **LOD2**: 32→1 gist compressing 32 LOD1 gists (1024 LOD0 tokens total)
+
+Higher levels provide coarser detail at lower token cost. The working context mixes all three levels dynamically based on relevance. See [[Architecture Details#Key terms & invariants]].
+
+### LensNet
+A dual cross-attention controller that scores working-context entries for expansion or collapse. Operates non-causally on the full working context plus a small tail of conditioning gists. Emits signed focus scores that the [[Focus Allocator]] uses to adjust level of detail. Trained with counterfactual ΔNLL utilities, budget regularizers, and legality penalties. Runs once per K tokens (32 in POC). See [[LensNet]].
+
+### Multi-Head Focus (MHF)
+Strategy where multiple working contexts (e.g., 2k-token windows) receive distinct focus layouts before the base model runs. Each head reuses a shared [[LensNet]] backbone with specialised conditioning, allowing the system to view the same MegaContext history from different perspectives. Outputs merge at the hidden-state level to avoid repeated disembedding. See [[Multi-headed Focus]].
+
+---
+
+## M
+
+### MegaContext / MegaContext Tree
+The complete, append-only interaction or document history stored as a hierarchical gist tree, potentially containing millions or billions of tokens. Persisted on disk (RAM in the POC) and built incrementally as text streams in through [[GistNet]]. Each node represents either raw tokens (LOD0) or compressed gists (LOD1, LOD2). The [[Working Context]] is a small, focused window drawn from this tree. See [[Architecture Details]].
+
+### Mutation Access Count
+Telemetry signal that records how often a span has been expanded, collapsed, or otherwise touched by LensNet/Focus Allocator decisions. Used by [[MegaCuration]] to measure “interest” in a region and prioritize what to keep vs. prune.
+
+---
+
+## R
+
+### RoPE (Rotary Position Embedding)
+Rotary Position Embedding technique used by the frozen base model for positional encoding. MegaContext preserves RoPE compatibility by:
+- Positioning gists at the central token index of their covered span
+- Maintaining original absolute token indices when swapping LOD levels
+- Ensuring the base model receives consistent phase information
+
+This allows gists to integrate seamlessly into the base model's attention mechanism. See [[GistNet#Architectural properties]].
+
+---
+
+## S
+
+### Substitutability
+The core property that a gist can replace its source token span without significantly changing the base model's predictions. Measured by ΔNLL@H—the lower the value, the more substitutable. [[GistNet]] is trained explicitly to maximize substitutability, allowing the working context to dynamically swap between token-level and gist-level representations while maintaining prediction quality. See [[GistNet#Training objectives]].
+
+### Swap Rate
+Fraction of working-context entries that change level of detail (expand or collapse) during a Focus Allocator iteration. High swap rates (>0.25) indicate thrash; healthy loops stay roughly 0.05–0.20. Logged via [[Training & Operations]] and referenced in [[Lifecycle#Validation & Troubleshooting]].
+
+---
+
+## T
+
+### Teacher Model
+The frozen base LLM used to generate training signals for [[GistNet]] and [[LensNet]]. Computes ΔNLL@H by comparing predictions with and without gist substitutions. The teacher model is the same as the base model used at inference—no separate teacher training is required. See [[GistNet#Training pipeline]].
+
+---
+
+## W
+
+### Tail Gists
+Small buffer of recent gists appended to the working context so [[LensNet]] can condition on the latest history while keeping budget constant. Tail gists provide lightweight lookahead/feedback without adding raw tokens. See [[LensNet]] and [[Working Context Assembly]].
+
+### W_max (Token Budget)
+The maximum token-equivalent cost allowed in the working context. Typically 8k–32k tokens in the POC. Each entry consumes tokens based on its level:
+- LOD0 blocks: 32 tokens
+- LOD1 gists: 1 token
+- LOD2 gists: 1 token
+
+The [[Focus Allocator]] ensures `sum(entry_costs) ≤ W_max` by balancing expansions (which consume budget) with collapses (which refund budget). See [[Architecture Details#Key terms & invariants]].
+
+### Working Context (WC)
+A fixed-size GPU window (budgeted at W_max tokens) that the frozen base LLM actually sees. Assembled from a contiguous-in-time sequence of entries drawn from the [[MegaContext Tree]], mixing raw tokens (LOD0) and gists (LOD1, LOD2) at varying levels of detail. Dynamically refocused by [[LensNet]] and [[Focus Allocator]] to keep relevant content detailed while compressing less-relevant regions. See [[Architecture Details]].
+
+### Staging Context
+Large intermediate context (e.g., ~100k entries) that lives between the disk-backed MegaContext and the small [[Working Context]] heads. It carries higher temporal resolution than any single working context but is not fed to the base model directly. LensNet-G refreshes the staging view periodically, seeding downstream heads with richer candidates. See [[Multi-headed Focus]].
+
+---
+
+## Cross-References
+
+- For architectural overview: [[Architecture Details]]
+- For component details: [[GistNet]], [[LensNet]], [[Focus Allocator]]
+- For implementation: [[POC Architecture]], [[Runtime Loop]]
+- For training: [[Training & Operations]]
