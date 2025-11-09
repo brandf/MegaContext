@@ -69,7 +69,7 @@ sample_every = 2000 # every how many steps to sample from the model
 model_tag = "" # optionally override the model tag for the output checkpoint directory name
 # MegaContext (phase 1 integration)
 mc_enabled = 0 # set to 1 to enable MegaContext instrumentation
-gistnet_type = "simple"
+gistnet_type = "mean_mlp2"
 lensnet_type = "simple"
 allocator_type = "simple"
 positional_type = "gaussian"

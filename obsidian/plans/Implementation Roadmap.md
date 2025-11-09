@@ -17,7 +17,7 @@ flowchart LR
     end
     subgraph MC["MegaContext (mc/)"]
         Controller[MCController]
-        GistNet -->|encode_block| MCT[MegaContextTree]
+        GistNet -->|forward (blocks)| MCT[MegaContextTree]
         MCT -->|tensor views| WC[WorkingContext]
         WC -->|embeddings| LensNet
         LensNet -->|logits| Alloc[FocusAllocator]

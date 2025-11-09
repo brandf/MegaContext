@@ -32,7 +32,7 @@ class MCConfig:
     device: str = "cuda"
     enable_gaussian_rope: bool = True
     telemetry_interval: int = 100
-    gistnet_type: str = "simple"
+    gistnet_type: str = "mean_mlp2"
     lensnet_type: str = "simple"
     allocator_type: str = "simple"
     num_heads: int = 1

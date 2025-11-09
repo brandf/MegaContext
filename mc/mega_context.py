@@ -60,7 +60,7 @@ class MegaContextTree:
                 flattened = grouped.view(
                     batch * new_len, self.config.block_size, embed_dim
                 )
-                pooled = gistnet.encode_block(flattened)
+                pooled = gistnet(flattened)
                 level_data = pooled.view(batch, new_len, embed_dim)
             else:
                 level_data = grouped.mean(dim=2)

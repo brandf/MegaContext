@@ -39,7 +39,7 @@ The detailed operating guide (env prep, telemetry, troubleshooting) lives in [`o
 
 These scripts run tokenizer → base → mid → chat SFT end-to-end, drop checkpoints in `~/.cache/nanochat`, and generate `report/report.md`. For chat/web demos after training, follow [[Base Runtime]](./obsidian/ops/Base%20Runtime.md).
 
-> 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the Phase 1 MegaContext instrumentation. Optional knobs `--gistnet <impl>`, `--lensnet <impl>`, `--allocator <impl>` select component implementations (defaults are `simple`). When `--mc` is active we also build Gaussian RoPE positional caches using MegaContext global positions/LOD metadata. The flagless path continues to match upstream nanochat.
+> 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the Phase 1 MegaContext instrumentation. Optional knobs `--gistnet <impl>`, `--lensnet <impl>`, `--allocator <impl>` select component implementations (GistNet defaults to `mean_mlp2`). GistNet families now follow a consistent naming scheme: `mean` (`mean`, `mean_linear`, `mean_mlp`, `mean_mlp2`), `selfattention` (same head progression), and `slotattention` (ditto). When `--mc` is active we also build Gaussian RoPE positional caches using MegaContext global positions/LOD metadata. The flagless path continues to match upstream nanochat.
 
 ---
 

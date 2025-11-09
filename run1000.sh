@@ -5,7 +5,7 @@
 # A bit sparser on comments, see speedrun.sh for more detail
 
 MC_ENABLED=0
-GISTNET_TYPE="simple"
+GISTNET_TYPE="mean_mlp2"
 LENSNET_TYPE="simple"
 ALLOCATOR_TYPE="simple"
 POSITIONAL_TYPE="gaussian"

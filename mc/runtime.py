@@ -50,7 +50,11 @@ class MCController:
         self.device = torch.device(config.device)
         self.embed = self._resolve_embedding_layer(model)
         embed_dim = config.embed_dim
-        self.gistnet = build_gistnet(config.gistnet_type, embed_dim).to(self.device)
+        self.gistnet = build_gistnet(
+            config.gistnet_type,
+            embed_dim,
+            block_size=config.block_size,
+        ).to(self.device)
         self.lensnet = build_lensnet(config.lensnet_type, embed_dim).to(self.device)
         self.focus_allocator: FocusAllocatorBase = build_focus_allocator(
             config.allocator_type

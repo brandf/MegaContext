@@ -4,7 +4,7 @@
 # It is designed to run in ~4 hours on 8XH100 node at $3/GPU/hour.
 
 MC_ENABLED=0
-GISTNET_TYPE="simple"
+GISTNET_TYPE="mean_mlp2"
 LENSNET_TYPE="simple"
 ALLOCATOR_TYPE="simple"
 POSITIONAL_TYPE="gaussian"
