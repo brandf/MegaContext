@@ -89,6 +89,9 @@ mc_tree_type = "ram"
 mc_initial_wcs = 4
 mc_max_counterfactuals = 8
 mc_horizon = 32
+mc_token_loss_weight = 1.0
+mc_lod1_loss_weight = 0.1
+mc_lens_loss_weight = 0.1
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -106,8 +109,8 @@ get_max_memory = torch.cuda.max_memory_allocated if device_type == "cuda" else l
 # wandb logging init
 use_dummy_wandb = run == "dummy" or not master_process
 wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat", name=run, config=user_config)
-    mc_controller = None
-    positional_cache = None
+mc_controller = None
+positional_cache = None
 
 # Tokenizer will be useful for evaluation, also we need the vocab size
 tokenizer = get_tokenizer()
@@ -162,6 +165,9 @@ if mc_enabled:
         initial_working_contexts=mc_initial_wcs,
         max_counterfactuals=mc_max_counterfactuals,
         horizon_tokens=mc_horizon,
+        token_loss_weight=mc_token_loss_weight,
+        lod1_loss_weight=mc_lod1_loss_weight,
+        lens_loss_weight=mc_lens_loss_weight,
         soft_max_length=allocator_soft_max,
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
@@ -242,9 +248,22 @@ total_training_time = 0 # total wall-clock time of training
 for step in range(num_iterations + 1):
     last_step = step == num_iterations
     flops_so_far = num_flops_per_token * total_batch_size * step
+    mc_result = None
+    positional_cache = None
+    mc_token_loss_val = None
+    mc_lod1_loss_val = None
+    mc_lens_loss_val = None
     if mc_controller is not None:
         try:
-            positional_cache = mc_controller.process_batch(x.detach(), step, context="train")
+            mc_result = mc_controller.process_batch(x.detach(), step, context="train")
+            if mc_result is not None:
+                positional_cache = mc_result.positional_cache
+                if mc_result.token_loss is not None:
+                    mc_token_loss_val = float(mc_result.token_loss.detach())
+                if mc_result.lod1_loss is not None:
+                    mc_lod1_loss_val = float(mc_result.lod1_loss.detach())
+                if mc_result.lens_loss is not None:
+                    mc_lens_loss_val = float(mc_result.lens_loss.detach())
         except Exception as exc: # pragma: no cover - guard against optional path regressions
             print0(f"[MegaContext] controller error at step {step}: {exc}")
 
@@ -338,7 +357,15 @@ for step in range(num_iterations + 1):
                 cos_sin_override = positional_cache[:2]
                 if len(positional_cache) > 2:
                     alibi_override = positional_cache[2]
-            loss = model(x, y, cos_sin_override=cos_sin_override, alibi_override=alibi_override)
+            mc_extra_loss = torch.tensor(0.0, device=device)
+            if mc_controller is not None and mc_result is not None:
+                if mc_result.token_loss is not None:
+                    mc_extra_loss = mc_extra_loss + mc_result.token_loss * mc_controller.config.token_loss_weight
+                if mc_result.lod1_loss is not None:
+                    mc_extra_loss = mc_extra_loss + mc_result.lod1_loss * mc_controller.config.lod1_loss_weight
+                if mc_result.lens_loss is not None:
+                    mc_extra_loss = mc_extra_loss + mc_result.lens_loss * mc_controller.config.lens_loss_weight
+            loss = model(x, y, cos_sin_override=cos_sin_override, alibi_override=alibi_override) + mc_extra_loss
         train_loss = loss.detach() # for logging
         loss = loss / grad_accum_steps # each .backward() is a grad sum => normalize loss here
         loss.backward()
@@ -389,6 +416,12 @@ for step in range(num_iterations + 1):
         }
         if grad_clip_enabled:
             log_data["train/grad_norm"] = grad_norm
+        if mc_token_loss_val is not None:
+            log_data["mc/token_loss"] = mc_token_loss_val
+        if mc_lod1_loss_val is not None:
+            log_data["mc/lod1_loss"] = mc_lod1_loss_val
+        if mc_lens_loss_val is not None:
+            log_data["mc/lens_loss"] = mc_lens_loss_val
         wandb_run.log(log_data)
 
 # print a few more stats

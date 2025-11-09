@@ -258,8 +258,22 @@ class GPT(nn.Module):
                 group["initial_lr"] = group["lr"]
         return optimizers
 
-    def forward(self, idx, targets=None, kv_cache=None, loss_reduction='mean', cos_sin_override=None, alibi_override=None):
-        B, T = idx.size()
+    def forward(
+        self,
+        idx,
+        targets=None,
+        kv_cache=None,
+        loss_reduction='mean',
+        cos_sin_override=None,
+        alibi_override=None,
+        inputs_embeds=None,
+    ):
+        if inputs_embeds is not None:
+            B, T = inputs_embeds.size(0), inputs_embeds.size(1)
+            if idx is None:
+                idx = torch.zeros((B, T), dtype=torch.long, device=inputs_embeds.device)
+        else:
+            B, T = idx.size()
 
         # Grab the rotary embeddings for the current sequence length (they are of shape (1, seq_len, 1, head_dim))
         assert T <= self.cos.size(1), f"Sequence length grew beyond the rotary embeddings cache: {T} > {self.cos.size(1)}"
@@ -273,7 +287,10 @@ class GPT(nn.Module):
             cos_sin = self.cos[:, T0:T0+T], self.sin[:, T0:T0+T]
 
         # Forward the trunk of the Transformer
-        x = self.transformer.wte(idx)
+        if inputs_embeds is not None:
+            x = inputs_embeds
+        else:
+            x = self.transformer.wte(idx)
         x = norm(x)
         for block in self.transformer.h:
             x = block(x, cos_sin, kv_cache, alibi=alibi_override)

@@ -40,8 +40,7 @@ class MegaContextTree:
         tree.tokens = tokens.to(tree.device).long()
         tree.batch_size = tokens.shape[0]
         batch, seq_len = tree.tokens.shape
-        with torch.no_grad():
-            lod0_embeddings = embedder(tree.tokens)
+        lod0_embeddings = embedder(tree.tokens)
         tree._lod0_cache = lod0_embeddings
         tree._build_higher_levels(lod0_embeddings)
         return tree
@@ -120,8 +119,7 @@ class MegaContextTree:
         tokens = tokens.to(self.device).long()
         self.tokens = torch.cat([self.tokens, tokens], dim=1)
         if self._lod0_cache is not None and self.embedder is not None:
-            with torch.no_grad():
-                embedded = self.embedder(tokens)
+            embedded = self.embedder(tokens)
             self._lod0_cache = torch.cat([self._lod0_cache, embedded], dim=1)
         self._refresh_after_append()
 
@@ -200,8 +198,7 @@ class MegaContextTree:
             return self.levels[0]
         if self.tokens is None or self.embedder is None:
             raise ValueError("Tree lacks tokens/embedder for LOD0")
-        with torch.no_grad():
-            embeddings = self.embedder(self.tokens)
+        embeddings = self.embedder(self.tokens)
         if self._cache_lod0:
             self._lod0_cache = embeddings
         return embeddings
@@ -265,8 +262,7 @@ class MegaContextTree:
         start = max(0, min(start, total))
         end = max(start, min(end, total))
         token_slice = self.tokens[:, start:end]
-        with torch.no_grad():
-            return self.embedder(token_slice)
+        return self.embedder(token_slice)
 
     def get_lod0_slice(self, start: int, end: int) -> torch.Tensor:
         start = max(0, start)
