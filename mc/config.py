@@ -41,6 +41,9 @@ class MCConfig:
     lensnet_head: str = "mlp"  # mlp | linear
     allocator_type: str = "transformer"
     mc_tree_type: str = "ram"
+    initial_working_contexts: int = 4
+    max_counterfactuals: int = 8
+    horizon_tokens: int = 32
     soft_max_length: Optional[int] = None
     allocator_recent_tokens: int = 128
     allocator_expand_threshold: float = 0.1
@@ -67,3 +70,6 @@ class MCConfig:
         )
         if self.soft_max_length is None:
             self.soft_max_length = self.wc_config.max_length
+        self.initial_working_contexts = max(1, self.initial_working_contexts)
+        self.max_counterfactuals = max(self.initial_working_contexts, self.max_counterfactuals)
+        self.horizon_tokens = max(1, self.horizon_tokens)

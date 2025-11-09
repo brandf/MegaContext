@@ -86,6 +86,9 @@ allocator_collapse_threshold = 0.1
 allocator_max_replacements = 4
 allocator_iterations = 2
 mc_tree_type = "ram"
+mc_initial_wcs = 4
+mc_max_counterfactuals = 8
+mc_horizon = 32
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -156,6 +159,9 @@ if mc_enabled:
         lensnet_head=lensnet_head,
         allocator_type=allocator_type,
         mc_tree_type=mc_tree_type,
+        initial_working_contexts=mc_initial_wcs,
+        max_counterfactuals=mc_max_counterfactuals,
+        horizon_tokens=mc_horizon,
         soft_max_length=allocator_soft_max,
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
