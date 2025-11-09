@@ -32,29 +32,32 @@ class WorkingContext:
         lod_tensor: Optional[torch.Tensor] = None,
     ) -> None:
         self.config = config
-        batch, seq_len, dim = embeddings.shape
+        batch, seq_len, dim = embeddings.shape  # embeddings: [B, T, D]
         window = min(seq_len, config.max_length)
-        self.tensor = embeddings[:, -window:].clone()
+        self.tensor = embeddings[:, -window:].clone()  # [B, W, D]
         if lod_tensor is None:
             self.lod_tensor = torch.zeros(
                 batch, window, dtype=torch.long, device="cpu"
             )
         else:
             self.lod_tensor = lod_tensor[:, -window:].to("cpu")
-        self.positions = positions[:, -window:].to("cpu")
+        self.positions = positions[:, -window:].to("cpu")  # [B, W]
 
     def to_tensor(self) -> torch.Tensor:
+        """Return current working context embeddings [B, W, D] on device."""
         return self.tensor
 
     def get_lod_tensor(self) -> torch.Tensor:
+        """Return CPU-side LOD annotations [B, W]."""
         return self.lod_tensor
 
     def get_positions(self) -> torch.Tensor:
+        """Return CPU-side global positions [B, W]."""
         return self.positions
 
     def append(self, embedding: torch.Tensor, lod: int, global_position: int) -> None:
         embedding = embedding.to(self.tensor.device)
-        self.tensor = torch.cat([self.tensor, embedding.unsqueeze(1)], dim=1)
+        self.tensor = torch.cat([self.tensor, embedding.unsqueeze(1)], dim=1)  # extend sequence axis
         self.lod_tensor = torch.cat(
             [self.lod_tensor, torch.full_like(self.lod_tensor[:, :1], lod)], dim=1
         )

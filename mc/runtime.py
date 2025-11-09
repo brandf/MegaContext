@@ -84,8 +84,14 @@ class MCController:
         step: int,
         context: str = "train",
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]]:
+        """
+        Args:
+            tokens: [B, T] token ids from nanochat loader.
+        Returns:
+            Optional positional cache tuple (cos, sin, alibi) each shaped per head.
+        """
         with torch.no_grad():
-            emb = self.embed(tokens.to(self.device))
+            emb = self.embed(tokens.to(self.device))  # [B, T, D]
             tree = MegaContextTree.from_embeddings(
                 emb, self.config.tree_config, gistnet=self.gistnet
             )
@@ -105,15 +111,15 @@ class MCController:
             positional = None
             if self.positional_encoder is not None:
                 cos, sin, alibi_slopes = self.positional_encoder(
-                    wc.get_positions(),
-                    wc.get_lod_tensor(),
+                    wc.get_positions(),  # [B, W]
+                    wc.get_lod_tensor(),  # [B, W]
                     device=self.device,
                 )
                 alibi_bias = None
                 if alibi_slopes is not None:
-                    positions = wc.get_positions().to(self.device).float()  # (B, T)
-                    rel = positions.unsqueeze(2) - positions.unsqueeze(1)  # (B, T, T)
+                    positions = wc.get_positions().to(self.device).float()  # [B, W]
+                    rel = positions.unsqueeze(2) - positions.unsqueeze(1)  # [B, W, W]
                     slopes = alibi_slopes.to(self.device).view(1, self.config.num_heads, 1, 1)
-                    alibi_bias = (slopes * rel.unsqueeze(1)).bfloat16()
+                    alibi_bias = (slopes * rel.unsqueeze(1)).bfloat16()  # [1, H, W, W]
                 positional = (cos, sin, alibi_bias)
             return positional

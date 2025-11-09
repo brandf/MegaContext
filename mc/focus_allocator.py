@@ -23,6 +23,12 @@ class FocusAllocatorBase:
         lens_logits: torch.Tensor,
         working_context: WorkingContext,
     ) -> List[ReplacementPlan]:
+        """
+        Args:
+            lens_logits: [B, W, 2] expand/collapse scores from LensNet.
+        Returns:
+            List of replacement plans describing WC edits.
+        """
         raise NotImplementedError
 
 
@@ -38,8 +44,8 @@ class SimpleFocusAllocator(FocusAllocatorBase):
         working_context: WorkingContext,
     ) -> List[ReplacementPlan]:
         _ = tree  # placeholder for future implementations
-        probs = torch.softmax(lens_logits, dim=-1)
-        expand_conf = probs[..., 0]
+        probs = torch.softmax(lens_logits, dim=-1)  # [B, W, 2]
+        expand_conf = probs[..., 0]  # [B, W]
         topk = torch.topk(
             expand_conf.mean(dim=0),
             k=min(self.max_edits, expand_conf.shape[1]),
@@ -50,8 +56,8 @@ class SimpleFocusAllocator(FocusAllocatorBase):
                 continue
             start = max(0, idx - 1)
             count = min(4, working_context.to_tensor().shape[1] - start)
-            slice_tensor = working_context.to_tensor()[:, start : start + count]
-            replacements = slice_tensor.mean(dim=1, keepdim=True)
+            slice_tensor = working_context.to_tensor()[:, start : start + count]  # [B, count, D]
+            replacements = slice_tensor.mean(dim=1, keepdim=True)  # [B, 1, D]
             lod = 1
             global_pos = int(working_context.get_positions()[0, start].item())
             plans.append(

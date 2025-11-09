@@ -23,6 +23,13 @@ class SimpleLensNet(LensNetBase):
         )
 
     def forward(self, wc_embeddings: torch.Tensor, lod_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            wc_embeddings: [B, W, D] working-context tokens.
+            lod_tensor: [B, W] LOD metadata (ints).
+        Returns:
+            [B, W, 2] logits for (expand, collapse) scores per position.
+        """
         lod_tensor = lod_tensor.to(wc_embeddings.device).float().unsqueeze(-1)
         features = torch.cat([wc_embeddings, lod_tensor], dim=-1)
         return self.mlp(features)

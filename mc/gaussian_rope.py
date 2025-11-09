@@ -44,9 +44,16 @@ class GaussianRoPE(nn.Module):
     def forward(
         self, positions: torch.Tensor, lod_tensor: torch.Tensor, device: torch.device
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Args:
+            positions: [B, T] global token positions.
+            lod_tensor: [B, T] level-of-detail annotations.
+        Returns:
+            cos/sin caches shaped [B, T, 1, H/2] (or doubled if LOD axis enabled) and optional ALiBi slopes [num_heads,1,1].
+        """
         inv_freq = self.inv_freq_template.to(device)
         pos = positions.to(device).float()
-        theta = torch.einsum("bt,d->btd", pos, inv_freq)
+        theta = torch.einsum("bt,d->btd", pos, inv_freq)  # [B, T, H/2]
         decay = 1.0
         if self.config.use_sigma_decay:
             sigma = self._lod_to_sigma(lod_tensor.to(device))
@@ -56,7 +63,7 @@ class GaussianRoPE(nn.Module):
 
         if self.config.use_lod_axis:
             lod_freq = self.lod_freq_template.to(device)
-            lod_phases = torch.einsum("bt,d->btd", lod_tensor.to(device).float(), lod_freq)
+            lod_phases = torch.einsum("bt,d->btd", lod_tensor.to(device).float(), lod_freq)  # [B, T, H/2]
             cos_lod = torch.cos(lod_phases)[:, :, None, :].bfloat16()
             sin_lod = torch.sin(lod_phases)[:, :, None, :].bfloat16()
             cos = torch.cat([cos, cos_lod], dim=-1)

@@ -37,6 +37,12 @@ class MeanPooledGistNet(GistNetBase):
         self.mlp = nn.Sequential(*layers)
 
     def forward(self, blocks: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            blocks: [B, block_size, D] tensor of embeddings.
+        Returns:
+            [B, D] pooled gist vector per block.
+        """
         assert blocks.shape[1] == self.block_size
         pooled = blocks.mean(dim=1)
         return self.mlp(pooled)
@@ -50,6 +56,7 @@ class MeanPoolHead(nn.Module):
         self.block_size = block_size
 
     def forward(self, blocks: torch.Tensor) -> torch.Tensor:
+        """blocks: [B, block_size, D] -> [B, D] via mean over block axis."""
         assert blocks.shape[1] == self.block_size
         return blocks.mean(dim=1)
 
@@ -63,6 +70,7 @@ class MeanLinearHead(nn.Module):
         self.proj = nn.Linear(embed_dim, embed_dim)
 
     def forward(self, blocks: torch.Tensor) -> torch.Tensor:
+        """blocks: [B, block_size, D] -> [B, D] mean+linear projection."""
         pooled = self.pool(blocks)
         return self.proj(pooled)
 
@@ -90,6 +98,7 @@ class PoolingOnlyGistNet(GistNetBase):
         )
 
     def forward(self, blocks: torch.Tensor) -> torch.Tensor:
+        """Directly apply the configured head to [B, block_size, D] blocks."""
         return self.head(blocks)
 
 
@@ -131,6 +140,7 @@ class ResidualSelfAttention(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """x: [B, T, D] -> [B, T, D] with residual attention + FFN."""
         attn_out, _ = self.attn(x, x, x)
         x = self.norm(x + attn_out)
         x = x + self.ff(x)
@@ -159,6 +169,12 @@ class SelfAttentionGistNet(GistNetBase):
         )
 
     def forward(self, blocks: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            blocks: [B, block_size, D] token embeddings.
+        Returns:
+            [B, D] gist vector after intra-block attention + head.
+        """
         x = blocks
         for layer in self.layers:
             x = layer(x)
@@ -173,6 +189,7 @@ class SlotAttentionBlock(nn.Module):
         self.norm = nn.LayerNorm(embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """x: [B, T, D] -> updated slots [B, num_slots, D]."""
         B = x.size(0)
         slots = self.slots.unsqueeze(0).expand(B, -1, -1)
         updated, _ = self.cross(slots, x, x)
@@ -202,6 +219,12 @@ class SlotAttentionGistNet(GistNetBase):
         )
 
     def forward(self, blocks: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            blocks: [B, block_size, D] token embeddings.
+        Returns:
+            [B, D] gist distilled through slot attention + pooling head.
+        """
         x = self.self_attn(blocks)
         slots = self.slot_block(x)
         back, _ = self.cross_back(x, slots, slots)

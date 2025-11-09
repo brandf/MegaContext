@@ -42,11 +42,9 @@ class MegaContextTree:
     def _build_levels(
         self, embeddings: torch.Tensor, gistnet: Optional["GistNetBase"] = None
     ) -> None:
-        batch, seq_len, embed_dim = embeddings.shape
+        batch, seq_len, embed_dim = embeddings.shape  # embeddings: [B, T, D]
         level_data = embeddings
-        level_positions = torch.arange(seq_len, device=self.device).unsqueeze(0).repeat(
-            batch, 1
-        )
+        level_positions = torch.arange(seq_len, device=self.device).unsqueeze(0).repeat(batch, 1)  # [B, T]
         self.levels[0] = level_data
         self.positions[0] = level_positions
 
@@ -59,7 +57,7 @@ class MegaContextTree:
                 grouped = grouped.contiguous()
                 flattened = grouped.view(
                     batch * new_len, self.config.block_size, embed_dim
-                )
+                )  # [B*new_len, block, D]
                 pooled = gistnet(flattened)
                 level_data = pooled.view(batch, new_len, embed_dim)
             else:
@@ -73,13 +71,13 @@ class MegaContextTree:
 
     @staticmethod
     def _reshape_for_pool(x: torch.Tensor, block_size: int) -> Tuple[torch.Tensor, int]:
-        batch, length, dim = x.shape
+        batch, length, dim = x.shape  # x: [B, T, D]
         new_len = math.ceil(length / block_size)
         pad = new_len * block_size - length
         if pad > 0:
             pad_tensor = torch.zeros(batch, pad, dim, device=x.device, dtype=x.dtype)
             x = torch.cat([x, pad_tensor], dim=1)
-        return x.view(batch, new_len, block_size, dim), new_len
+        return x.view(batch, new_len, block_size, dim), new_len  # [B, new_len, block, D]
 
     def slice(self, lod: int, start: int, end: int) -> torch.Tensor:
         data = self.levels.get(lod)
@@ -99,8 +97,8 @@ class MegaContextTree:
                 [[0]], device=self.device, dtype=torch.long
             )
         else:
-            self.levels[0] = torch.cat([self.levels[0], embedding.unsqueeze(1)], dim=1)
-            next_pos = self.positions[0][:, -1:] + 1
+            self.levels[0] = torch.cat([self.levels[0], embedding.unsqueeze(1)], dim=1)  # concat along sequence axis
+            next_pos = self.positions[0][:, -1:] + 1  # track absolute positions for appended token
             self.positions[0] = torch.cat([self.positions[0], next_pos], dim=1)
         base = self.levels[0]
         base_pos = self.positions[0]
