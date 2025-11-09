@@ -21,7 +21,7 @@ flowchart LR
         MCT -->|tensor views| WC[WorkingContext]
         WC -->|embeddings| LensNet
         LensNet -->|logits| Alloc[FocusAllocator]
-        Alloc -->|ReplacementPlan| WC
+        Alloc -->|WorkingContextEdit| WC
     end
 
     A --> BT -->|--mc_enabled| Controller

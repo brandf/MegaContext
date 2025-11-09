@@ -5,7 +5,7 @@ from typing import Dict, List, Type
 
 import torch
 
-from .working_context import ReplacementPlan, WorkingContext
+from .working_context import WorkingContextEdit, WorkingContext
 
 
 @dataclass
@@ -22,10 +22,10 @@ class FocusAllocatorBase:
         tree,
         lens_logits: torch.Tensor,
         working_context: WorkingContext,
-    ) -> List[ReplacementPlan]:
+    ) -> List[WorkingContextEdit]:
         """
         Args:
-            lens_logits: [B, W, 2] expand/collapse scores from LensNet.
+            lens_logits: [B, W] signed scores from LensNet (tanh output).
         Returns:
             List of replacement plans describing WC edits.
         """
@@ -33,7 +33,7 @@ class FocusAllocatorBase:
 
 
 class SimpleFocusAllocator(FocusAllocatorBase):
-    def __init__(self, max_edits: int = 2, threshold: float = 0.75) -> None:
+    def __init__(self, max_edits: int = 2, threshold: float = 0.2) -> None:
         self.max_edits = max_edits
         self.threshold = threshold
 
@@ -42,15 +42,14 @@ class SimpleFocusAllocator(FocusAllocatorBase):
         tree,
         lens_logits: torch.Tensor,
         working_context: WorkingContext,
-    ) -> List[ReplacementPlan]:
+    ) -> List[WorkingContextEdit]:
         _ = tree  # placeholder for future implementations
-        probs = torch.softmax(lens_logits, dim=-1)  # [B, W, 2]
-        expand_conf = probs[..., 0]  # [B, W]
+        scores = lens_logits.mean(dim=0)  # [W]
         topk = torch.topk(
-            expand_conf.mean(dim=0),
-            k=min(self.max_edits, expand_conf.shape[1]),
+            scores,
+            k=min(self.max_edits, scores.shape[0]),
         )
-        plans: List[ReplacementPlan] = []
+        plans: List[WorkingContextEdit] = []
         for idx, score in zip(topk.indices.tolist(), topk.values.tolist()):
             if score < self.threshold:
                 continue
@@ -61,12 +60,11 @@ class SimpleFocusAllocator(FocusAllocatorBase):
             lod = 1
             global_pos = int(working_context.get_positions()[0, start].item())
             plans.append(
-                ReplacementPlan(
-                    start=start,
-                    count=count,
+                WorkingContextEdit(
+                    wc_start=start,
                     replacements=replacements,
                     lod=lod,
-                    global_start=global_pos,
+                    mc_start_position=global_pos,
                 )
             )
         return plans

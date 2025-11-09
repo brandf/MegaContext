@@ -635,20 +635,21 @@ See [[Related Work]] for the complete bibliography of all research papers refere
 **Implementation status:** POC training pipeline demonstrated with `HuggingFaceTB/SmolLM3-3B` teacher on single NVIDIA L4. Full curriculum (3 stages) achieves ΔNLL@128 < 0.8 on mixed validation set after ~72 GPU-hours.
 ## Grid Search Guidance
 
-The current implementation exposes three largely independent axes:
+The current implementation exposes four largely independent axes:
 
-1. **Backbone depth** — `transformer2_*` (2-layer stack) vs `transformer4_*` (4-layer stack). Deeper backbones cost more FLOPs and generally improve quality, with minimal interaction with pooling heads.
-2. **Pooling style** — `mean`, `query`, `cls`. These change how information is collapsed; behaviour is similar across depths but offers different inductive biases (mean = invariant, query = attention focus, CLS = transformer-internal summary).
-3. **Projection head** — `linear` vs `mlp`. Governs readout capacity; cost impact is small relative to depth.
+1. **Backbone depth** — `--gistnet_layers 2|4`. Deeper backbones cost more FLOPs and generally improve quality, with minimal interaction with pooling heads.
+2. **Pooling style** — `--gistnet_pooling mean|query|cls`. These change how information is collapsed; behaviour is similar across depths but offers different inductive biases (mean = invariant, query = attention focus, CLS = transformer-internal summary).
+3. **Projection head** — `--gistnet_head linear|mlp`. Governs readout capacity; cost impact is small relative to depth.
+4. **Block size** — `--block_size 8|32|128`. Smaller blocks improve local substitutability but increase the number of gists; larger blocks do the opposite. We usually tune block size last (after picking the best depth/pooling/head combo) by re-running the top configuration at 8/32/128.
 
 Because interactions are mild, you can get ~80 % of the signal with seven runs instead of all twelve:
 
-1. `transformer2_mean_mlp` (baseline)
-2. `transformer2_query_mlp`
-3. `transformer2_cls_mlp` — isolates pooling effects with depth/projection fixed
-4. `transformer2_mean_linear` — isolates projection cost at depth = 2
-5. `transformer4_mean_mlp` — isolates depth impact for the best head
-6. `transformer4_query_mlp` — confirms pooling/generalisation at depth = 4
-7. `transformer4_mean_linear` — double-checks whether extra depth helps when the head is cheap
+1. `--gistnet_layers 2 --gistnet_pooling mean --gistnet_head mlp` (baseline)
+2. `--gistnet_layers 2 --gistnet_pooling query --gistnet_head mlp`
+3. `--gistnet_layers 2 --gistnet_pooling cls --gistnet_head mlp` — isolates pooling effects with depth/projection fixed
+4. `--gistnet_layers 2 --gistnet_pooling mean --gistnet_head linear` — isolates projection cost at depth = 2
+5. `--gistnet_layers 4 --gistnet_pooling mean --gistnet_head mlp` — isolates depth impact for the best head
+6. `--gistnet_layers 4 --gistnet_pooling query --gistnet_head mlp` — confirms pooling/generalisation at depth = 4
+7. `--gistnet_layers 4 --gistnet_pooling mean --gistnet_head linear` — double-checks whether extra depth helps when the head is cheap
 
 Only fill in the remaining combinations if these sweeps show ties.

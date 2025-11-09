@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from functools import partial
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from nanochat.gpt import Block, GPTConfig, apply_rotary_emb
 
@@ -105,29 +103,26 @@ class CLSHead(nn.Module):
 
 
 def build_head(
-    head: str,
+    pooling: str,
+    head_type: str,
     embed_dim: int,
     block_size: int,
     head_hidden_dims: Optional[Sequence[int]] = None,
 ) -> Tuple[str, nn.Module]:
-    """
-    Returns a tuple (summary_mode, module).
-    summary_mode ∈ {"mean", "cls"} informs callers whether a CLS token is required.
-    """
-    name = head.lower()
-    if name == "mean_linear":
-        return "mean", MeanLinearHead(embed_dim, block_size)
-    if name == "mean_mlp":
-        return "mean", MeanMLPHead(embed_dim, block_size, head_hidden_dims)
-    if name == "query_linear":
-        return "mean", QueryPoolingHead(embed_dim, proj="linear")
-    if name == "query_mlp":
-        return "mean", QueryPoolingHead(embed_dim, proj="mlp")
-    if name == "cls_linear":
-        return "cls", CLSHead(embed_dim, proj="linear")
-    if name == "cls_mlp":
-        return "cls", CLSHead(embed_dim, proj="mlp")
-    raise ValueError(f"Unknown head type: {head}")
+    """Returns pooling summary mode and the scoring module."""
+    pooling = pooling.lower()
+    head_type = head_type.lower()
+    if pooling == "mean":
+        if head_type == "linear":
+            return "mean", MeanLinearHead(embed_dim, block_size)
+        if head_type == "mlp":
+            return "mean", MeanMLPHead(embed_dim, block_size, head_hidden_dims)
+        raise ValueError(f"Unknown head type for mean pooling: {head_type}")
+    if pooling == "query":
+        return "mean", QueryPoolingHead(embed_dim, proj=head_type)
+    if pooling == "cls":
+        return "cls", CLSHead(embed_dim, proj=head_type)
+    raise ValueError(f"Unknown pooling mode: {pooling}")
 
 
 class PoolingOnlyGistNet(GistNetBase):
@@ -137,13 +132,14 @@ class PoolingOnlyGistNet(GistNetBase):
         self,
         embed_dim: int,
         block_size: int = 32,
-        head: str = "mean_linear",
+        head: str = "linear",
         head_hidden_dims: Optional[Sequence[int]] = None,
     ) -> None:
         super().__init__()
         self.block_size = block_size
         summary_mode, head_module = build_head(
-            head=head,
+            pooling="mean",
+            head_type=head,
             embed_dim=embed_dim,
             block_size=block_size,
             head_hidden_dims=head_hidden_dims,
@@ -182,7 +178,8 @@ class TransformerGistNet(GistNetBase):
         block_size: int = 32,
         layers: int = 2,
         num_heads: int = 8,
-        head: str = "mean_mlp",
+        pooling: str = "mean",
+        head: str = "mlp",
         head_hidden_dims: Optional[Sequence[int]] = None,
     ) -> None:
         super().__init__()
@@ -200,7 +197,8 @@ class TransformerGistNet(GistNetBase):
         self.head_dim = embed_dim // num_heads
         self.rope_base = 10000.0
         self.summary_mode, head_module = build_head(
-            head=head,
+            pooling=pooling,
+            head_type=head,
             embed_dim=embed_dim,
             block_size=block_size,
             head_hidden_dims=head_hidden_dims,
@@ -228,54 +226,29 @@ class TransformerGistNet(GistNetBase):
         return self.head(x)
 
 
-GistnetFactory = Callable[..., GistNetBase]
-
-
-def _pooling_only_factory(head: str) -> GistnetFactory:
-    def factory(
-        *,
-        embed_dim: int,
-        block_size: int = 32,
-        head_hidden_dims: Optional[Sequence[int]] = None,
-        **kwargs,
-    ) -> GistNetBase:
+def build_gistnet(
+    mode: str,
+    embed_dim: int,
+    block_size: int,
+    layers: int,
+    pooling: str,
+    head: str,
+    num_heads: int,
+) -> GistNetBase:
+    mode = mode.lower()
+    if mode == "mean":
         return PoolingOnlyGistNet(
             embed_dim=embed_dim,
             block_size=block_size,
             head=head,
-            head_hidden_dims=head_hidden_dims,
         )
-
-    return factory
-
-
-def _transformer_factory(layers: int, head: str) -> GistnetFactory:
-    return partial(TransformerGistNet, layers=layers, head=head)
-
-
-GISTNET_REGISTRY: Dict[str, GistnetFactory] = {
-    # Depth-2 transformer variants (default tier)
-    "transformer2_mean_mlp": _transformer_factory(2, "mean_mlp"),
-    "transformer2_query_mlp": _transformer_factory(2, "query_mlp"),
-    "transformer2_cls_mlp": _transformer_factory(2, "cls_mlp"),
-    "transformer2_mean_linear": _transformer_factory(2, "mean_linear"),
-    "transformer2_query_linear": _transformer_factory(2, "query_linear"),
-    "transformer2_cls_linear": _transformer_factory(2, "cls_linear"),
-    # Depth-4 transformer variants (heavier tier)
-    "transformer4_mean_mlp": _transformer_factory(4, "mean_mlp"),
-    "transformer4_query_mlp": _transformer_factory(4, "query_mlp"),
-    "transformer4_cls_mlp": _transformer_factory(4, "cls_mlp"),
-    "transformer4_mean_linear": _transformer_factory(4, "mean_linear"),
-    "transformer4_query_linear": _transformer_factory(4, "query_linear"),
-    "transformer4_cls_linear": _transformer_factory(4, "cls_linear"),
-    # Baseline
-    "mean_linear": _pooling_only_factory("mean_linear"),
-}
-
-
-def build_gistnet(kind: str, embed_dim: int, **kwargs) -> GistNetBase:
-    key = kind.lower()
-    if key not in GISTNET_REGISTRY:
-        raise ValueError(f"Unknown GistNet implementation: {kind}")
-    constructor = GISTNET_REGISTRY[key]
-    return constructor(embed_dim=embed_dim, **kwargs)
+    if mode == "transformer":
+        return TransformerGistNet(
+            embed_dim=embed_dim,
+            block_size=block_size,
+            layers=layers,
+            num_heads=num_heads,
+            pooling=pooling,
+            head=head,
+        )
+    raise ValueError(f"Unknown GistNet mode: {mode}")

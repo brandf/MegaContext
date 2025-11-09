@@ -45,21 +45,15 @@ flowchart LR
 
 ### Current Code Path
 
-| Depth | CLI flag (`--gistnet`) | Pooling mode | Projection | Notes |
-| --- | --- | --- | --- | --- |
-| 2 layers *(default family)* | `transformer2_mean_mlp` *(default)* | Mean | 2-layer MLP | Strong accuracy/cost balance. |
-| | `transformer2_query_mlp` | Query | 2-layer MLP | Adds explicit attention pooling. |
-| | `transformer2_cls_mlp` | CLS token | 2-layer MLP | Leverages `[CLS]` token. |
-| | `transformer2_mean_linear` | Mean | Linear | Cheapest transformer head. |
-| | `transformer2_query_linear` | Query | Linear | Query pooling w/out MLP. |
-| | `transformer2_cls_linear` | CLS token | Linear | CLS pooling w/out MLP. |
-| 4 layers *(heavier family)* | `transformer4_mean_mlp` | Mean | 2-layer MLP | Higher-quality / higher-FLOPs option. |
-| | `transformer4_query_mlp` | Query | 2-layer MLP | Deeper backbone + query pooling. |
-| | `transformer4_cls_mlp` | CLS token | 2-layer MLP | Deeper `[CLS]` summary. |
-| | `transformer4_mean_linear` | Mean | Linear | Heavier backbone, cheap head. |
-| | `transformer4_query_linear` | Query | Linear | Query pooling on 4-layer stack. |
-| | `transformer4_cls_linear` | CLS token | Linear | CLS pooling on 4-layer stack. |
-| Baseline | `mean_linear` | Mean | Linear | “Dumb” control with no transformer. |
+We expose each design axis directly via CLI flags:
+
+| Flag | Values | Notes |
+| --- | --- | --- |
+| `--block_size` | `8`, `32` *(default)*, `128` | Tokens per gist block; affects tree depth and cost. |
+| `--gistnet_type` | `transformer` *(default)*, `mean` | “mean” uses the simple pooling baseline. |
+| `--gistnet_layers` | `2` *(default)*, `4` | Transformer depth per block. |
+| `--gistnet_pooling` | `mean` *(default)*, `query`, `cls` | Pooling strategy before the scoring head. |
+| `--gistnet_head` | `mlp` *(default)*, `linear` | Projection after pooling (mean pooling uses MeanMLP/MeanLinear; query/cls heads share the same projection type). |
 
 > The legacy self-attention/slot variants were removed—only the transformer stack + pooling heads remain in code.
 

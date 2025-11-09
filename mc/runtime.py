@@ -8,8 +8,8 @@ import torch
 from nanochat.report import get_report
 
 from .config import MCConfig
-from .gistnet import build_gistnet, GistNetBase
-from .lensnet import build_lensnet, LensNetBase
+from .gistnet import build_gistnet
+from .lensnet import build_lensnet
 from .focus_allocator import build_focus_allocator, FocusAllocatorBase
 from .mega_context import MegaContextTree
 from .working_context import WorkingContext
@@ -54,8 +54,19 @@ class MCController:
             config.gistnet_type,
             embed_dim,
             block_size=config.block_size,
+            layers=config.gistnet_layers,
+            pooling=config.gistnet_pooling,
+            head=config.gistnet_head,
+            num_heads=config.num_heads,
         ).to(self.device)
-        self.lensnet = build_lensnet(config.lensnet_type, embed_dim).to(self.device)
+        self.lensnet = build_lensnet(
+            config.lensnet_type,
+            embed_dim,
+            max_length=config.wc_config.max_length,
+            num_heads=config.num_heads,
+            layers=config.lensnet_layers,
+            head=config.lensnet_head,
+        ).to(self.device)
         self.focus_allocator: FocusAllocatorBase = build_focus_allocator(
             config.allocator_type
         )
@@ -102,7 +113,13 @@ class MCController:
                 positions,
                 self.config.wc_config,
             )
-            logits = self.lensnet(wc.to_tensor(), wc.get_lod_tensor())
+            wc.set_positional_spec(
+                self.config.positional_type or "gaussian",
+                embed_dim // self.config.num_heads,
+                self.config.num_heads,
+                self.config.wc_config.max_length,
+            )
+            logits = self.lensnet(wc)
             plans = self.focus_allocator.build_plan(tree, logits, wc)
             for plan in plans:
                 wc.replace(plan)

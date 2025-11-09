@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 
 from .config import WorkingContextConfig
+from .gaussian_rope import build_positional, GaussianRoPE
 
 
 @dataclass
-class ReplacementPlan:
-    start: int
-    count: int
+class WorkingContextEdit:
+    wc_start: int
     replacements: torch.Tensor
     lod: int
-    global_start: int
+    mc_start_position: int
 
 
 class WorkingContext:
@@ -42,6 +42,9 @@ class WorkingContext:
         else:
             self.lod_tensor = lod_tensor[:, -window:].to(self.tensor.device)
         self.positions = positions[:, -window:].to(self.tensor.device)  # [B, W]
+        self._positional_encoder: Optional[GaussianRoPE] = None
+        self._positional_spec: Optional[Tuple[str, int, int, int]] = None
+        self._positional_cache: Optional[Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = None
 
     def to_tensor(self) -> torch.Tensor:
         """Return current working context embeddings [B, W, D] on device."""
@@ -66,34 +69,38 @@ class WorkingContext:
             [self.positions, torch.full_like(self.positions[:, :1], global_position)],
             dim=1,
         )
+        self._positional_cache = None
         self._trim()
 
-    def replace(self, plan: ReplacementPlan) -> None:
-        start, count = plan.start, plan.count
-        if count <= 0:
+    def replace(self, edit: WorkingContextEdit) -> None:
+        start = edit.wc_start
+        replacements = edit.replacements.to(self.tensor.device)
+        count = replacements.shape[1]
+        if count == 0:
             return
         end = start + count
-        replacements = plan.replacements.to(self.tensor.device)
         self.tensor = torch.cat(
             [self.tensor[:, :start], replacements, self.tensor[:, end:]], dim=1
         )
         lod_column = torch.full(
-            (self.lod_tensor.shape[0], replacements.shape[1]),
-            plan.lod,
+            (self.lod_tensor.shape[0], count),
+            edit.lod,
             dtype=self.lod_tensor.dtype,
+            device=self.lod_tensor.device,
         )
         self.lod_tensor = torch.cat(
             [self.lod_tensor[:, :start], lod_column, self.lod_tensor[:, end:]], dim=1
         )
         position_col = torch.arange(
-            plan.global_start,
-            plan.global_start + replacements.shape[1],
+            edit.mc_start_position,
+            edit.mc_start_position + count,
             dtype=self.positions.dtype,
             device=self.positions.device,
         ).unsqueeze(0)
         self.positions = torch.cat(
             [self.positions[:, :start], position_col, self.positions[:, end:]], dim=1
         )
+        self._positional_cache = None
         self._trim()
 
     def _trim(self) -> None:
@@ -104,3 +111,39 @@ class WorkingContext:
         self.tensor = self.tensor[:, excess:]
         self.lod_tensor = self.lod_tensor[:, excess:]
         self.positions = self.positions[:, excess:]
+        self._positional_cache = None
+
+    def set_positional_spec(
+        self,
+        positional_type: str,
+        head_dim: int,
+        num_heads: int,
+        block_size: Optional[int] = None,
+    ) -> None:
+        spec = (
+            positional_type,
+            head_dim,
+            num_heads,
+            block_size or self.config.max_length,
+        )
+        if spec == self._positional_spec:
+            return
+        self._positional_encoder = build_positional(
+            positional_type,
+            head_dim=head_dim,
+            block_size=spec[3],
+            num_heads=num_heads,
+        )
+        self._positional_spec = spec
+        self._positional_cache = None
+
+    def get_positional_encodings(self) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        if self._positional_encoder is None:
+            raise ValueError("WorkingContext positional encoder not configured")
+        if self._positional_cache is None:
+            self._positional_cache = self._positional_encoder(
+                self.positions,
+                self.lod_tensor,
+                device=self.tensor.device,
+            )
+        return self._positional_cache

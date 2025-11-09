@@ -5,8 +5,14 @@
 # A bit sparser on comments, see speedrun.sh for more detail
 
 MC_ENABLED=0
-GISTNET_TYPE="transformer2_mean_mlp"
-LENSNET_TYPE="simple"
+BLOCK_SIZE=32
+GISTNET_TYPE="transformer"
+GISTNET_LAYERS=2
+GISTNET_POOLING="mean"
+GISTNET_HEAD="mlp"
+LENSNET_TYPE="transformer"
+LENSNET_LAYERS=2
+LENSNET_HEAD="mlp"
 ALLOCATOR_TYPE="simple"
 POSITIONAL_TYPE="gaussian"
 while [[ $# -gt 0 ]]; do
@@ -19,10 +25,35 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --gistnet" >&2; exit 1; }
             GISTNET_TYPE="$1"
             ;;
+        --gistnet_layers)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --gistnet_layers" >&2; exit 1; }
+            GISTNET_LAYERS="$1"
+            ;;
+        --gistnet_pooling)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --gistnet_pooling" >&2; exit 1; }
+            GISTNET_POOLING="$1"
+            ;;
+        --gistnet_head)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --gistnet_head" >&2; exit 1; }
+            GISTNET_HEAD="$1"
+            ;;
         --lensnet)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --lensnet" >&2; exit 1; }
             LENSNET_TYPE="$1"
+            ;;
+        --lensnet_layers)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --lensnet_layers" >&2; exit 1; }
+            LENSNET_LAYERS="$1"
+            ;;
+        --lensnet_head)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --lensnet_head" >&2; exit 1; }
+            LENSNET_HEAD="$1"
             ;;
         --allocator)
             shift
@@ -33,6 +64,11 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --positional" >&2; exit 1; }
             POSITIONAL_TYPE="$1"
+            ;;
+        --block_size)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --block_size" >&2; exit 1; }
+            BLOCK_SIZE="$1"
             ;;
         -h|--help)
             echo "Usage: bash run1000.sh [--mc]"
@@ -116,7 +152,18 @@ python -m scripts.tok_eval
 # Number of processes/GPUs to use
 NPROC_PER_NODE=8
 
-torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- --depth=32 --device_batch_size=8 --run=$WANDB_RUN --mc_enabled="$MC_ENABLED" --gistnet_type="$GISTNET_TYPE" --lensnet_type="$LENSNET_TYPE" --allocator_type="$ALLOCATOR_TYPE" --positional_type="$POSITIONAL_TYPE"
+torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- --depth=32 --device_batch_size=8 --run=$WANDB_RUN \
+    --mc_enabled="$MC_ENABLED" \
+    --block_size="$BLOCK_SIZE" \
+    --gistnet_type="$GISTNET_TYPE" \
+    --gistnet_layers="$GISTNET_LAYERS" \
+    --gistnet_pooling="$GISTNET_POOLING" \
+    --gistnet_head="$GISTNET_HEAD" \
+    --lensnet_type="$LENSNET_TYPE" \
+    --lensnet_layers="$LENSNET_LAYERS" \
+    --lensnet_head="$LENSNET_HEAD" \
+    --allocator_type="$ALLOCATOR_TYPE" \
+    --positional_type="$POSITIONAL_TYPE"
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_loss
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_eval
 

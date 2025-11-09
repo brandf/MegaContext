@@ -32,8 +32,13 @@ class MCConfig:
     device: str = "cuda"
     enable_gaussian_rope: bool = True
     telemetry_interval: int = 100
-    gistnet_type: str = "transformer2_mean_mlp"
-    lensnet_type: str = "simple"
+    gistnet_type: str = "transformer"  # transformer | mean
+    gistnet_layers: int = 2
+    gistnet_pooling: str = "mean"  # mean | query | cls
+    gistnet_head: str = "mlp"  # mlp | linear
+    lensnet_type: str = "transformer"
+    lensnet_layers: int = 2
+    lensnet_head: str = "mlp"  # mlp | linear
     allocator_type: str = "simple"
     num_heads: int = 1
     positional_type: Optional[str] = "gaussian"

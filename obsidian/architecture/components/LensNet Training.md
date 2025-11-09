@@ -5,7 +5,7 @@ summary: Complete training methodology for LensNet including counterfactual labe
 ---
 # LensNet Training
 
-[[LensNet]] learns to predict signed focus scores that guide the [[Focus Allocator]] to expand or collapse regions within the [[Working Context]], maintaining relevance while keeping compute constant. Training relies on **counterfactual supervision** derived from NLL deltas and multi-objective loss functions that balance accuracy, budget constraints, and legal actions.
+[[LensNet]] learns to predict signed focus scores that guide the [[Focus Allocator]] to expand or collapse regions within the [[Working Context]], maintaining relevance while keeping compute constant. The current implementation trains a shallow transformer (2/4/8 layers) that runs directly over the working context embeddings (no tail-gist conditioning) and uses Gaussian RoPE supplied by the [[Working Context]] cache. Training still relies on **counterfactual supervision** derived from NLL deltas and multi-objective loss functions that balance accuracy, budget constraints, and legal actions.
 
 ## Overview
 
@@ -81,6 +81,8 @@ def compute_collapse_utility(token_span, context, base_model):
 Entries that cannot be expanded or collapsed receive `y_i = 0` and are masked during loss computation.
 
 ### Batched Label Generation
+
+> **Phase 1 note:** The current transformer-based LensNet ignores `tail_gists` and operates purely on working-context embeddings, but we keep the feature in the data spec so future experiments can reintroduce cross-conditioning if needed.
 
 During training data collection:
 

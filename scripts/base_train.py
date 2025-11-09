@@ -44,6 +44,7 @@ device_type = "" # cuda|cpu|mps (empty => autodetect good device type default, i
 # Model architecture
 depth = 20 # the depth of the Transformer model to train, rest of the kwargs are derived
 max_seq_len = 2048 # max context length
+block_size = 32 # MegaContext block size (tokens per gist)
 # Training horizon. Only one of these 3 will be used, in this order of precedence.
 num_iterations = -1 # explicit number of steps of the optimization (-1 = disable)
 target_flops = -1.0 # calculate num_iterations to reach target_flops. Useful for scaling laws experiments (-1 = disable)
@@ -69,8 +70,13 @@ sample_every = 2000 # every how many steps to sample from the model
 model_tag = "" # optionally override the model tag for the output checkpoint directory name
 # MegaContext (phase 1 integration)
 mc_enabled = 0 # set to 1 to enable MegaContext instrumentation
-gistnet_type = "transformer2_mean_mlp"
-lensnet_type = "simple"
+gistnet_type = "transformer"  # transformer | mean
+gistnet_layers = 2
+gistnet_pooling = "mean"  # mean | query | cls
+gistnet_head = "mlp"  # mlp | linear
+lensnet_type = "transformer"
+lensnet_layers = 2
+lensnet_head = "mlp"
 allocator_type = "simple"
 positional_type = "gaussian"
 # now allow CLI to override the settings via the configurator lol
@@ -129,16 +135,22 @@ model.init_weights()
 if mc_enabled:
     if MCController is None or MCConfig is None:
         raise ImportError("mc package is required when --mc_enabled=1")
-        mc_config = MCConfig(
-            embed_dim=model_config.n_embd,
-            max_seq_len=max_seq_len,
-            device=str(device),
-            gistnet_type=gistnet_type,
-            lensnet_type=lensnet_type,
-            allocator_type=allocator_type,
-            num_heads=num_heads,
-            positional_type=positional_type,
-        )
+    mc_config = MCConfig(
+        embed_dim=model_config.n_embd,
+        max_seq_len=max_seq_len,
+        block_size=block_size,
+        device=str(device),
+        gistnet_type=gistnet_type,
+        gistnet_layers=gistnet_layers,
+        gistnet_pooling=gistnet_pooling,
+        gistnet_head=gistnet_head,
+        lensnet_type=lensnet_type,
+        lensnet_layers=lensnet_layers,
+        lensnet_head=lensnet_head,
+        allocator_type=allocator_type,
+        num_heads=num_heads,
+        positional_type=positional_type,
+    )
     mc_controller = MCController(model, mc_config)
 orig_model = model # original, uncompiled model, for saving raw model state_dict
 model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through

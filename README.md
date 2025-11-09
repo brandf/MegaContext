@@ -39,7 +39,11 @@ The detailed operating guide (env prep, telemetry, troubleshooting) lives in [`o
 
 These scripts run tokenizer → base → mid → chat SFT end-to-end, drop checkpoints in `~/.cache/nanochat`, and generate `report/report.md`. For chat/web demos after training, follow [[Base Runtime]](./obsidian/ops/Base%20Runtime.md).
 
-> 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the Phase 1 MegaContext instrumentation. Optional knobs `--gistnet <impl>`, `--lensnet <impl>`, `--allocator <impl>` select component implementations (GistNet now defaults to `transformer2_mean_mlp`). Supported compressors cover the cross-product of **depth** (2-layer vs 4-layer backbones) and **pooling heads** (mean/query/CLS with linear or MLP projections): `transformer2_*`, `transformer4_*`, plus the lightweight control `mean_linear`. When `--mc` is active we also build Gaussian RoPE positional caches using MegaContext global positions/LOD metadata. The flagless path continues to match upstream nanochat.
+> 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the Phase 1 MegaContext instrumentation. Optional knobs `--gistnet_*`, `--lensnet_*`, `--block_size`, `--allocator`, `--positional` let you pick the exact component configuration:
+> - `--block_size` (default 32) controls how many tokens feed each gist.
+> - `--gistnet_type transformer|mean`, `--gistnet_layers {2,4}`, `--gistnet_pooling mean|query|cls`, `--gistnet_head linear|mlp` (defaults transformer/2/mean/mlp).
+> - `--lensnet_type transformer`, `--lensnet_layers {2,4,8}`, `--lensnet_head linear|mlp` (defaults transformer/2/mlp).
+> LensNet scores are tanh-clamped floats (positive ⇒ expand, negative ⇒ collapse). When `--mc` is active we also build Gaussian RoPE positional caches using MegaContext global positions/LOD metadata. The flagless path continues to match upstream nanochat.
 
 ---
 
