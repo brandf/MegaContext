@@ -79,6 +79,13 @@ lensnet_layers = 2
 lensnet_head = "mlp"
 allocator_type = "simple"
 positional_type = "gaussian"
+allocator_soft_max = max_seq_len
+allocator_recent_tokens = 128
+allocator_expand_threshold = 0.1
+allocator_collapse_threshold = 0.1
+allocator_max_replacements = 4
+allocator_iterations = 2
+mc_tree_type = "ram"
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -148,6 +155,13 @@ if mc_enabled:
         lensnet_layers=lensnet_layers,
         lensnet_head=lensnet_head,
         allocator_type=allocator_type,
+        mc_tree_type=mc_tree_type,
+        soft_max_length=allocator_soft_max,
+        allocator_recent_tokens=allocator_recent_tokens,
+        allocator_expand_threshold=allocator_expand_threshold,
+        allocator_collapse_threshold=allocator_collapse_threshold,
+        allocator_max_replacements=allocator_max_replacements,
+        allocator_iterations=allocator_iterations,
         num_heads=num_heads,
         positional_type=positional_type,
     )

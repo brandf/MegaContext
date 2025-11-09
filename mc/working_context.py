@@ -15,6 +15,7 @@ class WorkingContextEdit:
     replacements: torch.Tensor
     lod: int
     mc_start_position: int
+    stride: int = 1
 
 
 class WorkingContext:
@@ -50,6 +51,10 @@ class WorkingContext:
         """Return current working context embeddings [B, W, D] on device."""
         return self.tensor
 
+    @property
+    def length(self) -> int:
+        return int(self.tensor.shape[1])
+
     def get_lod_tensor(self) -> torch.Tensor:
         """Return LOD annotations [B, W] colocated with embeddings."""
         return self.lod_tensor
@@ -58,17 +63,36 @@ class WorkingContext:
         """Return global positions [B, W] colocated with embeddings."""
         return self.positions
 
+    def load_from_level(self, embeddings: torch.Tensor, positions: torch.Tensor, lod: int) -> None:
+        window = min(embeddings.shape[1], self.config.max_length)
+        self.tensor = embeddings[:, -window:].clone()
+        self.positions = positions[:, -window:].to(self.tensor.device).long()
+        self.lod_tensor = torch.full(
+            (embeddings.shape[0], window),
+            lod,
+            dtype=torch.long,
+            device=self.tensor.device,
+        )
+        self._positional_cache = None
+
 
     def append(self, embedding: torch.Tensor, lod: int, global_position: int) -> None:
         embedding = embedding.to(self.tensor.device)
         self.tensor = torch.cat([self.tensor, embedding.unsqueeze(1)], dim=1)  # extend sequence axis
-        self.lod_tensor = torch.cat(
-            [self.lod_tensor, torch.full_like(self.lod_tensor[:, :1], lod)], dim=1
+        lod_col = torch.full(
+            (self.lod_tensor.shape[0], 1),
+            lod,
+            dtype=self.lod_tensor.dtype,
+            device=self.lod_tensor.device,
         )
-        self.positions = torch.cat(
-            [self.positions, torch.full_like(self.positions[:, :1], global_position)],
-            dim=1,
+        self.lod_tensor = torch.cat([self.lod_tensor, lod_col], dim=1)
+        pos_col = torch.full(
+            (self.positions.shape[0], 1),
+            global_position,
+            dtype=self.positions.dtype,
+            device=self.positions.device,
         )
+        self.positions = torch.cat([self.positions, pos_col], dim=1)
         self._positional_cache = None
         self._trim()
 
@@ -91,12 +115,18 @@ class WorkingContext:
         self.lod_tensor = torch.cat(
             [self.lod_tensor[:, :start], lod_column, self.lod_tensor[:, end:]], dim=1
         )
+        stride = max(int(edit.stride), 1)
         position_col = torch.arange(
             edit.mc_start_position,
-            edit.mc_start_position + count,
+            edit.mc_start_position + stride * count,
+            stride,
             dtype=self.positions.dtype,
             device=self.positions.device,
         ).unsqueeze(0)
+        if position_col.shape[1] != count:
+            pad_len = count - position_col.shape[1]
+            tail = position_col[:, -1:].repeat(1, pad_len)
+            position_col = torch.cat([position_col, tail], dim=1)
         self.positions = torch.cat(
             [self.positions[:, :start], position_col, self.positions[:, end:]], dim=1
         )

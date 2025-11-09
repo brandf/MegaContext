@@ -39,7 +39,14 @@ class MCConfig:
     lensnet_type: str = "transformer"
     lensnet_layers: int = 2
     lensnet_head: str = "mlp"  # mlp | linear
-    allocator_type: str = "simple"
+    allocator_type: str = "transformer"
+    mc_tree_type: str = "ram"
+    soft_max_length: Optional[int] = None
+    allocator_recent_tokens: int = 128
+    allocator_expand_threshold: float = 0.1
+    allocator_collapse_threshold: float = 0.1
+    allocator_max_replacements: int = 4
+    allocator_iterations: int = 2
     num_heads: int = 1
     positional_type: Optional[str] = "gaussian"
 
@@ -58,3 +65,5 @@ class MCConfig:
             max_length=self.max_seq_len,
             device=self.device,
         )
+        if self.soft_max_length is None:
+            self.soft_max_length = self.wc_config.max_length

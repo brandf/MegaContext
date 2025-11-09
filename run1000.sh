@@ -15,6 +15,7 @@ LENSNET_LAYERS=2
 LENSNET_HEAD="mlp"
 ALLOCATOR_TYPE="simple"
 POSITIONAL_TYPE="gaussian"
+MC_TREE_TYPE="ram"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mc)
@@ -59,6 +60,11 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --allocator" >&2; exit 1; }
             ALLOCATOR_TYPE="$1"
+            ;;
+        --mc_tree)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_tree" >&2; exit 1; }
+            MC_TREE_TYPE="$1"
             ;;
         --positional)
             shift
@@ -163,6 +169,7 @@ torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- 
     --lensnet_layers="$LENSNET_LAYERS" \
     --lensnet_head="$LENSNET_HEAD" \
     --allocator_type="$ALLOCATOR_TYPE" \
+    --mc_tree_type="$MC_TREE_TYPE" \
     --positional_type="$POSITIONAL_TYPE"
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_loss
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_eval

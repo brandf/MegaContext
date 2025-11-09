@@ -43,6 +43,8 @@ These scripts run tokenizer → base → mid → chat SFT end-to-end, drop check
 > - `--block_size` (default 32) controls how many tokens feed each gist.
 > - `--gistnet_type transformer|mean`, `--gistnet_layers {2,4}`, `--gistnet_pooling mean|query|cls`, `--gistnet_head linear|mlp` (defaults transformer/2/mean/mlp).
 > - `--lensnet_type transformer`, `--lensnet_layers {2,4,8}`, `--lensnet_head linear|mlp` (defaults transformer/2/mlp).
+> - `--allocator transformer|greedy` (`simple` is an alias). Advanced knobs—`--allocator_soft_max`, `--allocator_recent_tokens`, `--allocator_expand_threshold`, `--allocator_collapse_threshold`, `--allocator_max_replacements`, `--allocator_iterations`—are exposed through `scripts/base_train.py` for fine-grained control over the greedy expand/collapse loop.
+> - `--mc_tree ram|disk` selects the MegaContext backing store. `ram` keeps LOD0 as tokens in memory (default); `disk` is reserved for the upcoming MegaCache-backed implementation.
 > LensNet scores are tanh-clamped floats (positive ⇒ expand, negative ⇒ collapse). When `--mc` is active we also build Gaussian RoPE positional caches using MegaContext global positions/LOD metadata. The flagless path continues to match upstream nanochat.
 
 ---

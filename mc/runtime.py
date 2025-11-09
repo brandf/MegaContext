@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 
@@ -10,8 +10,12 @@ from nanochat.report import get_report
 from .config import MCConfig
 from .gistnet import build_gistnet
 from .lensnet import build_lensnet
-from .focus_allocator import build_focus_allocator, FocusAllocatorBase
-from .mega_context import MegaContextTree
+from .focus_allocator import (
+    build_focus_allocator,
+    FocusAllocatorBase,
+    FocusAllocatorConfig,
+)
+from .mega_context import MegaContextTree, build_mega_context
 from .working_context import WorkingContext
 from .gaussian_rope import build_positional, GaussianRoPE
 
@@ -67,9 +71,7 @@ class MCController:
             layers=config.lensnet_layers,
             head=config.lensnet_head,
         ).to(self.device)
-        self.focus_allocator: FocusAllocatorBase = build_focus_allocator(
-            config.allocator_type
-        )
+        self.focus_allocator: Optional[FocusAllocatorBase] = None
         self.telemetry = MCTelemetry(interval=config.telemetry_interval)
         self.positional_encoder: Optional[GaussianRoPE] = None
         if config.positional_type:
@@ -102,12 +104,15 @@ class MCController:
             Optional positional cache tuple (cos, sin, alibi) each shaped per head.
         """
         with torch.no_grad():
-            emb = self.embed(tokens.to(self.device))  # [B, T, D]
-            tree = MegaContextTree.from_embeddings(
-                emb, self.config.tree_config, gistnet=self.gistnet
+            tokens_device = tokens.to(self.device)
+            tree = build_mega_context(
+                self.config.mc_tree_type,
+                tokens_device,
+                self.embed,
+                self.config.tree_config,
+                gistnet=self.gistnet,
             )
-            level0 = tree.get_level(0)
-            positions = tree.positions[0]
+            level0, positions = tree.get_level_metadata(0)
             wc = WorkingContext(
                 level0,
                 positions,
@@ -115,16 +120,32 @@ class MCController:
             )
             wc.set_positional_spec(
                 self.config.positional_type or "gaussian",
-                embed_dim // self.config.num_heads,
+                self.config.embed_dim // self.config.num_heads,
                 self.config.num_heads,
                 self.config.wc_config.max_length,
             )
-            logits = self.lensnet(wc)
-            plans = self.focus_allocator.build_plan(tree, logits, wc)
-            for plan in plans:
-                wc.replace(plan)
+            tree.release_lod0_cache(disable_future_cache=True)
+            allocator_cfg = FocusAllocatorConfig(
+                block_size=self.config.block_size,
+                max_lod=self.config.max_lod,
+                soft_max_length=self.config.soft_max_length,
+                recent_tokens=self.config.allocator_recent_tokens,
+                expand_threshold=self.config.allocator_expand_threshold,
+                collapse_threshold=self.config.allocator_collapse_threshold,
+            )
+            self.focus_allocator = build_focus_allocator(
+                self.config.allocator_type,
+                tree=tree,
+                working_context=wc,
+                lensnet=self.lensnet,
+                config=allocator_cfg,
+            )
+            edits = self.focus_allocator.rebuild(
+                max_replacements_per_iteration=self.config.allocator_max_replacements,
+                num_iterations=self.config.allocator_iterations,
+            )
             self.telemetry.log_tree(step, tree)
-            self.telemetry.log_focus(step, len(plans))
+            self.telemetry.log_focus(step, edits)
             positional = None
             if self.positional_encoder is not None:
                 cos, sin, alibi_slopes = self.positional_encoder(
