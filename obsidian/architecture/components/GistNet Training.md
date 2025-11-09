@@ -1,11 +1,11 @@
 ---
 tags:
   - components
-summary: Complete training methodology for GistNet including loss functions, teacher-student distillation, curriculum strategies, and optimization details.
+summary: Complete training methodology for GistNet’s transformer backbone, pooling heads, and ΔNLL supervision strategy.
 ---
 # GistNet Training
 
-Training [[GistNet]] to produce [[Glossary#Substitutability|substitutable]] gist embeddings [1] that preserve the [[Glossary#Base Model|LLM]] prediction quality when replacing token spans. The training process uses a frozen teacher model to minimize [[Glossary#ΔNLL (Delta Negative Log-Likelihood)|ΔNLL]]@H and optional contrastive losses to ensure distinct gist representations.
+Training [[GistNet]] to produce [[Glossary#Substitutability|substitutable]] gist embeddings [1] that preserve the [[Glossary#Base Model|LLM]] prediction quality when replacing token spans. The Phase 1 implementation uses a mini transformer stack (shared across every 32-token window) plus configurable pooling heads (mean, query, CLS). A frozen teacher model supervises the student via [[Glossary#ΔNLL (Delta Negative Log-Likelihood)|ΔNLL]]@H, and optional contrastive losses keep neighbouring gists distinct.
 
 ## Training Objectives
 
@@ -47,7 +47,7 @@ Loss_subst = NLL_replaced - NLL_original  # ΔNLL@H
 **Why this works:**
 If `g_final` faithfully captures the span's semantic content, the base [[Glossary#Base Model|LLM]] should produce nearly identical predictions whether it sees the original 32 tokens or the single gist vector. Minimizing [[Glossary#ΔNLL (Delta Negative Log-Likelihood)|ΔNLL]]@H trains [[GistNet]] to encode exactly what the teacher model needs for accurate continuation.
 
-### Secondary: Contrastive Span Separation
+### Secondary: Contrastive Span Separation (optional)
 
 Without explicit regularization, [[GistNet]] might collapse all gists to similar vectors (mode collapse). The contrastive loss encourages adjacent spans to maintain distinct representations.
 
@@ -78,7 +78,7 @@ where `λ_contrast = 0.05` in the POC.
 
 ## Teacher-Student Training Architecture
 
-[[GistNet]] training follows a **knowledge distillation** paradigm [2]: a frozen teacher [[Glossary#Base Model|LLM]] provides supervision signals, and the student [[GistNet]] learns to compress spans while preserving teacher predictions.
+[[GistNet]] training follows a **knowledge distillation** paradigm [2]: a frozen teacher [[Glossary#Base Model|LLM]] provides supervision signals, and the student transformer learns to compress spans while preserving teacher predictions.
 
 ### Teacher Model Setup
 
@@ -111,31 +111,29 @@ Loss_subst = KL(probs_original || probs_replaced)
 - Cache teacher logits for the original context (no repeat computation)
 - Use gradient checkpointing for [[GistNet]] if memory-constrained
 
-### Student Model (GistNet)
+### Student Model (Transformer + pooling head, co-trained)
 
-**Architecture:** 32→32→1→32→32→1 refinement stack (see [[GistNet#POC architecture]])
+**Architecture:** `[32, d]` token embeddings → nanochat transformer blocks (RoPE-enabled) → pooling head (mean / query / CLS) → gist. See [[GistNet Architecture Details]] for parameter choices.
 
-**Trainable parameters (LoRA adapters [3]):**
-- ~0.5M per compression layer
-- 2 shared slot queries (`Q₁`, `Q₂`)
-- Self-attention and cross-attention weights
-- MLP blocks and layer norms
+**Trainable parameters (per run):**
+- Transformer block weights (attention + MLP + layer norms).
+- Pooling head weights (linear/MLP/query).
+- Optional `[CLS]` token embedding when CLS heads are enabled.
+- Base model weights (since GistNet now rides along the full run10/speedrun flow).
 
 **Gradient flow:**
 
 ```
 Loss_subst (from teacher comparison)
     ↓
-teacher_model.backward()  [frozen, no weight updates]
+teacher_model (frozen) provides logits only
     ↓
-g_final.backward()
-    ↓
-gist_net.backward()  [update weights]
+loss.backward() updates base model + GistNet weights together
 ```
 
-Only [[GistNet]] weights are updated; the teacher remains frozen throughout training.
+Only the student path receives gradients; the teacher remains frozen. Because MegaContext is baked into the base training script, we no longer have a separate optimizer—everything goes through the existing nanochat optimizer/scheduler.
 
-## Training Loop and Data Flow
+## Training Loop and Data Flow (Co-Training)
 
 ### Per-Example Data Flow
 
@@ -154,15 +152,16 @@ graph TD
     J --> K[Optimizer step]
 ```
 
-### Training Loop Pseudocode
+### Training Loop Pseudocode (run10-style)
 
 ```python
 # POC training loop for GistNet
 
 teacher_model = load_frozen_teacher("SmolLM3-3B")
-gist_net = GistNet(window_size=32, embed_dim=4096, num_layers=4)
-optimizer = AdamW(gist_net.parameters(), lr=1e-4, weight_decay=0.01)
-scheduler = CosineAnnealingLR(optimizer, T_max=num_train_steps)
+model = build_nanochat_model(...)
+mc_controller = MCController(model, mc_config)
+base_optimizer = model.setup_optimizers(...)
+scheduler = CosineAnnealingLR(base_optimizer, T_max=num_train_steps)
 
 for epoch in range(num_epochs):
     for batch in dataloader:
@@ -209,16 +208,17 @@ for epoch in range(num_epochs):
         # 7. Combined loss
         loss = loss_subst + 0.05 * loss_contrast
 
-        # 8. Backprop through GistNet only
-        optimizer.zero_grad()
+        # 8. Backprop (updates base model + GistNet)
+        base_optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(gist_net.parameters(), max_norm=1.0)
-        optimizer.step()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        base_optimizer.step()
         scheduler.step()
 
         # 9. Logging
         if step % 100 == 0:
             log_metrics({
+                'loss': loss.item(),
                 'loss_subst': loss_subst.item(),
                 'loss_contrast': loss_contrast.item() if use_contrastive else 0,
                 'delta_nll': loss_subst.item(),
@@ -633,3 +633,22 @@ See [[Related Work]] for the complete bibliography of all research papers refere
 ---
 
 **Implementation status:** POC training pipeline demonstrated with `HuggingFaceTB/SmolLM3-3B` teacher on single NVIDIA L4. Full curriculum (3 stages) achieves ΔNLL@128 < 0.8 on mixed validation set after ~72 GPU-hours.
+## Grid Search Guidance
+
+The current implementation exposes three largely independent axes:
+
+1. **Backbone depth** — `transformer2_*` (2-layer stack) vs `transformer4_*` (4-layer stack). Deeper backbones cost more FLOPs and generally improve quality, with minimal interaction with pooling heads.
+2. **Pooling style** — `mean`, `query`, `cls`. These change how information is collapsed; behaviour is similar across depths but offers different inductive biases (mean = invariant, query = attention focus, CLS = transformer-internal summary).
+3. **Projection head** — `linear` vs `mlp`. Governs readout capacity; cost impact is small relative to depth.
+
+Because interactions are mild, you can get ~80 % of the signal with seven runs instead of all twelve:
+
+1. `transformer2_mean_mlp` (baseline)
+2. `transformer2_query_mlp`
+3. `transformer2_cls_mlp` — isolates pooling effects with depth/projection fixed
+4. `transformer2_mean_linear` — isolates projection cost at depth = 2
+5. `transformer4_mean_mlp` — isolates depth impact for the best head
+6. `transformer4_query_mlp` — confirms pooling/generalisation at depth = 4
+7. `transformer4_mean_linear` — double-checks whether extra depth helps when the head is cheap
+
+Only fill in the remaining combinations if these sweeps show ties.

@@ -16,7 +16,7 @@ EOF
 
 GPU_PROFILE="h100"
 MC_ENABLED=0
-GISTNET_TYPE="mean_mlp2"
+GISTNET_TYPE="transformer2_mean_mlp"
 LENSNET_TYPE="simple"
 ALLOCATOR_TYPE="simple"
 POSITIONAL_TYPE="gaussian"

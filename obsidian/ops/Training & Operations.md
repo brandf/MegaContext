@@ -39,7 +39,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 
 | Scenario | Command | Notes |
 | --- | --- | --- |
-| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--gistnet mean|mean_linear|mean_mlp|mean_mlp2|selfattention_*|slotattention_*] [--lensnet simple|slot] [--allocator simple|...]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
+| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--gistnet transformer2_*|transformer4_*|mean_linear] [--lensnet simple|slot] [--allocator simple|...]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
 | Single H100 (80 GB) | `bash run10.sh --gpu h100 [--mc] ...` | Doubles device batch size, halves iteration count for the same token budget. |
 | $100 speed tier | `bash speedrun.sh [--mc] ...` | 8×H100, depth 20 (Karpathy’s “best $100” recipe). |
 | $1000 tier | `bash run1000.sh [--mc] ...` | 8×H100, depth 32 with tuned accumulation. |
