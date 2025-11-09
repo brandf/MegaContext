@@ -13,7 +13,7 @@ from .lensnet import build_lensnet, LensNetBase
 from .focus_allocator import build_focus_allocator, FocusAllocatorBase
 from .mega_context import MegaContextTree
 from .working_context import WorkingContext
-from .positional import build_positional, PositionalEncodingBase
+from .gaussian_rope import build_positional, GaussianRoPE
 
 
 class MCTelemetry:
@@ -56,12 +56,13 @@ class MCController:
             config.allocator_type
         )
         self.telemetry = MCTelemetry(interval=config.telemetry_interval)
-        self.positional_encoder: Optional[PositionalEncodingBase] = None
+        self.positional_encoder: Optional[GaussianRoPE] = None
         if config.positional_type:
             self.positional_encoder = build_positional(
                 config.positional_type,
                 head_dim=embed_dim // config.num_heads,
                 block_size=config.block_size,
+                num_heads=config.num_heads,
             )
 
         for module in (self.gistnet, self.lensnet):
@@ -78,7 +79,7 @@ class MCController:
         tokens: torch.Tensor,
         step: int,
         context: str = "train",
-    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]]:
         with torch.no_grad():
             emb = self.embed(tokens.to(self.device))
             tree = MegaContextTree.from_embeddings(
@@ -99,10 +100,16 @@ class MCController:
             self.telemetry.log_focus(step, len(plans))
             positional = None
             if self.positional_encoder is not None:
-                cos, sin = self.positional_encoder(
+                cos, sin, alibi_slopes = self.positional_encoder(
                     wc.get_positions(),
                     wc.get_lod_tensor(),
                     device=self.device,
                 )
-                positional = (cos, sin)
+                alibi_bias = None
+                if alibi_slopes is not None:
+                    positions = wc.get_positions().to(self.device).float()  # (B, T)
+                    rel = positions.unsqueeze(2) - positions.unsqueeze(1)  # (B, T, T)
+                    slopes = alibi_slopes.to(self.device).view(1, self.config.num_heads, 1, 1)
+                    alibi_bias = (slopes * rel.unsqueeze(1)).bfloat16()
+                positional = (cos, sin, alibi_bias)
             return positional

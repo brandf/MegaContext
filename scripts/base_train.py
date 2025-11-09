@@ -300,8 +300,13 @@ for step in range(num_iterations + 1):
     t0 = time.time()
     for micro_step in range(grad_accum_steps):
         with autocast_ctx:
-            cos_sin_override = positional_cache if mc_controller is not None else None
-            loss = model(x, y, cos_sin_override=cos_sin_override)
+            cos_sin_override = None
+            alibi_override = None
+            if mc_controller is not None and positional_cache is not None:
+                cos_sin_override = positional_cache[:2]
+                if len(positional_cache) > 2:
+                    alibi_override = positional_cache[2]
+            loss = model(x, y, cos_sin_override=cos_sin_override, alibi_override=alibi_override)
         train_loss = loss.detach() # for logging
         loss = loss / grad_accum_steps # each .backward() is a grad sum => normalize loss here
         loss.backward()

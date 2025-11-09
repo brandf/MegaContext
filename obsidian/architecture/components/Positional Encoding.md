@@ -73,17 +73,18 @@ When we eventually "upgrade" a larger semi-frozen model, we fall back to the ada
 - Implemented as a post-process on rotary embedding vectors. Does not modify logits or residual streams.
 - Leaves the [[GistNet]] hierarchy untouched—the same gist vector feeds both positional variants.
 
-### ALiBi augmentation via LoRA
+### ALiBi augmentation (optional)
 
-- Add an [[Glossary#ALiBi|ALiBi]]-style linear bias head per attention head using a small LoRA adapter on the first block.
+- Add an [[Glossary#ALiBi|ALiBi]]-style bias head per attention head directly inside the model (no LoRA required in the POR path).
 - Supplies a monotonic “arrow of time” derived from global token indices so distant spans remain ordered even when RoPE wraps.
-- Training can run on limited synthetic data (ordering tasks, long-range copy) within the POC compute budget.
+- Only relevant if we retrofit frozen checkpoints later; Track A end-to-end runs do not use ALiBi at present.
 
 ### Optional ultra-slow bands
 
 - Reserve a handful of extra rotary channels with periods ≫ working window (e.g., 1M–1B tokens).
 - Encoded as additional sinusoidal bands concatenated to the existing rotary set; requires no gradient updates if weights are frozen.
 - Helps disambiguate extreme offsets before the Track A Gaussian stack is in place.
+- Not implemented yet; lives on the Track B backlog alongside ALiBi.
 
 These adaptations operate entirely inside the runtime embedding pass so allocations, focus decisions, and [[Runtime Loop]] cadence stay unchanged even when we retrofit.
 

@@ -43,7 +43,7 @@ Goal: produce a fully nanochat-native training loop that mirrors the legacy POC 
 - **[[GistNet]] compression (32→1, 1024→1)** wired into the nanochat tokenizer/model code.
 - **[[LensNet]] focus scoring** with ΔNLL supervision and the existing [[Focus Allocator]] thresholds.
 - **[[Working Context]] + [[MegaContext Tree]] (in-memory)** with deterministic ingestion and serialization.
-- **[[Positional Encoding#Gaussian RoPE stack|Gaussian RoPE positional encoding]]** integrated via `mc/positional.py` so MegaContext windows respect global positions/LOD-derived variance.
+- **[[Positional Encoding#Gaussian RoPE stack|Gaussian RoPE positional encoding]]** integrated via `mc/gaussian_rope.py` so MegaContext windows respect global positions/LOD-derived variance.
 - **Nanochat report + WANDB telemetry** covering ΔNLL@H, swap rate, residency, MFU (per [[Telemetry]]).
 
 ### Feature Breakdown
