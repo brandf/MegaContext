@@ -117,7 +117,7 @@ class MCController:
                 )
                 alibi_bias = None
                 if alibi_slopes is not None:
-                    positions = wc.get_positions().to(self.device).float()  # [B, W]
+                    positions = wc.get_positions().float()  # already on device
                     rel = positions.unsqueeze(2) - positions.unsqueeze(1)  # [B, W, W]
                     slopes = alibi_slopes.to(self.device).view(1, self.config.num_heads, 1, 1)
                     alibi_bias = (slopes * rel.unsqueeze(1)).bfloat16()  # [1, H, W, W]

@@ -37,23 +37,24 @@ class WorkingContext:
         self.tensor = embeddings[:, -window:].clone()  # [B, W, D]
         if lod_tensor is None:
             self.lod_tensor = torch.zeros(
-                batch, window, dtype=torch.long, device="cpu"
+                batch, window, dtype=torch.long, device=self.tensor.device
             )
         else:
-            self.lod_tensor = lod_tensor[:, -window:].to("cpu")
-        self.positions = positions[:, -window:].to("cpu")  # [B, W]
+            self.lod_tensor = lod_tensor[:, -window:].to(self.tensor.device)
+        self.positions = positions[:, -window:].to(self.tensor.device)  # [B, W]
 
     def to_tensor(self) -> torch.Tensor:
         """Return current working context embeddings [B, W, D] on device."""
         return self.tensor
 
     def get_lod_tensor(self) -> torch.Tensor:
-        """Return CPU-side LOD annotations [B, W]."""
+        """Return LOD annotations [B, W] colocated with embeddings."""
         return self.lod_tensor
 
     def get_positions(self) -> torch.Tensor:
-        """Return CPU-side global positions [B, W]."""
+        """Return global positions [B, W] colocated with embeddings."""
         return self.positions
+
 
     def append(self, embedding: torch.Tensor, lod: int, global_position: int) -> None:
         embedding = embedding.to(self.tensor.device)
@@ -88,6 +89,7 @@ class WorkingContext:
             plan.global_start,
             plan.global_start + replacements.shape[1],
             dtype=self.positions.dtype,
+            device=self.positions.device,
         ).unsqueeze(0)
         self.positions = torch.cat(
             [self.positions[:, :start], position_col, self.positions[:, end:]], dim=1
