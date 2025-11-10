@@ -12,6 +12,7 @@ from .gistnet import GistNetBase, build_gistnet
 from .lensnet import build_lensnet
 from .focus_allocator import FocusAllocatorBase, FocusAllocatorConfig, build_focus_allocator
 from .runtime import MCController
+from .telemetry import TelemetryEvent, TelemetryProvider, NoOpTelemetryProvider
 
 __all__ = [
     "MCConfig",
@@ -27,4 +28,7 @@ __all__ = [
     "build_focus_allocator",
     "build_mega_context",
     "MCController",
+    "TelemetryEvent",
+    "TelemetryProvider",
+    "NoOpTelemetryProvider",
 ]

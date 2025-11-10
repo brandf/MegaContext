@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from typing import Dict, Optional, Tuple, TYPE_CHECKING
 
 import torch
@@ -25,6 +26,11 @@ class MegaContextTree:
         self._cache_lod0: bool = True
         self.gistnet: Optional["GistNetBase"] = None
         self.batch_size: Optional[int] = None
+        self.access_counters = {
+            "child": defaultdict(int),
+            "parent": defaultdict(int),
+            "token_slice": 0,
+        }
 
     @classmethod
     def from_tokens(
@@ -239,12 +245,14 @@ class MegaContextTree:
             level = self.levels[child_lod]
             end = min(end, level.shape[1])
             children = level[:, start:end]
+        self.access_counters["child"][lod] += 1
         return children
 
     def get_parent_embedding(self, lod: int, global_position: int) -> torch.Tensor:
         parent_lod = lod + 1
         if parent_lod not in self.levels:
             raise ValueError("Parent level not available")
+        self.access_counters["parent"][parent_lod] += 1
         return self.get_node_embedding(parent_lod, global_position)
 
     def summary(self) -> Dict[int, Tuple[int, int]]:
@@ -262,6 +270,7 @@ class MegaContextTree:
         start = max(0, min(start, total))
         end = max(start, min(end, total))
         token_slice = self.tokens[:, start:end]
+        self.access_counters["token_slice"] += 1
         return self.embedder(token_slice)
 
     def get_lod0_slice(self, start: int, end: int) -> torch.Tensor:
@@ -271,6 +280,13 @@ class MegaContextTree:
         if self.tokens is not None and self.embedder is not None:
             return self._embed_tokens_range(start, end)
         return self.get_level(0)[:, start:end]
+
+    def get_access_stats(self) -> Dict[str, Dict[int, int]]:
+        return {
+            "child": {int(k): int(v) for k, v in self.access_counters["child"].items()},
+            "parent": {int(k): int(v) for k, v in self.access_counters["parent"].items()},
+            "token_slice": int(self.access_counters["token_slice"]),
+        }
 
     def _batch_size(self) -> int:
         if self.batch_size is not None:

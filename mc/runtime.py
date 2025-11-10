@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+import uuid
 
 import torch
 import torch.nn.functional as F
@@ -20,6 +21,7 @@ from .focus_allocator import (
 from .mega_context import MegaContextTree, build_mega_context
 from .working_context import WorkingContext, WorkingContextEdit
 from .gaussian_rope import build_positional, GaussianRoPE
+from .telemetry import TelemetryEvent, TelemetryProvider, NoOpTelemetryProvider
 
 
 @dataclass
@@ -36,12 +38,14 @@ class WorkingContextVariant:
 
 @dataclass
 class SampleContext:
+    session_id: str
     tree: MegaContextTree
     variants: List[WorkingContextVariant]
 
 
 @dataclass
 class InferenceState:
+    session_id: str
     tree: MegaContextTree
     working_context: WorkingContext
     allocator: FocusAllocatorBase
@@ -52,6 +56,7 @@ class MCBatchResult:
     positional_cache: Optional[Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]]
     token_loss: Optional[torch.Tensor]
     lod1_loss: Optional[torch.Tensor]
+    lod2_loss: Optional[torch.Tensor]
     lens_loss: Optional[torch.Tensor]
 
 
@@ -83,7 +88,12 @@ class MCController:
     guard process_batch() with the `mc_enabled` flag.
     """
 
-    def __init__(self, model: torch.nn.Module, config: MCConfig) -> None:
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        config: MCConfig,
+        telemetry_provider: Optional[TelemetryProvider] = None,
+    ) -> None:
         self.model = model
         self.config = config
         self.device = torch.device(config.device)
@@ -109,6 +119,7 @@ class MCController:
         ).to(self.device)
         self.focus_allocator: Optional[FocusAllocatorBase] = None
         self.telemetry = MCTelemetry(interval=config.telemetry_interval)
+        self.telemetry_provider = telemetry_provider or NoOpTelemetryProvider()
         self.positional_encoder: Optional[GaussianRoPE] = None
         if config.positional_type:
             self.positional_encoder = build_positional(
@@ -146,6 +157,7 @@ class MCController:
         tokens_device = tokens.to(self.device)
         for idx in range(tokens_device.size(0)):
             seq = tokens_device[idx : idx + 1]
+            session_id = f"train_step_{step}_sample_{idx}"
             tree = build_mega_context(
                 self.config.mc_tree_type,
                 seq,
@@ -153,7 +165,8 @@ class MCController:
                 self.config.tree_config,
                 gistnet=self.gistnet,
             )
-            sample_state = self._build_sample_context(tree)
+            self._log_tree_snapshot(session_id, tree, tag="training_build")
+            sample_state = self._build_sample_context(tree, session_id=session_id)
             batch_states.append(sample_state)
             for variant in sample_state.variants:
                 total_edits += max(0, variant.edits_applied)
@@ -161,12 +174,13 @@ class MCController:
         self.current_batch_states = batch_states
         self.telemetry.log_focus(step, total_edits)
         positional_cache = self._build_primary_positional(batch_states)
-        token_loss, lod1_loss = self._aggregate_horizon_losses(batch_states)
+        token_loss, lod1_loss, lod2_loss = self._aggregate_horizon_losses(batch_states)
         lens_loss = self._compute_lens_losses(batch_states)
         result = MCBatchResult(
             positional_cache=positional_cache,
             token_loss=token_loss,
             lod1_loss=lod1_loss,
+            lod2_loss=lod2_loss,
             lens_loss=lens_loss,
         )
         self.current_batch_states = []
@@ -175,11 +189,11 @@ class MCController:
     # ------------------------------------------------------------------ #
     # Training helpers
     # ------------------------------------------------------------------ #
-    def _build_sample_context(self, tree: MegaContextTree) -> SampleContext:
-        variants = self._sample_initial_wcs(tree)
-        refined = self._refine_variants(tree, variants)
+    def _build_sample_context(self, tree: MegaContextTree, session_id: str) -> SampleContext:
+        variants = self._sample_initial_wcs(tree, session_id=session_id)
+        refined = self._refine_variants(tree, variants, session_id=session_id)
         limited = refined[: self.config.max_counterfactuals]
-        return SampleContext(tree=tree, variants=limited)
+        return SampleContext(session_id=session_id, tree=tree, variants=limited)
 
     def _build_primary_positional(
         self, batch_states: List[SampleContext]
@@ -196,7 +210,7 @@ class MCController:
             alibi_bias = (slopes * rel.unsqueeze(1)).bfloat16()
         return cos, sin, alibi_bias
 
-    def _sample_initial_wcs(self, tree: MegaContextTree) -> List[WorkingContextVariant]:
+    def _sample_initial_wcs(self, tree: MegaContextTree, session_id: str) -> List[WorkingContextVariant]:
         variants: List[WorkingContextVariant] = []
         baseline = self._build_recency_variant(tree)
         if baseline is not None:
@@ -208,12 +222,36 @@ class MCController:
             variant = self._build_lod_variant(tree, lod)
             if variant is not None:
                 variants.append(variant)
+        self._ensure_highest_lod_coverage(tree, variants, target)
         while len(variants) < target:
             variant = self._build_random_span_variant(tree)
             if variant is None:
                 break
             variants.append(variant)
         return variants
+
+    def _ensure_highest_lod_coverage(
+        self,
+        tree: MegaContextTree,
+        variants: List[WorkingContextVariant],
+        target: int,
+    ) -> None:
+        available = [
+            lod
+            for lod in tree.levels.keys()
+            if lod > 0 and tree.levels[lod].shape[1] > 0
+        ]
+        if not available:
+            return
+        highest = max(available)
+        if any(v.lod_hint == highest for v in variants):
+            return
+        variant = self._build_lod_variant(tree, highest)
+        if variant is None:
+            return
+        if len(variants) >= target:
+            variants.pop()
+        variants.append(variant)
 
     def _build_recency_variant(self, tree: MegaContextTree) -> Optional[WorkingContextVariant]:
         try:
@@ -273,6 +311,7 @@ class MCController:
         self,
         tree: MegaContextTree,
         variants: List[WorkingContextVariant],
+        session_id: str,
     ) -> List[WorkingContextVariant]:
         refined: List[WorkingContextVariant] = []
         for variant in variants:
@@ -285,9 +324,13 @@ class MCController:
                 num_iterations=self.config.allocator_iterations,
             )
             refined.append(variant)
-            siblings = self._generate_sibling_variants(tree, variant)
+            self._log_wc_snapshot(session_id, variant.working_context, variant.source)
+            self._log_focus_stats(session_id, variant, f"{variant.source}_focus")
+            siblings = self._generate_sibling_variants(tree, variant, session_id)
             for sibling in siblings:
                 refined.append(sibling)
+                self._log_wc_snapshot(session_id, sibling.working_context, sibling.source)
+                self._log_focus_stats(session_id, sibling, f"{sibling.source}_focus")
                 if len(refined) >= self.config.max_counterfactuals:
                     return refined
         return refined
@@ -296,6 +339,7 @@ class MCController:
         self,
         tree: MegaContextTree,
         variant: WorkingContextVariant,
+        session_id: str,
     ) -> List[WorkingContextVariant]:
         if variant.lens_scores is None:
             return []
@@ -348,6 +392,10 @@ class MCController:
                 return sample.variants[0].working_context
         return None
 
+    def _log_event(self, session_id: str, event_type: str, payload: Dict[str, any]) -> None:
+        event = TelemetryEvent(session_id=session_id, event_type=event_type, payload=payload)
+        self.telemetry_provider.log_event(event)
+
     def _clone_working_context(self, wc: WorkingContext) -> WorkingContext:
         embeddings = wc.to_tensor().clone()
         positions = wc.get_positions().clone()
@@ -363,51 +411,69 @@ class MCController:
 
     def _aggregate_horizon_losses(
         self, batch_states: List[SampleContext]
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         token_losses = []
         lod1_losses = []
+        lod2_losses = []
         for sample in batch_states:
-            token_loss, lod1_loss = self._compute_horizon_losses_for_sample(sample)
+            token_loss, lod1_loss, lod2_loss = self._compute_horizon_losses_for_sample(sample)
             if token_loss is not None:
                 token_losses.append(token_loss)
             if lod1_loss is not None:
                 lod1_losses.append(lod1_loss)
+            if lod2_loss is not None:
+                lod2_losses.append(lod2_loss)
         agg_token = torch.stack(token_losses).mean() if token_losses else None
         agg_lod1 = torch.stack(lod1_losses).mean() if lod1_losses else None
-        return agg_token, agg_lod1
+        agg_lod2 = torch.stack(lod2_losses).mean() if lod2_losses else None
+        return agg_token, agg_lod1, agg_lod2
 
     def _compute_horizon_losses_for_sample(
         self, sample: SampleContext
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         token_losses = []
         lod1_losses = []
+        lod2_losses = []
         for variant in sample.variants:
-            token_loss, lod1_loss = self._evaluate_variant_horizon(sample, variant)
+            token_loss, lod1_loss, lod2_loss = self._evaluate_variant_horizon(sample, variant)
             if token_loss is not None:
                 variant.token_loss_value = token_loss
                 token_losses.append(token_loss)
             if lod1_loss is not None:
                 variant.lod1_loss_value = lod1_loss
                 lod1_losses.append(lod1_loss)
+            if lod2_loss is not None:
+                lod2_losses.append(lod2_loss)
         token_loss = torch.stack(token_losses).mean() if token_losses else None
         lod1_loss = torch.stack(lod1_losses).mean() if lod1_losses else None
-        return token_loss, lod1_loss
+        lod2_loss = torch.stack(lod2_losses).mean() if lod2_losses else None
+        return token_loss, lod1_loss, lod2_loss
 
     def _evaluate_variant_horizon(
         self,
         sample: SampleContext,
         variant: WorkingContextVariant,
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
-        horizon = self.config.horizon_tokens
-        if horizon <= 0 or sample.tree.tokens is None:
-            return None, None
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        base_horizon = self.config.horizon_tokens
+        if base_horizon <= 0 or sample.tree.tokens is None:
+            return None, None, None
         wc = variant.working_context
         wc_embeddings = wc.to_tensor()
         wc_positions = wc.get_positions()
         last_pos = int(wc_positions[0, -1].item())
+        available = sample.tree.tokens.shape[1] - (last_pos + 1)
+        lod2_horizon = self.config.block_size * self.config.long_horizon_multiplier
+        use_lod2 = available >= lod2_horizon >= base_horizon
+        horizon = lod2_horizon if use_lod2 else base_horizon
         horizon_tokens = self._slice_tokens(sample.tree, last_pos + 1, horizon)
         if horizon_tokens is None:
-            return None, None
+            return None, None, None
+        if use_lod2:
+            self._log_event(
+                sample.session_id,
+                "horizon_trigger",
+                {"variant": variant.source, "lod": 2, "length": horizon},
+            )
         horizon_embeddings = self._embed_with_padding(horizon_tokens)
         combined = torch.cat([wc_embeddings, horizon_embeddings], dim=1)
         cos_sin = self._compose_positional_overrides(wc, last_pos, horizon_tokens.shape[1])
@@ -426,8 +492,8 @@ class MCController:
             horizon_tokens.view(-1),
             ignore_index=-1,
         )
-        lod1_loss = self._compute_lod1_loss(horizon_tokens, horizon_logits)
-        return token_loss, lod1_loss
+        lod1_loss, lod2_loss = self._compute_lod_losses(horizon_tokens, horizon_logits, use_lod2=use_lod2)
+        return token_loss, lod1_loss, lod2_loss
 
     def _compose_positional_overrides(
         self,
@@ -482,12 +548,15 @@ class MCController:
             slice_tokens = torch.cat([slice_tokens, pad], dim=1)
         return slice_tokens
 
-    def _compute_lod1_loss(
-        self, tokens: torch.Tensor, horizon_logits: torch.Tensor
-    ) -> Optional[torch.Tensor]:
+    def _compute_lod_losses(
+        self,
+        tokens: torch.Tensor,
+        horizon_logits: torch.Tensor,
+        use_lod2: bool = False,
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
         block = self.config.block_size
         if block <= 0:
-            return None
+            return None, None
         horizon_len = tokens.shape[1]
         num_blocks = horizon_len // block
         if num_blocks == 0:
@@ -507,8 +576,20 @@ class MCController:
         pred_blocks = pred_embeds.view(num_blocks, block, -1)
         gt_gists = self.gistnet(gt_blocks)
         pred_gists = self.gistnet(pred_blocks)
-        loss = 1 - F.cosine_similarity(pred_gists, gt_gists, dim=-1)
-        return loss.mean()
+        lod1_loss = 1 - F.cosine_similarity(pred_gists, gt_gists, dim=-1)
+        lod1_mean = lod1_loss.mean()
+        lod2_mean = None
+        if use_lod2 and pred_gists.numel() > 0:
+            num_lod1 = pred_gists.shape[0]
+            lod2_block = self.config.long_horizon_multiplier
+            if num_lod1 >= lod2_block:
+                trim = (num_lod1 // lod2_block) * lod2_block
+                if trim > 0:
+                    pred_lod2 = self.gistnet(pred_gists[:trim].view(1, trim, -1)).view(-1, self.config.embed_dim)
+                    gt_lod2 = self.gistnet(gt_gists[:trim].view(1, trim, -1)).view(-1, self.config.embed_dim)
+                    lod2 = 1 - F.cosine_similarity(pred_lod2, gt_lod2, dim=-1)
+                    lod2_mean = lod2.mean()
+        return lod1_mean, lod2_mean
 
     def _compute_lens_losses(
         self, batch_states: List[SampleContext]
@@ -535,6 +616,57 @@ class MCController:
         if not losses:
             return None
         return torch.stack(losses).mean()
+
+    # ------------------------------------------------------------------ #
+    # Telemetry helpers
+    # ------------------------------------------------------------------ #
+    def _log_tree_snapshot(self, session_id: str, tree: MegaContextTree, tag: str) -> None:
+        payload = {
+            "tag": tag,
+            "summary": {str(k): [int(v[0]), int(v[1])] for k, v in tree.summary().items()},
+            "total_tokens": tree.num_tokens(),
+            "max_lod": self.config.max_lod,
+            "access": tree.get_access_stats(),
+        }
+        self._log_event(session_id, "mc_tree_snapshot", payload)
+
+    def _log_wc_snapshot(self, session_id: str, wc: WorkingContext, tag: str) -> None:
+        positions = wc.get_positions()[0].tolist()
+        lods = wc.get_lod_tensor()[0].tolist()
+        payload = {
+            "tag": tag,
+            "length": wc.length,
+            "lods": lods,
+            "positions": positions,
+            "events": wc.drain_events(),
+        }
+        self._log_event(session_id, "working_context_snapshot", payload)
+
+    def _log_focus_stats(
+        self,
+        session_id: str,
+        variant: WorkingContextVariant,
+        tag: str,
+    ) -> None:
+        scores = variant.lens_scores
+        score_payload = {}
+        if scores is not None:
+            if scores.dim() > 1:
+                scores = scores.squeeze(0)
+            score_payload = {
+                "score_mean": float(scores.mean().item()),
+                "score_std": float(scores.std().item()),
+                "score_max": float(scores.max().item()),
+                "score_min": float(scores.min().item()),
+            }
+        payload = {
+            "tag": tag,
+            "source": variant.source,
+            "lod_hint": variant.lod_hint,
+            "edits": variant.edits_applied,
+        }
+        payload.update(score_payload)
+        self._log_event(session_id, "focus_allocator", payload)
 
     def _select_best_variant(
         self, variants: List[WorkingContextVariant]
@@ -664,13 +796,18 @@ class MCController:
     # ------------------------------------------------------------------ #
     # Inference facade
     # ------------------------------------------------------------------ #
-    def begin_inference_session(self, initial_tokens: torch.Tensor) -> None:
+    def begin_inference_session(
+        self,
+        initial_tokens: torch.Tensor,
+        session_id: Optional[str] = None,
+    ) -> str:
         """
         Initialize a persistent MegaContext for inference/autoregressive decoding.
         """
         if initial_tokens.dim() == 1:
             initial_tokens = initial_tokens.unsqueeze(0)
         tokens = initial_tokens.to(self.device)
+        session = session_id or f"infer_{uuid.uuid4().hex}"
         with torch.no_grad():
             tree = build_mega_context(
                 self.config.mc_tree_type,
@@ -687,11 +824,15 @@ class MCController:
             max_replacements_per_iteration=self.config.allocator_max_replacements,
             num_iterations=self.config.allocator_iterations,
         )
+        self._log_tree_snapshot(session, tree, tag="inference_init")
+        self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
         self.inference_state = InferenceState(
+            session_id=session,
             tree=tree,
             working_context=recency_variant.working_context,
             allocator=allocator,
         )
+        return session
 
     def inference_step(self, new_tokens: torch.Tensor) -> None:
         """
@@ -709,6 +850,18 @@ class MCController:
                 max_replacements_per_iteration=self.config.allocator_max_replacements,
                 num_iterations=self.config.allocator_iterations,
             )
+        self._log_wc_snapshot(self.inference_state.session_id, self.inference_state.working_context, tag="inference_update")
+        self._log_focus_stats(
+            self.inference_state.session_id,
+            WorkingContextVariant(
+                working_context=self.inference_state.working_context,
+                source="inference",
+                lod_hint=0,
+                edits_applied=0,
+                lens_scores=None,
+            ),
+            tag="inference_focus",
+        )
 
     def get_inference_working_context(self) -> Optional[WorkingContext]:
         if self.inference_state is None:

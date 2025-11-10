@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 
@@ -46,6 +46,7 @@ class WorkingContext:
         self._positional_encoder: Optional[GaussianRoPE] = None
         self._positional_spec: Optional[Tuple[str, int, int, int]] = None
         self._positional_cache: Optional[Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = None
+        self._event_log: List[Dict[str, int]] = []
 
     def to_tensor(self) -> torch.Tensor:
         """Return current working context embeddings [B, W, D] on device."""
@@ -74,6 +75,7 @@ class WorkingContext:
             device=self.tensor.device,
         )
         self._positional_cache = None
+        self._event_log.append({"event": "load", "lod": lod, "length": window})
 
 
     def append(self, embedding: torch.Tensor, lod: int, global_position: int) -> None:
@@ -95,6 +97,7 @@ class WorkingContext:
         self.positions = torch.cat([self.positions, pos_col], dim=1)
         self._positional_cache = None
         self._trim()
+        self._event_log.append({"event": "append", "lod": lod, "position": global_position})
 
     def replace(self, edit: WorkingContextEdit) -> None:
         start = edit.wc_start
@@ -132,6 +135,15 @@ class WorkingContext:
         )
         self._positional_cache = None
         self._trim()
+        self._event_log.append(
+            {
+                "event": "replace",
+                "start": start,
+                "count": count,
+                "new_lod": edit.lod,
+                "mc_start": edit.mc_start_position,
+            }
+        )
 
     def _trim(self) -> None:
         window = self.config.max_length
@@ -177,3 +189,8 @@ class WorkingContext:
                 device=self.tensor.device,
             )
         return self._positional_cache
+
+    def drain_events(self) -> List[Dict[str, int]]:
+        events = self._event_log
+        self._event_log = []
+        return events

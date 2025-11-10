@@ -44,8 +44,10 @@ class MCConfig:
     initial_working_contexts: int = 4
     max_counterfactuals: int = 8
     horizon_tokens: int = 32
+    long_horizon_multiplier: int = 32
     token_loss_weight: float = 1.0
     lod1_loss_weight: float = 0.1
+    lod2_loss_weight: float = 0.05
     lens_loss_weight: float = 0.1
     soft_max_length: Optional[int] = None
     allocator_recent_tokens: int = 128

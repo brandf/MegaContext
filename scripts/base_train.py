@@ -89,9 +89,11 @@ mc_tree_type = "ram"
 mc_initial_wcs = 4
 mc_max_counterfactuals = 8
 mc_horizon = 32
+mc_long_horizon_multiplier = 32
 mc_token_loss_weight = 1.0
 mc_lod1_loss_weight = 0.1
 mc_lens_loss_weight = 0.1
+mc_lod2_loss_weight = 0.05
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -165,8 +167,10 @@ if mc_enabled:
         initial_working_contexts=mc_initial_wcs,
         max_counterfactuals=mc_max_counterfactuals,
         horizon_tokens=mc_horizon,
+        long_horizon_multiplier=mc_long_horizon_multiplier,
         token_loss_weight=mc_token_loss_weight,
         lod1_loss_weight=mc_lod1_loss_weight,
+        lod2_loss_weight=mc_lod2_loss_weight,
         lens_loss_weight=mc_lens_loss_weight,
         soft_max_length=allocator_soft_max,
         allocator_recent_tokens=allocator_recent_tokens,
@@ -252,6 +256,7 @@ for step in range(num_iterations + 1):
     positional_cache = None
     mc_token_loss_val = None
     mc_lod1_loss_val = None
+    mc_lod2_loss_val = None
     mc_lens_loss_val = None
     if mc_controller is not None:
         try:
@@ -262,6 +267,8 @@ for step in range(num_iterations + 1):
                     mc_token_loss_val = float(mc_result.token_loss.detach())
                 if mc_result.lod1_loss is not None:
                     mc_lod1_loss_val = float(mc_result.lod1_loss.detach())
+                if mc_result.lod2_loss is not None:
+                    mc_lod2_loss_val = float(mc_result.lod2_loss.detach())
                 if mc_result.lens_loss is not None:
                     mc_lens_loss_val = float(mc_result.lens_loss.detach())
         except Exception as exc: # pragma: no cover - guard against optional path regressions
@@ -358,12 +365,14 @@ for step in range(num_iterations + 1):
                 if len(positional_cache) > 2:
                     alibi_override = positional_cache[2]
             mc_extra_loss = torch.tensor(0.0, device=device)
-            if mc_controller is not None and mc_result is not None:
-                if mc_result.token_loss is not None:
-                    mc_extra_loss = mc_extra_loss + mc_result.token_loss * mc_controller.config.token_loss_weight
-                if mc_result.lod1_loss is not None:
-                    mc_extra_loss = mc_extra_loss + mc_result.lod1_loss * mc_controller.config.lod1_loss_weight
-                if mc_result.lens_loss is not None:
+        if mc_controller is not None and mc_result is not None:
+            if mc_result.token_loss is not None:
+                mc_extra_loss = mc_extra_loss + mc_result.token_loss * mc_controller.config.token_loss_weight
+            if mc_result.lod1_loss is not None:
+                mc_extra_loss = mc_extra_loss + mc_result.lod1_loss * mc_controller.config.lod1_loss_weight
+            if mc_result.lod2_loss is not None:
+                mc_extra_loss = mc_extra_loss + mc_result.lod2_loss * mc_controller.config.lod2_loss_weight
+            if mc_result.lens_loss is not None:
                     mc_extra_loss = mc_extra_loss + mc_result.lens_loss * mc_controller.config.lens_loss_weight
             loss = model(x, y, cos_sin_override=cos_sin_override, alibi_override=alibi_override) + mc_extra_loss
         train_loss = loss.detach() # for logging
@@ -420,6 +429,8 @@ for step in range(num_iterations + 1):
             log_data["mc/token_loss"] = mc_token_loss_val
         if mc_lod1_loss_val is not None:
             log_data["mc/lod1_loss"] = mc_lod1_loss_val
+        if mc_lod2_loss_val is not None:
+            log_data["mc/lod2_loss"] = mc_lod2_loss_val
         if mc_lens_loss_val is not None:
             log_data["mc/lens_loss"] = mc_lens_loss_val
         wandb_run.log(log_data)
