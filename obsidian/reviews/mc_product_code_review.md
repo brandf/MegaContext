@@ -1,5 +1,8 @@
 # MegaContext Product Code Review
 
+This review is now split by difficulty so we can parallelize execution:
 
-## Recommended Pre-run Checks
-- [ ] Benchmark MC on a single GPU with and without the LensNet caching to quantify the current overhead before launching wide sweeps.
+- [[mc_product_code_review_easy|Quick Wins (Codex-Medium)]]
+- [[mc_product_code_review_hard|Deep Work (Codex-High)]]
+
+Use the quick-wins doc for fast fixes (docs, CLI flags, inference smoke tests) and the deep-work doc for the structural/performance issues that require dedicated focus.
