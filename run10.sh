@@ -5,6 +5,12 @@
 
 set -euo pipefail
 
+# Load optional environment prepared by mc_setup
+if [ -f ".mc_env" ]; then
+    # shellcheck source=/dev/null
+    source .mc_env
+fi
+
 usage() {
     cat <<'EOF'
 Usage: bash run10.sh [--gpu 5090|h100] [--mc]

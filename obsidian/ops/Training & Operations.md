@@ -46,6 +46,8 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 
 `--mc` toggles the full MegaContext controller (tree/working-context/controller) without altering the default nanochat flow. Leave it off to reproduce the upstream baselines. The additional knobs control MC-specific behaviors as described below.
 
+> 🆕 On a fresh machine, run `./mc_setup` first. It installs `uv`, syncs deps, installs OTEL exporters, and writes `.mc_env` (WANDB/HF/Telmetry env vars). `run10.sh` auto-sources `.mc_env`, so your settings carry across every stage.
+
 ### MegaContext CLI knobs
 
 - **Tree / WC sampling**

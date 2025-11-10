@@ -37,7 +37,7 @@ The detailed operating guide (env prep, telemetry, troubleshooting) lives in [`o
 | $100 tier (8×H100) | `bash speedrun.sh` |
 | $1000 tier (8×H100) | `bash run1000.sh` |
 
-These scripts run tokenizer → base → mid → chat SFT end-to-end, drop checkpoints in `~/.cache/nanochat`, and generate `report/report.md`. For chat/web demos after training, follow [[Base Runtime]](./obsidian/ops/Base%20Runtime.md).
+These scripts run tokenizer → base → mid → chat SFT end-to-end, drop checkpoints in `~/.cache/nanochat`, and generate `report/report.md`. For chat/web demos after training, follow [[Base Runtime]](./obsidian/ops/Base%20Runtime.md). New box? Run `./mc_setup` once and follow the prompts— it installs `uv`, syncs deps, installs OTEL exporters, and writes `.mc_env` so `run10.sh` inherits your WANDB/HF/telemetry settings automatically.
 
 > 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the MegaContext controller. The knobs below configure the tree/working-context components and their auxiliary losses:
 
