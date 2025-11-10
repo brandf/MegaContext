@@ -30,11 +30,12 @@ from scripts.base_eval import evaluate_model
 
 try:
     from mc.config import MCConfig
-from mc.runtime import MCController
-from mc.telemetry import OpenTelemetryProvider
+    from mc.runtime import MCController
+    from mc.telemetry import OpenTelemetryProvider
 except ImportError:  # pragma: no cover - optional dependency during early development
     MCController = None
     MCConfig = None
+    OpenTelemetryProvider = None
 print_banner()
 
 # -----------------------------------------------------------------------------
@@ -113,7 +114,6 @@ get_max_memory = torch.cuda.max_memory_allocated if device_type == "cuda" else l
 use_dummy_wandb = run == "dummy" or not master_process
 wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat", name=run, config=user_config)
 mc_controller = None
-positional_cache = None
 
 # Tokenizer will be useful for evaluation, also we need the vocab size
 tokenizer = get_tokenizer()
@@ -151,6 +151,8 @@ model.init_weights()
 if mc_enabled:
     if MCController is None or MCConfig is None:
         raise ImportError("mc package is required when --mc_enabled=1")
+    if OpenTelemetryProvider is None:
+        raise ImportError("opentelemetry dependencies are required when --mc_enabled=1")
     mc_config = MCConfig(
         embed_dim=model_config.n_embd,
         max_seq_len=max_seq_len,
@@ -251,6 +253,10 @@ def get_muon_momentum(it):
     momentum = (1 - frac) * 0.85 + frac * 0.95
     return momentum
 
+
+def _mean_or_none(values):
+    return float(sum(values) / len(values)) if values else None
+
 # -----------------------------------------------------------------------------
 # Training loop
 min_val_bpb = float("inf")
@@ -261,27 +267,14 @@ total_training_time = 0 # total wall-clock time of training
 for step in range(num_iterations + 1):
     last_step = step == num_iterations
     flops_so_far = num_flops_per_token * total_batch_size * step
-    mc_result = None
-    positional_cache = None
     mc_token_loss_val = None
     mc_lod1_loss_val = None
     mc_lod2_loss_val = None
     mc_lens_loss_val = None
-    if mc_controller is not None:
-        try:
-            mc_result = mc_controller.process_batch(x.detach(), step, context="train")
-            if mc_result is not None:
-                positional_cache = mc_result.positional_cache
-                if mc_result.token_loss is not None:
-                    mc_token_loss_val = float(mc_result.token_loss.detach())
-                if mc_result.lod1_loss is not None:
-                    mc_lod1_loss_val = float(mc_result.lod1_loss.detach())
-                if mc_result.lod2_loss is not None:
-                    mc_lod2_loss_val = float(mc_result.lod2_loss.detach())
-                if mc_result.lens_loss is not None:
-                    mc_lens_loss_val = float(mc_result.lens_loss.detach())
-        except Exception as exc: # pragma: no cover - guard against optional path regressions
-            print0(f"[MegaContext] controller error at step {step}: {exc}")
+    mc_token_loss_samples = []
+    mc_lod1_loss_samples = []
+    mc_lod2_loss_samples = []
+    mc_lens_loss_samples = []
 
     # once in a while: evaluate the val bpb (all ranks participate)
     if last_step or step % eval_every == 0:
@@ -366,28 +359,51 @@ for step in range(num_iterations + 1):
     synchronize()
     t0 = time.time()
     for micro_step in range(grad_accum_steps):
+        mc_result = None
+        positional_cache = None
+        if mc_controller is not None:
+            try:
+                mc_result = mc_controller.process_batch(x.detach(), step, context="train")
+            except Exception as exc: # pragma: no cover - guard against optional path regressions
+                print0(f"[MegaContext] controller error at step {step}: {exc}")
+            else:
+                if mc_result is not None:
+                    positional_cache = mc_result.positional_cache
+                    if mc_result.token_loss is not None:
+                        mc_token_loss_samples.append(float(mc_result.token_loss.detach()))
+                    if mc_result.lod1_loss is not None:
+                        mc_lod1_loss_samples.append(float(mc_result.lod1_loss.detach()))
+                    if mc_result.lod2_loss is not None:
+                        mc_lod2_loss_samples.append(float(mc_result.lod2_loss.detach()))
+                    if mc_result.lens_loss is not None:
+                        mc_lens_loss_samples.append(float(mc_result.lens_loss.detach()))
         with autocast_ctx:
             cos_sin_override = None
             alibi_override = None
-            if mc_controller is not None and positional_cache is not None:
+            if positional_cache is not None:
                 cos_sin_override = positional_cache[:2]
                 if len(positional_cache) > 2:
                     alibi_override = positional_cache[2]
-            mc_extra_loss = torch.tensor(0.0, device=device)
-        if mc_controller is not None and mc_result is not None:
-            if mc_result.token_loss is not None:
-                mc_extra_loss = mc_extra_loss + mc_result.token_loss * mc_controller.config.token_loss_weight
-            if mc_result.lod1_loss is not None:
-                mc_extra_loss = mc_extra_loss + mc_result.lod1_loss * mc_controller.config.lod1_loss_weight
-            if mc_result.lod2_loss is not None:
-                mc_extra_loss = mc_extra_loss + mc_result.lod2_loss * mc_controller.config.lod2_loss_weight
-            if mc_result.lens_loss is not None:
+            base_loss = model(x, y, cos_sin_override=cos_sin_override, alibi_override=alibi_override)
+            mc_extra_loss = base_loss.new_zeros(())
+            if mc_controller is not None and mc_result is not None:
+                if mc_result.token_loss is not None:
+                    mc_extra_loss = mc_extra_loss + mc_result.token_loss * mc_controller.config.token_loss_weight
+                if mc_result.lod1_loss is not None:
+                    mc_extra_loss = mc_extra_loss + mc_result.lod1_loss * mc_controller.config.lod1_loss_weight
+                if mc_result.lod2_loss is not None:
+                    mc_extra_loss = mc_extra_loss + mc_result.lod2_loss * mc_controller.config.lod2_loss_weight
+                if mc_result.lens_loss is not None:
                     mc_extra_loss = mc_extra_loss + mc_result.lens_loss * mc_controller.config.lens_loss_weight
-            loss = model(x, y, cos_sin_override=cos_sin_override, alibi_override=alibi_override) + mc_extra_loss
+            loss = base_loss + mc_extra_loss
         train_loss = loss.detach() # for logging
         loss = loss / grad_accum_steps # each .backward() is a grad sum => normalize loss here
         loss.backward()
         x, y = next(train_loader) # prefetch the next batch while the GPU is busy with forward/backward
+    mc_token_loss_val = _mean_or_none(mc_token_loss_samples)
+    mc_lod1_loss_val = _mean_or_none(mc_lod1_loss_samples)
+    mc_lod2_loss_val = _mean_or_none(mc_lod2_loss_samples)
+    mc_lens_loss_val = _mean_or_none(mc_lens_loss_samples)
     # gradient clipping
     grad_clip_enabled = grad_clip > 0.0
     if grad_clip_enabled:

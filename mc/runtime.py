@@ -173,7 +173,7 @@ class MCController:
             self.telemetry.log_tree(step, tree)
         self.current_batch_states = batch_states
         self.telemetry.log_focus(step, total_edits)
-        positional_cache = self._build_primary_positional(batch_states)
+        positional_cache = self._build_primary_positional(batch_states) if len(batch_states) == 1 else None
         token_loss, lod1_loss, lod2_loss = self._aggregate_horizon_losses(batch_states)
         lens_loss = self._compute_lens_losses(batch_states)
         result = MCBatchResult(
@@ -318,10 +318,12 @@ class MCController:
             allocator = self._build_allocator(tree, variant.working_context)
             variant.allocator = allocator
             scores = self.lensnet(variant.working_context)
-            variant.lens_scores = scores.squeeze(-1)
+            scores_detached = scores.detach()
+            variant.lens_scores = scores_detached.clone()
             variant.edits_applied = allocator.update_focus(
                 max_replacements_per_iteration=self.config.allocator_max_replacements,
                 num_iterations=self.config.allocator_iterations,
+                scores=scores_detached,
             )
             refined.append(variant)
             self._log_wc_snapshot(session_id, variant.working_context, variant.source)
@@ -560,12 +562,12 @@ class MCController:
         horizon_len = tokens.shape[1]
         num_blocks = horizon_len // block
         if num_blocks == 0:
-            return None
+            return None, None
         trim = num_blocks * block
         valid_tokens = tokens[:, :trim]
         mask = valid_tokens != -1
         if not mask.any():
-            return None
+            return None, None
         safe_tokens = valid_tokens.clone()
         safe_tokens[~mask] = 0
         gt_embeddings = self.embed(safe_tokens) * mask.unsqueeze(-1)
@@ -655,7 +657,7 @@ class MCController:
                 scores = scores.squeeze(0)
             score_payload = {
                 "score_mean": float(scores.mean().item()),
-                "score_std": float(scores.std().item()),
+                "score_std": float(scores.std(unbiased=False).item()),
                 "score_max": float(scores.max().item()),
                 "score_min": float(scores.min().item()),
             }

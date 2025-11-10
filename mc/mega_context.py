@@ -80,30 +80,41 @@ class MegaContextTree:
             prev_len = level_embeddings.shape[1]
             if prev_len == 0:
                 break
-            grouped, new_len = self._reshape_for_pool(level_embeddings, self.config.block_size)
+            grouped, new_len, mask = self._reshape_for_pool(level_embeddings, self.config.block_size)
             if new_len == 0:
                 break
             grouped = grouped.contiguous()
+            mask = mask.contiguous()
             if self.gistnet is not None:
-                flat = grouped.view(-1, self.config.block_size, self.config.embed_dim)
+                masked = grouped * mask
+                flat = masked.view(-1, self.config.block_size, self.config.embed_dim)
                 pooled = self.gistnet(flat).view(batch, new_len, self.config.embed_dim)
             else:
-                pooled = grouped.mean(dim=2)
+                weighted = grouped * mask
+                counts = mask.sum(dim=2).clamp_min(1.0)
+                pooled = weighted.sum(dim=2) / counts
             self.levels[lod] = pooled
+            level_embeddings = pooled
 
-    def _reshape_for_pool(self, x: torch.Tensor, block_size: int) -> Tuple[torch.Tensor, int]:
+    def _reshape_for_pool(self, x: torch.Tensor, block_size: int) -> Tuple[torch.Tensor, int, torch.Tensor]:
         if x.dim() == 2:
             x = x.unsqueeze(-1)
         batch, length, dim = x.shape
         new_len = math.ceil(length / block_size)
         if new_len == 0:
-            return x.new_zeros(batch, 0, block_size, dim), 0
+            empty = x.new_zeros(batch, 0, block_size, dim)
+            mask = x.new_zeros(batch, 0, block_size, 1)
+            return empty, 0, mask
         pad = new_len * block_size - length
+        valid_mask = torch.ones(batch, length, 1, device=x.device, dtype=x.dtype)
         if pad > 0:
             pad_tensor = torch.zeros(batch, pad, dim, device=x.device, dtype=x.dtype)
             x = torch.cat([x, pad_tensor], dim=1)
+            pad_mask = torch.zeros(batch, pad, 1, device=x.device, dtype=x.dtype)
+            valid_mask = torch.cat([valid_mask, pad_mask], dim=1)
         reshaped = x.view(batch, new_len, block_size, dim)
-        return reshaped, new_len
+        mask = valid_mask.view(batch, new_len, block_size, 1)
+        return reshaped, new_len, mask
 
     def release_lod0_cache(self, disable_future_cache: bool = False) -> None:
         self._lod0_cache = None

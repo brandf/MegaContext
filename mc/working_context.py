@@ -79,6 +79,11 @@ class WorkingContext:
 
 
     def append(self, embedding: torch.Tensor, lod: int, global_position: int) -> None:
+        """
+        Append a single timestep embedding `[B, D]` with its metadata.
+        """
+        if embedding.dim() != 2:
+            raise ValueError("WorkingContext.append expects an embedding shaped [B, D]")
         embedding = embedding.to(self.tensor.device)
         self.tensor = torch.cat([self.tensor, embedding.unsqueeze(1)], dim=1)  # extend sequence axis
         lod_col = torch.full(

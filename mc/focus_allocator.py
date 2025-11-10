@@ -45,7 +45,27 @@ class FocusAllocatorBase:
     def append(self, tokens: torch.Tensor, embeddings: torch.Tensor) -> None:
         start_pos = self.tree.num_tokens()
         self.tree.append(tokens)
-        self.working_context.append(embeddings, lod=0, global_position=start_pos)
+        if embeddings.dim() == 2:
+            seq_len = 1
+        elif embeddings.dim() == 3:
+            seq_len = embeddings.shape[1]
+        else:
+            raise ValueError("FocusAllocatorBase.append expects embeddings shaped [B, D] or [B, T, D]")
+        if tokens.dim() == 2:
+            tokens_to_add = tokens.shape[1]
+        elif tokens.dim() == 1:
+            tokens_to_add = tokens.shape[0]
+        else:
+            tokens_to_add = 1
+        if tokens_to_add != seq_len:
+            raise ValueError("Token and embedding lengths must match in FocusAllocatorBase.append")
+        for offset in range(seq_len):
+            step_embedding = embeddings if embeddings.dim() == 2 else embeddings[:, offset, :]
+            self.working_context.append(
+                step_embedding,
+                lod=0,
+                global_position=start_pos + offset,
+            )
 
     def rebuild(self, max_replacements_per_iteration: int, num_iterations: int) -> int:
         target_lod = self._choose_rebuild_lod()
@@ -56,17 +76,25 @@ class FocusAllocatorBase:
             return 0
         return self.update_focus(max_replacements_per_iteration, num_iterations)
 
-    def update_focus(self, max_replacements_per_iteration: int, num_iterations: int) -> int:
+    def update_focus(
+        self,
+        max_replacements_per_iteration: int,
+        num_iterations: int,
+        scores: Optional[torch.Tensor] = None,
+    ) -> int:
         if max_replacements_per_iteration <= 0 or num_iterations <= 0:
             return 0
         total_edits = 0
         for _ in range(num_iterations):
-            scores = self.lensnet(self.working_context).detach()
-            if scores.dim() == 2:
+            lens_scores = scores
+            if lens_scores is None:
+                lens_scores = self.lensnet(self.working_context)
+            lens_scores = lens_scores.detach()
+            if lens_scores.dim() == 2:
                 # Average across batch; allocator operates on shared WC indices.
-                scores_1d = scores.mean(dim=0)
+                scores_1d = lens_scores.mean(dim=0)
             else:
-                scores_1d = scores.squeeze(0)
+                scores_1d = lens_scores.squeeze(0)
             prefer_collapse = self.working_context.length > self.cfg.soft_max_length
             edits = self._select_edits(scores_1d, max_replacements_per_iteration, prefer_collapse)
             if not edits:
@@ -105,7 +133,8 @@ class GreedyFocusAllocator(FocusAllocatorBase):
         length = scores.numel()
         protected_start = max(0, length - self.cfg.recent_tokens)
         order = torch.argsort(torch.abs(scores), descending=True)
-        for idx in order.tolist():
+        for idx_tensor in order:
+            idx = int(idx_tensor.item())
             if idx >= length or len(edits) >= max_replacements:
                 break
             if idx >= protected_start:
