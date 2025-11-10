@@ -107,6 +107,7 @@ class MCController:
             "sibling_collapses": 0,
             "allocator_edits": 0,
         }
+        self._dtype_debug_logged = False
         if config.embed_dim % config.num_heads != 0:
             raise ValueError("embed_dim must be divisible by num_heads for positional encodings")
         self.embed = self._resolve_embedding_layer(model)
@@ -710,6 +711,15 @@ class MCController:
         else:
             target_dtype = next(self.model.parameters()).dtype
         if combined.dtype != target_dtype:
+            if not self._dtype_debug_logged:
+                print(
+                    "[MegaContext] dtype mismatch before model forward: "
+                    f"wc={wc_embeddings.dtype}, horizon={horizon_embeddings.dtype}, "
+                    f"combined={combined.dtype}, target={target_dtype}, "
+                    f"autocast={torch.is_autocast_enabled()}",
+                    flush=True,
+                )
+                self._dtype_debug_logged = True
             combined = combined.to(target_dtype)
         cos_sin = self._compose_positional_overrides(wc, last_pos, horizon_tokens.shape[1])
         dummy_idx = torch.zeros(
