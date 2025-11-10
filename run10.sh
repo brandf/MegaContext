@@ -34,6 +34,7 @@ LENSNET_HEAD="mlp"
 ALLOCATOR_TYPE="greedy"
 POSITIONAL_TYPE="gaussian"
 MC_TREE_TYPE="ram"
+SKIP_DATA_PREP=${SKIP_DATA_PREP:-0}
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -168,17 +169,21 @@ uv run maturin develop --release --manifest-path rustbpe/Cargo.toml
 # -----------------------------------------------------------------------------
 # Dataset + tokenizer
 
-python -m nanochat.dataset -n "$TOKENIZER_SHARDS"
-python -m nanochat.dataset -n "$PRETRAIN_SHARDS" &
-DATASET_DOWNLOAD_PID=$!
+if [ "$SKIP_DATA_PREP" -eq 1 ]; then
+    echo "Skipping dataset/tokenizer prep (SKIP_DATA_PREP=1). Ensure shards/checkpoints already exist."
+else
+    python -m nanochat.dataset -n "$TOKENIZER_SHARDS"
+    python -m nanochat.dataset -n "$PRETRAIN_SHARDS" &
+    DATASET_DOWNLOAD_PID=$!
 
-python -m scripts.tok_train --max_chars="$TOKENIZER_MAX_CHARS"
-python -m scripts.tok_eval
+    python -m scripts.tok_train --max_chars="$TOKENIZER_MAX_CHARS"
+    python -m scripts.tok_eval
 
-curl -L -o "$NANOCHAT_BASE_DIR/identity_conversations.jsonl" https://karpathy-public.s3.us-west-2.amazonaws.com/identity_conversations.jsonl
+    curl -L -o "$NANOCHAT_BASE_DIR/identity_conversations.jsonl" https://karpathy-public.s3.us-west-2.amazonaws.com/identity_conversations.jsonl
 
-echo "Waiting for dataset download to complete..."
-wait "$DATASET_DOWNLOAD_PID"
+    echo "Waiting for dataset download to complete..."
+    wait "$DATASET_DOWNLOAD_PID"
+fi
 
 # -----------------------------------------------------------------------------
 # Training + eval
