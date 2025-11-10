@@ -11,7 +11,7 @@ Use this table to keep the major MegaContext PRDs in sync. Update the status col
 
 | PRD | Status | Latest updates | Next milestones |
 |-----|--------|----------------|-----------------|
-| [[MegaContext End-to-End Training]] | 🔄 In progress | Nanochat trainer wiring drafted; alternating references retired | Land packed-forward horizon loss in `nanochat.train`; document ΔNLL dashboards. |
+| [[MegaContext End-to-End Training]] | 🔄 In progress | MCController now samples per-sequence WC sets, opportunistic LOD2 horizons, and logs token/gist/Lens losses into nanochat runs. | Wire telemetry provider adapters + fairness-comparison dashboards; finalize inference-session scaffolding. |
 | [[MegaAttention Training]] | 🔄 In progress | Hierarchical KV cache spec + positional links added | Implement pyramidal mask generator + link to FlashAttention kernels. |
 | [[MegaPrediction Training]] | 🔄 In progress | Shared-head plan documented; MegaPrediction vision doc aligned | Add inference hooks + gist regression targets to nanochat decode loop. |
 | [[Cognitive-Core Training]] | ⏳ Pending | Awaiting MegaAttention/MegaPrediction milestones | Define eval harness + telemetry requirements for composite WC reasoning. |

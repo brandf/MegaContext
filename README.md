@@ -39,13 +39,20 @@ The detailed operating guide (env prep, telemetry, troubleshooting) lives in [`o
 
 These scripts run tokenizer → base → mid → chat SFT end-to-end, drop checkpoints in `~/.cache/nanochat`, and generate `report/report.md`. For chat/web demos after training, follow [[Base Runtime]](./obsidian/ops/Base%20Runtime.md).
 
-> 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the Phase 1 MegaContext instrumentation. Optional knobs `--gistnet_*`, `--lensnet_*`, `--block_size`, `--allocator`, `--positional` let you pick the exact component configuration:
+> 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the Phase 1 MegaContext instrumentation. Optional knobs let you pick the exact component configuration:
 > - `--block_size` (default 32) controls how many tokens feed each gist.
 > - `--gistnet_type transformer|mean`, `--gistnet_layers {2,4}`, `--gistnet_pooling mean|query|cls`, `--gistnet_head linear|mlp` (defaults transformer/2/mean/mlp).
 > - `--lensnet_type transformer`, `--lensnet_layers {2,4,8}`, `--lensnet_head linear|mlp` (defaults transformer/2/mlp).
 > - `--allocator transformer|greedy` (`simple` is an alias). Advanced knobs—`--allocator_soft_max`, `--allocator_recent_tokens`, `--allocator_expand_threshold`, `--allocator_collapse_threshold`, `--allocator_max_replacements`, `--allocator_iterations`—are exposed through `scripts/base_train.py` for fine-grained control over the greedy expand/collapse loop.
 > - `--mc_tree ram|disk` selects the MegaContext backing store. `ram` keeps LOD0 as tokens in memory (default); `disk` is reserved for the upcoming MegaCache-backed implementation.
+> - `--mc_initial_wcs`, `--mc_max_counterfactuals` tune how many Working Contexts (initial + LensNet siblings) are sampled per training sequence.
+> - `--mc_horizon`, `--mc_long_horizon_multiplier` control the opportunistic LOD1/LOD2 teacher-forced horizon (defaults give 32-token LOD1 horizons that upgrade to 1024-token LOD2 horizons whenever the sequence is long enough).
+> - `--mc_token_loss_weight`, `--mc_lod1_loss_weight`, `--mc_lod2_loss_weight`, `--mc_lens_loss_weight` weight the auxiliary losses added on top of the vanilla nanochat objective.
 > LensNet scores are tanh-clamped floats (positive ⇒ expand, negative ⇒ collapse). When `--mc` is active we also build Gaussian RoPE positional caches using MegaContext global positions/LOD metadata. The flagless path continues to match upstream nanochat.
+
+When comparing MC-enabled vs. vanilla runs, normalize by tokens, FLOPs, or wall-clock time rather than raw `step` counts (MC batches perform more work per update). `scripts/base_train.py` already logs `total_training_flops`, `total_training_time`, and `mc/*` loss metrics so you can overlay both training curves fairly in W&B or Grafana.
+
+Telemetry: the training scripts now instantiate the built-in OpenTelemetry provider (OTLP exporter) whenever `--mc` is set. Point it at Tempo/Grafana (or any OTLP-compatible backend) by exporting `MC_OTEL_ENDPOINT` (e.g., `http://localhost:4318`) and `MC_OTEL_INSECURE=1` if needed. Each MC session emits structured spans (`mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `horizon_trigger`, etc.) that you can visualize alongside WANDB metrics.
 
 ---
 

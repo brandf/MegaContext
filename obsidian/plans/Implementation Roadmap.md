@@ -39,6 +39,8 @@ flowchart LR
 
 Goal: produce a fully nanochat-native training loop that mirrors the legacy POC functionality with modernized infrastructure. The outcome is a single-GPU runnable stack (`run10.sh`) that trains tokenizer → base → mid → chat SFT (per [[MegaContext End-to-End Training]]) and exposes the core [[MegaContext Tree]] / [[Working Context]] mechanics in-memory.
 
+> **Status:** Core MCController/GistNet/LensNet loop implemented with opportunistic LOD2 horizons and telemetry plumbing. **Remaining Phase‑1 tasks:** (1) pick & integrate a production telemetry provider (OpenTelemetry/Grafana vs. OpenSearch/Kibana); (2) document the fairness-comparison methodology for MC vs. baseline nanochat runs; (3) finish inference-session UX + dashboards fed by the new metrics.
+
 ### Capabilities
 - **[[GistNet]] compression (32→1, 1024→1)** wired into the nanochat tokenizer/model code.
 - **[[LensNet]] focus scoring** with ΔNLL supervision and the existing [[Focus Allocator]] thresholds.

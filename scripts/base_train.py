@@ -30,7 +30,8 @@ from scripts.base_eval import evaluate_model
 
 try:
     from mc.config import MCConfig
-    from mc.runtime import MCController
+from mc.runtime import MCController
+from mc.telemetry import OpenTelemetryProvider
 except ImportError:  # pragma: no cover - optional dependency during early development
     MCController = None
     MCConfig = None
@@ -181,7 +182,15 @@ if mc_enabled:
         num_heads=num_heads,
         positional_type=positional_type,
     )
-    mc_controller = MCController(model, mc_config)
+    otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
+    otel_insecure = os.getenv("MC_OTEL_INSECURE", "0") == "1"
+    telemetry_provider = OpenTelemetryProvider(
+        service_name="megacontext-train",
+        endpoint=otel_endpoint,
+        insecure=otel_insecure,
+        resource_attributes={"run.id": run},
+    )
+    mc_controller = MCController(model, mc_config, telemetry_provider=telemetry_provider)
 orig_model = model # original, uncompiled model, for saving raw model state_dict
 model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
 num_params = sum(p.numel() for p in model.parameters())

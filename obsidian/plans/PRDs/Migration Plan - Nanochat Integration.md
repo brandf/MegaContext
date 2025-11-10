@@ -36,7 +36,7 @@ Goal: move the active MegaContext implementation from notebooks + PyTorch Lightn
 - Update README/onboarding to signal the new baseline stack before integrating MegaContext code.
 - Maintain read-only access to notebooks solely for historical reference; no further development expected.
 
-## Phase 3 — MegaContext core scaffolding
+## Phase 3 — MegaContext core scaffolding ✅
 - Implement the following as isolated modules so nanochat baseline remains functional:
   - [[MegaContext Tree]] construction utilities (ingest, refresh, serialization).
   - [[Working Context]] assembly with dynamic mixing of LOD entries.
@@ -44,10 +44,10 @@ Goal: move the active MegaContext implementation from notebooks + PyTorch Lightn
   - Registry/config glue for selecting between vanilla nanochat runs and MegaContext runs.
 - Add end-to-end smoke tests mirroring the current notebook experiments.
 
-## Phase 4 — PRD feature layering
-- **E2E Training:** Embed the [[MegaContext End-to-End Training]] loop into nanochat’s trainer, including horizon ΔNLL evaluation and gist losses.
-- **MegaPrediction:** Attach the multi-LOD decoding head defined in [[MegaPrediction Training]]; expose CLI flags for gist-first inference.
-- **Cognitive Core:** Scaffold composite memory management and CK reliance checks per [[Cognitive-Core Training]].
+## Phase 4 — PRD feature layering 🔄
+- **E2E Training:** Embed the [[MegaContext End-to-End Training]] loop into nanochat’s trainer, including horizon ΔNLL evaluation and gist losses. ✅ (multi-WC batches, opportunistic LOD2 horizons, and telemetry hooks now live; remaining work is dashboarding + inference parity).
+- **MegaPrediction:** Attach the multi-LOD decoding head defined in [[MegaPrediction Training]]; expose CLI flags for gist-first inference. ⏳
+- **Cognitive Core:** Scaffold composite memory management and CK reliance checks per [[Cognitive-Core Training]]. ⏳
 
 ## Phase 5 — Migration & validation
 - Port critical datasets/configs from notebooks; ensure determinism with nanochat pipelines.
