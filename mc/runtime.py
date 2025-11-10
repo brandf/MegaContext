@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import uuid
 
@@ -60,6 +60,7 @@ class MCBatchResult:
     lod2_loss: Optional[torch.Tensor]
     lens_loss: Optional[torch.Tensor]
     cached_embeddings: Optional[torch.Tensor]
+    positional_caches: Dict[str, Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = field(default_factory=dict)
 
 
 class MCTelemetry:
@@ -196,6 +197,7 @@ class MCController:
         self.current_batch_states = batch_states
         self.telemetry.log_focus(step, total_edits)
         positional_cache = self._build_primary_positional(batch_states) if len(batch_states) == 1 else None
+        positional_cache_map = self._build_session_positional(batch_states)
         token_loss, lod1_loss, lod2_loss = self._aggregate_horizon_losses(batch_states)
         lens_loss = self._compute_lens_losses(batch_states)
         result = MCBatchResult(
@@ -205,6 +207,7 @@ class MCController:
             lod2_loss=lod2_loss,
             lens_loss=lens_loss,
             cached_embeddings=torch.cat(cached_embeddings, dim=0) if cached_embeddings else None,
+            positional_caches=positional_cache_map,
         )
         self.current_batch_states = []
         self._emit_batch_counters(step)
@@ -248,6 +251,24 @@ class MCController:
         wc = self._select_primary_variant(batch_states)
         if wc is None or self.positional_encoder is None:
             return None
+        return self._build_wc_positional(wc)
+
+    def _build_session_positional(
+        self, batch_states: List[SampleContext]
+    ) -> Dict[str, Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]]:
+        if self.positional_encoder is None:
+            return {}
+        positional_map: Dict[str, Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = {}
+        for sample in batch_states:
+            if not sample.variants:
+                continue
+            wc = sample.variants[0].working_context
+            positional_map[sample.session_id] = self._build_wc_positional(wc)
+        return positional_map
+
+    def _build_wc_positional(
+        self, wc: WorkingContext
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         cos, sin, alibi_slopes = wc.get_positional_encodings()
         alibi_bias = None
         if alibi_slopes is not None:
@@ -255,9 +276,7 @@ class MCController:
             rel = positions.unsqueeze(2) - positions.unsqueeze(1)
             slopes = alibi_slopes.to(self.device).view(1, self.config.num_heads, 1, 1)
             alibi_bias = (slopes * rel.unsqueeze(1)).bfloat16()
-        cos = cos.to(self.device)
-        sin = sin.to(self.device)
-        return cos, sin, alibi_bias
+        return cos.to(self.device), sin.to(self.device), alibi_bias
 
     def _sample_initial_wcs(self, tree: MegaContextTree, session_id: str) -> List[WorkingContextVariant]:
         variants: List[WorkingContextVariant] = []

@@ -49,14 +49,14 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 ### MegaContext CLI knobs
 
 - **Tree / WC sampling**
-  - `--mc_tree ram|disk` (disk = placeholder until MegaCache lands).
+  - `--mc_tree ram` (disk-backed MegaContext is on the roadmap; today only the in-memory tree is wired up and the scripts will error if another value is provided).
   - `--mc_initial_wcs` (N1) and `--mc_max_counterfactuals` (N2) define how many Working Contexts we evaluate per training sequence (initial samples + LensNet siblings). Raise them for richer ΔNLL supervision; lower to save compute.
 - **Horizon & losses**
   - `--mc_horizon` sets the base teacher-forced horizon (LOD1).  
   - `--mc_long_horizon_multiplier` (defaults to 32) opportunistically upgrades to a LOD2 horizon (`block_size * multiplier` tokens) whenever enough context remains; the controller emits `horizon_trigger` telemetry each time this path runs.
   - `--mc_token_loss_weight`, `--mc_lod1_loss_weight`, `--mc_lod2_loss_weight`, `--mc_lens_loss_weight` scale the auxiliary losses blended into the vanilla nanochat objective.
 - **Allocator**
-  - `--allocator_*` thresholds (`soft_max_length`, `recent_tokens`, expand/collapse thresholds, max replacements, iterations) shape how aggressively focus edits are applied per step.
+  - `--allocator_type greedy` is the only supported policy in the current codebase; the various `--allocator_*` thresholds (`soft_max_length`, `recent_tokens`, expand/collapse thresholds, max replacements, iterations) shape how aggressively focus edits are applied per step.
 
 All scripts perform the following stages in order:
 1. Install uv deps + Rust tokenizer (via `maturin`).

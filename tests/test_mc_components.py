@@ -344,6 +344,18 @@ def test_mc_controller_returns_cached_embeddings(monkeypatch):
     assert torch.allclose(result.cached_embeddings, direct)
 
 
+def test_mc_controller_provides_per_sample_positional(monkeypatch):
+    controller = _build_mc_controller(monkeypatch)
+    tokens = torch.randint(0, 16, (2, 4))
+    result = controller.process_batch(tokens, step=0)
+    cache_map = result.positional_caches
+    assert len(cache_map) == 2
+    for cache in cache_map.values():
+        cos, sin, alibi = cache
+        assert cos.shape[0] == 1
+        assert sin.shape == cos.shape
+
+
 def test_horizon_loss_topk_projection(monkeypatch):
     controller = _build_mc_controller(monkeypatch)
     controller.config.loss_projection_top_k = 1

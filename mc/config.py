@@ -65,6 +65,9 @@ class MCConfig:
     wc_config: WorkingContextConfig = field(init=False)
 
     def __post_init__(self) -> None:
+        self.mc_tree_type = self.mc_tree_type.lower()
+        if self.mc_tree_type != "ram":
+            raise ValueError("Only mc_tree_type='ram' is supported in the current release.")
         self.tree_config = MegaContextConfig(
             embed_dim=self.embed_dim,
             block_size=self.block_size,
