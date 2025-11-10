@@ -705,7 +705,10 @@ class MCController:
             )
         horizon_embeddings = self._embed_with_padding(horizon_tokens)
         combined = torch.cat([wc_embeddings, horizon_embeddings], dim=1)
-        target_dtype = next(self.model.parameters()).dtype
+        if torch.is_autocast_enabled():
+            target_dtype = torch.get_autocast_gpu_dtype()
+        else:
+            target_dtype = next(self.model.parameters()).dtype
         if combined.dtype != target_dtype:
             combined = combined.to(target_dtype)
         cos_sin = self._compose_positional_overrides(wc, last_pos, horizon_tokens.shape[1])
