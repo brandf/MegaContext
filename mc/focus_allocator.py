@@ -38,13 +38,26 @@ class FocusAllocatorBase:
         self.working_context = working_context
         self.lensnet = lensnet
         self.cfg = config
+        # Initialize residency ages for each WC element
+        self._residency = torch.zeros(self.working_context.length, dtype=torch.long)
 
     # ------------------------------------------------------------------ #
     # Lifecycle helpers
     # ------------------------------------------------------------------ #
     def append(self, tokens: torch.Tensor, embeddings: torch.Tensor) -> None:
         start_pos = self.tree.num_tokens()
-        self.tree.append(tokens)
+        # Avoid redundant embedding runs by supplying precomputed embeddings
+        self.tree.append_with_embeddings(tokens, embeddings)
+        # Advance residency once per appended token
+        if embeddings.dim() == 2:
+            steps = 1
+        elif embeddings.dim() == 3:
+            steps = embeddings.shape[1]
+        else:
+            raise ValueError("FocusAllocatorBase.append expects embeddings shaped [B, D] or [B, T, D]")
+        for _ in range(steps):
+            if self._residency.numel() > 0:
+                self._residency += 1
         if embeddings.dim() == 2:
             seq_len = 1
         elif embeddings.dim() == 3:
@@ -66,11 +79,14 @@ class FocusAllocatorBase:
                 lod=0,
                 global_position=start_pos + offset,
             )
+            # New element at tail has age 0
+            self._residency = torch.cat([self._residency, torch.zeros(1, dtype=torch.long)])
 
     def rebuild(self, max_replacements_per_iteration: int, num_iterations: int) -> int:
         target_lod = self._choose_rebuild_lod()
         embeddings, positions = self.tree.get_level_metadata(target_lod)
         self.working_context.load_from_level(embeddings, positions, lod=target_lod)
+        self._residency = torch.zeros(self.working_context.length, dtype=torch.long)
         self._reinforce_recent_tokens()
         if max_replacements_per_iteration <= 0 or num_iterations <= 0:
             return 0
@@ -85,7 +101,17 @@ class FocusAllocatorBase:
         if max_replacements_per_iteration <= 0 or num_iterations <= 0:
             return 0
         total_edits = 0
+        # Track last edit stats for telemetry
+        self._last_edit_stats = {
+            "expand": 0,
+            "collapse": 0,
+            "total": 0,
+            "wc_length": int(self.working_context.length),
+        }
         for _ in range(num_iterations):
+            # One residency tick per allocator iteration
+            if self._residency.numel() > 0:
+                self._residency += 1
             lens_scores = scores
             if lens_scores is None:
                 lens_scores = self.lensnet(self.working_context)
@@ -101,7 +127,38 @@ class FocusAllocatorBase:
                 break
             for edit in edits:
                 self.working_context.replace(edit)
+                # Update residency ages across replaced span
+                old_count = edit.old_count
+                if old_count <= 0:
+                    if getattr(edit, "action", "") == "expand":
+                        old_count = 1
+                    elif getattr(edit, "action", "") == "collapse":
+                        old_count = self.cfg.block_size
+                    else:
+                        old_count = edit.replacements.shape[1]
+                new_count = edit.replacements.shape[1]
+                start = int(edit.wc_start)
+                start = max(0, min(start, int(self._residency.numel())))
+                end = min(int(self._residency.numel()), start + max(0, int(old_count)))
+                left = self._residency[:start]
+                right = self._residency[end:]
+                middle = torch.zeros(max(0, int(new_count)), dtype=torch.long)
+                self._residency = torch.cat([left, middle, right])
                 total_edits += 1
+                if hasattr(edit, "action") and edit.action:
+                    if edit.action == "expand":
+                        self._last_edit_stats["expand"] += 1
+                    elif edit.action == "collapse":
+                        self._last_edit_stats["collapse"] += 1
+                self._last_edit_stats["total"] += 1
+        # Summarize residency after updates
+        if self._residency.numel() > 0:
+            ages = self._residency.to(torch.float32)
+            self._last_edit_stats["residency_mean"] = float(ages.mean().item())
+            try:
+                self._last_edit_stats["residency_p95"] = float(torch.quantile(ages, 0.95).item())
+            except Exception:
+                self._last_edit_stats["residency_p95"] = float(ages.max().item())
         return total_edits
 
     def _select_edits(
@@ -162,6 +219,7 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             lod=lod - 1,
             mc_start_position=global_position,
             stride=stride,
+            action="expand",
         )
 
     def _build_collapse_edit(self, wc_index: int, lod: int, global_position: int) -> Optional[WorkingContextEdit]:
@@ -192,6 +250,7 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             lod=lod + 1,
             mc_start_position=global_position,
             stride=parent_stride,
+            action="collapse",
         )
 
     # ------------------------------------------------------------------ #

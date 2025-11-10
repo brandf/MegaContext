@@ -16,6 +16,10 @@ class WorkingContextEdit:
     lod: int
     mc_start_position: int
     stride: int = 1
+    # Optional annotation for telemetry/debugging: 'expand' or 'collapse'
+    action: str = ""
+    # Optional: how many WC elements this edit replaces (for telemetry)
+    old_count: int = 0
 
 
 class WorkingContext:

@@ -167,33 +167,16 @@ class MCController:
         tokens_device = tokens.to(self.device)
         self._reset_batch_counters()
         cached_embeddings: List[torch.Tensor] = []
-        workers = max(1, self.config.build_workers)
-        if workers > 1 and tokens_device.size(0) > 1:
-            tasks = []
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                for idx in range(tokens_device.size(0)):
-                    seq = tokens_device[idx : idx + 1]
-                    session_id = f"train_step_{step}_sample_{idx}"
-                    tasks.append(
-                        (session_id, pool.submit(self._build_tree_sample, seq, session_id))
-                    )
-                for session_id, task in tasks:
-                    tree, sample_state, seq_embeds, sample_edits = task.result()
-                    batch_states.append(sample_state)
-                    total_edits += sample_edits
-                    cached_embeddings.append(seq_embeds)
-                    self._log_tree_snapshot(session_id, tree, tag="training_build")
-                    self.telemetry.log_tree(step, tree)
-        else:
-            for idx in range(tokens_device.size(0)):
-                seq = tokens_device[idx : idx + 1]
-                session_id = f"train_step_{step}_sample_{idx}"
-                tree, sample_state, seq_embeds, sample_edits = self._build_tree_sample(seq, session_id)
-                batch_states.append(sample_state)
-                total_edits += sample_edits
-                cached_embeddings.append(seq_embeds)
-                self._log_tree_snapshot(session_id, tree, tag="training_build")
-                self.telemetry.log_tree(step, tree)
+        # Build trees sequentially to avoid GPU stream contention and nondeterminism
+        for idx in range(tokens_device.size(0)):
+            seq = tokens_device[idx : idx + 1]
+            session_id = f"train_step_{step}_sample_{idx}"
+            tree, sample_state, seq_embeds, sample_edits = self._build_tree_sample(seq, session_id)
+            batch_states.append(sample_state)
+            total_edits += sample_edits
+            cached_embeddings.append(seq_embeds)
+            self._log_tree_snapshot(session_id, tree, tag="training_build")
+            self.telemetry.log_tree(step, tree)
         self.current_batch_states = batch_states
         self.telemetry.log_focus(step, total_edits)
         positional_cache = self._build_primary_positional(batch_states) if len(batch_states) == 1 else None
@@ -262,7 +245,13 @@ class MCController:
         for sample in batch_states:
             if not sample.variants:
                 continue
-            wc = sample.variants[0].working_context
+            # Prefer recency-baseline variant when available; fallback to first
+            wc_choice = sample.variants[0]
+            for v in sample.variants:
+                if v.source.startswith("recency_baseline") or v.lod_hint == 0:
+                    wc_choice = v
+                    break
+            wc = wc_choice.working_context
             positional_map[sample.session_id] = self._build_wc_positional(wc)
         return positional_map
 
@@ -426,16 +415,11 @@ class MCController:
         if max_start == 0:
             return [0] * count
         gen_seed = self._rng.randint(0, 2**31 - 1)
-        generator = torch.Generator(device=self.device)
+        # Generate on CPU to avoid device syncs per .item()
+        generator = torch.Generator()
         generator.manual_seed(gen_seed)
-        starts = torch.randint(
-            0,
-            max_start + 1,
-            (count,),
-            generator=generator,
-            device=self.device,
-        )
-        return [int(s.item()) for s in starts]
+        starts_cpu = torch.randint(0, max_start + 1, (count,), generator=generator, device=torch.device("cpu"))
+        return [int(s) for s in starts_cpu.tolist()]
 
     def _create_variant(
         self,
@@ -627,6 +611,29 @@ class MCController:
         token_loss = torch.stack(token_losses).mean() if token_losses else None
         lod1_loss = torch.stack(lod1_losses).mean() if lod1_losses else None
         lod2_loss = torch.stack(lod2_losses).mean() if lod2_losses else None
+        # Telemetry: ΔNLL vs. recency baseline when available
+        try:
+            baseline = None
+            for v in sample.variants:
+                if v.token_loss_value is not None and (v.source.startswith("recency_baseline") or v.lod_hint == 0):
+                    baseline = v.token_loss_value
+                    break
+            if baseline is not None:
+                deltas = []
+                for v in sample.variants:
+                    if v.token_loss_value is None:
+                        continue
+                    deltas.append((v.token_loss_value - baseline).detach())
+                if deltas:
+                    d = torch.stack(deltas)
+                    payload = {
+                        "mean": float(d.mean().item()),
+                        "p95": float(torch.quantile(d, 0.95).item()),
+                        "count": int(d.numel()),
+                    }
+                    self._log_event(sample.session_id, "delta_nll", payload)
+        except Exception:
+            pass
         return token_loss, lod1_loss, lod2_loss
 
     def _evaluate_variant_horizon(
@@ -752,14 +759,7 @@ class MCController:
         gt_embeddings = self.embed(safe_tokens) * mask.unsqueeze(-1)
         gt_blocks = gt_embeddings.view(num_blocks, block, -1)
         pred_logits = horizon_logits[:, :trim, :]
-        top_k = min(self.config.loss_projection_top_k, pred_logits.size(-1))
-        probs = F.softmax(pred_logits, dim=-1)
-        if top_k < pred_logits.size(-1):
-            top_vals, top_idx = torch.topk(probs, top_k, dim=-1)
-            embed_weights = self.embed.weight[top_idx]
-            pred_embeds = (top_vals.unsqueeze(-1) * embed_weights).sum(dim=-2)
-        else:
-            pred_embeds = torch.matmul(probs, self.embed.weight)
+        pred_embeds = self._project_logits_to_embeddings(pred_logits)
         pred_blocks = pred_embeds.view(num_blocks, block, -1)
         gt_gists = self.gistnet(gt_blocks)
         pred_gists = self.gistnet(pred_blocks)
@@ -778,6 +778,24 @@ class MCController:
                     lod2_mean = lod2.mean()
         return lod1_mean, lod2_mean
 
+    def _project_logits_to_embeddings(self, pred_logits: torch.Tensor) -> torch.Tensor:
+        """Project token logits to embedding space using (truncated) probability mass.
+
+        Applies softmax, keeps top-k mass if configured, renormalizes, and
+        returns the expected embedding per position.
+        """
+        top_k = min(self.config.loss_projection_top_k, pred_logits.size(-1))
+        probs = F.softmax(pred_logits, dim=-1)
+        if top_k < pred_logits.size(-1):
+            top_vals, top_idx = torch.topk(probs, top_k, dim=-1)
+            norm = top_vals.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+            top_vals = top_vals / norm
+            embed_weights = self.embed.weight[top_idx]
+            pred_embeds = (top_vals.unsqueeze(-1) * embed_weights).sum(dim=-2)
+        else:
+            pred_embeds = torch.matmul(probs, self.embed.weight)
+        return pred_embeds
+
     def _compute_lens_losses(
         self, batch_states: List[SampleContext]
     ) -> Optional[torch.Tensor]:
@@ -789,13 +807,14 @@ class MCController:
             best_map = self._build_lod_lookup(best.working_context)
             best_loss = best.token_loss_value
             for variant in sample.variants:
-                if variant.lens_scores is None:
-                    continue
-                scores = variant.lens_scores
-                if scores.dim() > 1:
-                    scores = scores.squeeze(0)
-                targets = self._build_lens_targets(variant, best_map, scores)
-                base_loss = F.mse_loss(scores, targets, reduction='mean')
+                # Recompute scores here to allow gradients to flow into LensNet
+                scores_live = self.lensnet(variant.working_context)
+                if scores_live.dim() > 1:
+                    scores_1d = scores_live.squeeze(0)
+                else:
+                    scores_1d = scores_live
+                targets = self._build_lens_targets(variant, best_map, scores_1d)
+                base_loss = F.mse_loss(scores_1d, targets, reduction='mean')
                 if variant.token_loss_value is not None:
                     weight = 1.0 + (variant.token_loss_value - best_loss).clamp(min=0)
                     base_loss = base_loss * weight
@@ -852,6 +871,20 @@ class MCController:
             "lod_hint": variant.lod_hint,
             "edits": variant.edits_applied,
         }
+        # Attach swap-rate and token-budget utilization if allocator exposed stats
+        if variant.allocator is not None and hasattr(variant.allocator, "_last_edit_stats"):
+            stats = getattr(variant.allocator, "_last_edit_stats") or {}
+            wc_len = max(1, stats.get("wc_length", variant.working_context.length))
+            swap_rate = float(stats.get("total", 0)) / float(wc_len)
+            payload.update({
+                "swap_rate": swap_rate,
+                "num_expand": int(stats.get("expand", 0)),
+                "num_collapse": int(stats.get("collapse", 0)),
+                "wc_length": int(wc_len),
+                "utilization": float(variant.working_context.length) / float(self.config.wc_config.max_length),
+                "residency_mean": float(stats.get("residency_mean", 0.0)),
+                "residency_p95": float(stats.get("residency_p95", 0.0)),
+            })
         payload.update(score_payload)
         self._log_event(session_id, "focus_allocator", payload)
 
@@ -1049,6 +1082,7 @@ class MCController:
                 lod_hint=0,
                 edits_applied=0,
                 lens_scores=None,
+                allocator=self.inference_state.allocator,
             ),
             tag="inference_focus",
         )

@@ -14,7 +14,12 @@ MegaContext's telemetry infrastructure provides **real-time and post-hoc** analy
 ### Current Status (implemented vs. planned)
 
 - Implemented events/metrics (emitted today):
-  - `mc_tree_snapshot` (tree summary, token counts), `working_context_snapshot` (positions, LODs), `focus_allocator` (score stats, edits), `horizon_trigger` (LOD2 upgrade), `mc_batch_counters` (per-step counters).
+  - `mc_tree_snapshot`: tree summary and token counts.
+  - `working_context_snapshot`: WC length, positions, LODs, recent events.
+  - `focus_allocator`: score stats and edit telemetry — now includes `swap_rate`, `num_expand`, `num_collapse`, `wc_length`, `utilization` (WC/Budget), `residency_mean`, `residency_p95`.
+  - `delta_nll`: per-sample ΔNLL summary vs. recency baseline (`mean`, `p95`, `count`).
+  - `horizon_trigger`: LOD2 upgrade trigger metadata.
+  - `mc_batch_counters`: per-step counters.
 - Planned (not yet emitted):
   - Swap rate, residency histograms, token budget utilization, ΔNLL@H time series, latency streams. Dashboards should treat these as placeholders until the controller wires them up.
 

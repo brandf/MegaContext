@@ -279,11 +279,17 @@ class MegaContextTree:
         return summary
 
     def _embed_tokens_range(self, start: int, end: int) -> torch.Tensor:
-        if self.tokens is None or self.embedder is None:
+        if self.tokens is None:
             raise ValueError("Tree lacks tokens/embedder for LOD0 operations")
         total = self.tokens.shape[1]
         start = max(0, min(start, total))
         end = max(start, min(end, total))
+        # Prefer cached embeddings if available
+        if self._lod0_cache is not None:
+            self.access_counters["token_slice"] += 1
+            return self._lod0_cache[:, start:end]
+        if self.embedder is None:
+            raise ValueError("Tree lacks embedder for LOD0 operations")
         token_slice = self.tokens[:, start:end]
         self.access_counters["token_slice"] += 1
         return self.embedder(token_slice)
@@ -295,6 +301,35 @@ class MegaContextTree:
         if self.tokens is not None and self.embedder is not None:
             return self._embed_tokens_range(start, end)
         return self.get_level(0)[:, start:end]
+
+    def append_with_embeddings(self, tokens: torch.Tensor, embeddings: torch.Tensor) -> None:
+        """Append tokens along with their precomputed LOD0 embeddings.
+
+        Accepts embeddings shaped [B, D] or [B, T, D]. Updates the token buffer
+        and the LOD0 cache without re-running the embedder.
+        """
+        if self.tokens is None:
+            raise ValueError("Tree not initialized with tokens")
+        # Normalize token shape to [B, T]
+        if tokens.dim() == 1:
+            tokens = tokens.unsqueeze(1)
+        elif tokens.dim() != 2:
+            raise ValueError("append_with_embeddings expects tokens shaped [B] or [B, T]")
+        tokens = tokens.to(self.device).long()
+        self.tokens = torch.cat([self.tokens, tokens], dim=1)
+
+        # Normalize embeddings to [B, T, D]
+        if embeddings.dim() == 2:
+            embeddings = embeddings.unsqueeze(1)
+        elif embeddings.dim() != 3:
+            raise ValueError("append_with_embeddings expects embeddings shaped [B, D] or [B, T, D]")
+        embeddings = embeddings.to(self.device)
+        if self._lod0_cache is None:
+            # Initialize cache lazily if needed
+            self._lod0_cache = embeddings
+        else:
+            self._lod0_cache = torch.cat([self._lod0_cache, embeddings], dim=1)
+        self._refresh_after_append()
 
     def get_access_stats(self) -> Dict[str, Dict[int, int]]:
         return {
