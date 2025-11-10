@@ -38,10 +38,15 @@ class OpenTelemetryProvider:
             from opentelemetry import trace
             from opentelemetry.sdk.resources import Resource
             from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor, OTLPSpanExporter
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+            try:
+                # Newer releases ship exporters under opentelemetry.exporter.*
+                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+            except ImportError:
+                from opentelemetry.sdk.trace.export import OTLPSpanExporter  # type: ignore[assignment]
         except ImportError as exc:  # pragma: no cover - dependency issue
             raise ImportError(
-                "opentelemetry-sdk and opentelemetry-exporter-otlp are required for OpenTelemetryProvider"
+                "opentelemetry-sdk and opentelemetry-exporter-otlp-proto-grpc (or proto-http) are required for OpenTelemetryProvider"
             ) from exc
 
         resource = Resource.create(
