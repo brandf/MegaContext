@@ -13,7 +13,7 @@
 - [x] Every sample is embedded twice: once when the tree is built (`self.embed(tokens)`) and again inside the main GPT forward pass, roughly doubling embedding FLOPs and SRAM footprint for long contexts. Sharing the embedding lookup (or reusing MC’s cached LOD0 tensor) would free ~15–20% wall-clock. (`mc/runtime.py:144`, `scripts/base_train.py:272`)
 - [x] `_reshape_for_pool` and the mean baseline treat zero padding as real tokens, so tail blocks with <`block_size` tokens get diluted gists and inaccurate access stats; masking out padded positions before pooling would keep higher LODs faithful. (`mc/mega_context.py:94`)
 - [ ] Tree+variant construction is entirely serial over the batch, with Python `random` sampling and repeated tensor clones on the default stream; large device batches stall waiting for MC bookkeeping. Consider vectorizing by batching token embeddings and doing variant sampling in Torch. (`mc/runtime.py:140`)
-- [ ] Horizon LOD losses materialize full vocab probabilities (`torch.matmul(pred_probs, self.embed.weight)`) for every block. This scales poorly with large vocabularies; projecting via a smaller learned head or reusing the model’s internal value projections could cut both compute and memory. (`mc/runtime.py:573`)
+- [x] Horizon LOD losses materialize full vocab probabilities (`torch.matmul(pred_probs, self.embed.weight)`) for every block. This scales poorly with large vocabularies; projecting via a smaller learned head or reusing the model’s internal value projections could cut both compute and memory. (`mc/runtime.py:573`)
 
 ## Architecture & Feature Suggestions
 - [ ] Provide per-sample positional caches (or a map from session→cos/sin) so the model can opt into MC-conditioned RoPE on a subset of sequences instead of forcing a single cache across the whole batch. (`mc/runtime.py:200`)
@@ -25,7 +25,7 @@
 ## Consistency, Comments, and Documentation Gaps
 - [x] CLI defaults still mention `allocator_type="transformer"`/`"simple"`, but the factory always returns `GreedyFocusAllocator`; add a note in the config help or prune the unused options to avoid confusion during ablations. (`scripts/base_train.py:116`, `mc/focus_allocator.py:183`)
 - [x] `WorkingContext.append`’s docstring never states that it only handles a single time-step (`[B, D]`), which hid the inference bug above. Updating the docstring (and adding an assert) would save future readers time. (`mc/working_context.py:81`)
-- [ ] The telemetry provider section in `scripts/base_train.py` assumes OTLP deps are present once `mc_enabled=1`, but the setup docs never call this out. A short note in the ops README about required `opentelemetry-sdk` wheels would prevent runtime import errors. (`scripts/base_train.py:186`)
+- [x] The telemetry provider section in `scripts/base_train.py` assumes OTLP deps are present once `mc_enabled=1`, but the setup docs never call this out. A short note in the ops README about required `opentelemetry-sdk` wheels would prevent runtime import errors. (`scripts/base_train.py:186`)
 - [ ] Comments still describe MC as “Phase 1 instrumentation” but the code now drives auxiliary losses into training; aligning the README/ops docs with the current behavior would set expectations for anyone comparing vanilla nanochat baselines. (`mc/runtime.py:84`, `obsidian/ops/Training & Operations.md:47`)
 
 ## Recommended Pre-run Checks

@@ -124,6 +124,9 @@ export MC_OTEL_ENDPOINT="http://tempo:4318"
 export MC_OTEL_INSECURE=1  # set only if you’re skipping TLS
 ```
 
+> **Install the OTLP deps before enabling MC telemetry.**  
+> The nanochat project treats `opentelemetry-sdk` and `opentelemetry-exporter-otlp` as optional extras, so your Python environment may not have them by default. Install the CPU wheels once per environment (e.g., `uv pip install opentelemetry-sdk opentelemetry-exporter-otlp`) before running `--mc_enabled=1`, otherwise the script falls back to `NoOpTelemetryProvider`.
+
 If you need to disable telemetry entirely, unset `MC_OTEL_ENDPOINT` (the provider falls back to OTLP defaults) or patch the script to use `NoOpTelemetryProvider`.
 
 Once enabled, expect event types such as `mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `horizon_trigger`, and `inference_update`. Use them to drive Grafana dashboards / alerts (see [[Telemetry]] for schema details).

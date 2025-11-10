@@ -310,17 +310,19 @@ def test_random_span_sampling_uses_seed(monkeypatch):
     controller_a = _build_mc_controller(monkeypatch, random_seed=42)
     embedder_a = nn.Embedding(64, controller_a.config.embed_dim)
     tree_a = MegaContextTree.from_tokens(tokens, embedder_a, controller_a.config.tree_config)
-    variant_a = controller_a._build_random_span_variant(tree_a)
+    cache_a = {}
+    variant_a = controller_a._build_random_span_variant(tree_a, cache_a)
     controller_b = _build_mc_controller(monkeypatch, random_seed=42)
     embedder_b = nn.Embedding(64, controller_b.config.embed_dim)
     tree_b = MegaContextTree.from_tokens(tokens, embedder_b, controller_b.config.tree_config)
-    variant_b = controller_b._build_random_span_variant(tree_b)
+    cache_b = {}
+    variant_b = controller_b._build_random_span_variant(tree_b, cache_b)
     assert variant_a is not None and variant_b is not None
     assert variant_a.source == variant_b.source
     controller_alt = _build_mc_controller(monkeypatch, random_seed=7)
     embedder_alt = nn.Embedding(64, controller_alt.config.embed_dim)
     tree_alt = MegaContextTree.from_tokens(tokens, embedder_alt, controller_alt.config.tree_config)
-    variant_c = controller_alt._build_random_span_variant(tree_alt)
+    variant_c = controller_alt._build_random_span_variant(tree_alt, {})
     assert variant_c is not None
     assert variant_c.source != variant_a.source
 
@@ -340,3 +342,12 @@ def test_mc_controller_returns_cached_embeddings(monkeypatch):
     assert result.cached_embeddings is not None
     direct = controller.embed(tokens.to(controller.device))
     assert torch.allclose(result.cached_embeddings, direct)
+
+
+def test_horizon_loss_topk_projection(monkeypatch):
+    controller = _build_mc_controller(monkeypatch)
+    controller.config.loss_projection_top_k = 1
+    tokens = torch.randint(0, 16, (1, 8))
+    logits = torch.randn(1, tokens.shape[1], controller.embed.weight.shape[0])
+    lod1, lod2 = controller._compute_lod_losses(tokens, logits, use_lod2=False)
+    assert lod1 is None or lod1 >= 0

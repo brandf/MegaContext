@@ -229,22 +229,28 @@ class MCController:
 
     def _sample_initial_wcs(self, tree: MegaContextTree, session_id: str) -> List[WorkingContextVariant]:
         variants: List[WorkingContextVariant] = []
-        baseline = self._build_recency_variant(tree)
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+        baseline = self._build_recency_variant(tree, level_cache)
         if baseline is not None:
             variants.append(baseline)
         target = self.config.initial_working_contexts
         for lod in range(1, self.config.max_lod + 1):
             if len(variants) >= target:
                 break
-            variant = self._build_lod_variant(tree, lod)
+            variant = self._build_lod_variant(tree, lod, level_cache)
             if variant is not None:
                 variants.append(variant)
-        self._ensure_highest_lod_coverage(tree, variants, target)
-        while len(variants) < target:
-            variant = self._build_random_span_variant(tree)
-            if variant is None:
-                break
-            variants.append(variant)
+        self._ensure_highest_lod_coverage(tree, variants, target, level_cache)
+        needed = target - len(variants)
+        if needed > 0:
+            starts = self._sample_random_span_starts(tree, level_cache, needed)
+            for start in starts:
+                variant = self._build_span_variant(tree, start, level_cache)
+                if variant is None:
+                    continue
+                variants.append(variant)
+                if len(variants) >= target:
+                    break
         return variants
 
     def _ensure_highest_lod_coverage(
@@ -252,6 +258,7 @@ class MCController:
         tree: MegaContextTree,
         variants: List[WorkingContextVariant],
         target: int,
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
     ) -> None:
         available = [
             lod
@@ -263,47 +270,121 @@ class MCController:
         highest = max(available)
         if any(v.lod_hint == highest for v in variants):
             return
-        variant = self._build_lod_variant(tree, highest)
+        variant = self._build_lod_variant(tree, highest, level_cache)
         if variant is None:
             return
         if len(variants) >= target:
             variants.pop()
         variants.append(variant)
 
-    def _build_recency_variant(self, tree: MegaContextTree) -> Optional[WorkingContextVariant]:
-        try:
-            embeddings, positions = tree.get_level_metadata(0)
-        except ValueError:
+    def _build_recency_variant(
+        self,
+        tree: MegaContextTree,
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+    ) -> Optional[WorkingContextVariant]:
+        metadata = self._get_level_metadata_cached(tree, 0, level_cache)
+        if metadata is None:
             return None
+        embeddings, positions = metadata
         window = self.config.wc_config.max_length
         if embeddings.shape[1] > window:
             embeddings = embeddings[:, -window:]
             positions = positions[:, -window:]
         return self._create_variant(embeddings, positions, lod=0, source="recency_baseline")
 
-    def _build_lod_variant(self, tree: MegaContextTree, lod: int) -> Optional[WorkingContextVariant]:
-        try:
-            embeddings, positions = tree.get_level_metadata(lod)
-        except ValueError:
+    def _build_lod_variant(
+        self,
+        tree: MegaContextTree,
+        lod: int,
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+    ) -> Optional[WorkingContextVariant]:
+        metadata = self._get_level_metadata_cached(tree, lod, level_cache)
+        if metadata is None:
             return None
+        embeddings, positions = metadata
         if embeddings.shape[1] == 0:
             return None
         return self._create_variant(embeddings, positions, lod=lod, source=f"lod_{lod}")
 
-    def _build_random_span_variant(self, tree: MegaContextTree) -> Optional[WorkingContextVariant]:
-        try:
-            embeddings, positions = tree.get_level_metadata(0)
-        except ValueError:
+    def _build_random_span_variant(
+        self,
+        tree: MegaContextTree,
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+    ) -> Optional[WorkingContextVariant]:
+        metadata = self._get_level_metadata_cached(tree, 0, level_cache)
+        if metadata is None:
             return None
+        embeddings, positions = metadata
         total = embeddings.shape[1]
         window = self.config.wc_config.max_length
         if total <= window:
             return None
         start = self._rng.randint(0, max(0, total - window))
-        end = start + window
-        span_embeddings = embeddings[:, start:end]
-        span_positions = positions[:, start:end]
-        return self._create_variant(span_embeddings, span_positions, lod=0, source=f"random_span_{start}")
+        return self._build_span_variant_from_metadata(embeddings, positions, start, window)
+
+    def _build_span_variant(
+        self,
+        tree: MegaContextTree,
+        start: int,
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+    ) -> Optional[WorkingContextVariant]:
+        metadata = self._get_level_metadata_cached(tree, 0, level_cache)
+        if metadata is None:
+            return None
+        embeddings, positions = metadata
+        window = self.config.wc_config.max_length
+        return self._build_span_variant_from_metadata(embeddings, positions, start, window)
+
+    def _build_span_variant_from_metadata(
+        self,
+        embeddings: torch.Tensor,
+        positions: torch.Tensor,
+        start: int,
+        window: int,
+    ) -> Optional[WorkingContextVariant]:
+        total = embeddings.shape[1]
+        if total <= window:
+            return None
+        max_start = max(0, total - window)
+        clamped_start = max(0, min(start, max_start))
+        end = clamped_start + window
+        span_embeddings = embeddings[:, clamped_start:end]
+        span_positions = positions[:, clamped_start:end]
+        return self._create_variant(
+            span_embeddings,
+            span_positions,
+            lod=0,
+            source=f"random_span_{clamped_start}",
+        )
+
+    def _sample_random_span_starts(
+        self,
+        tree: MegaContextTree,
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+        count: int,
+    ) -> List[int]:
+        metadata = self._get_level_metadata_cached(tree, 0, level_cache)
+        if metadata is None or count <= 0:
+            return []
+        embeddings, _ = metadata
+        total = embeddings.shape[1]
+        window = self.config.wc_config.max_length
+        if total <= window:
+            return []
+        max_start = max(0, total - window)
+        if max_start == 0:
+            return [0] * count
+        gen_seed = self._rng.randint(0, 2**31 - 1)
+        generator = torch.Generator(device=self.device)
+        generator.manual_seed(gen_seed)
+        starts = torch.randint(
+            0,
+            max_start + 1,
+            (count,),
+            generator=generator,
+            device=self.device,
+        )
+        return [int(s.item()) for s in starts]
 
     def _create_variant(
         self,
@@ -315,6 +396,21 @@ class MCController:
         wc = WorkingContext(embeddings, positions, self.config.wc_config)
         self._configure_wc_positional(wc)
         return WorkingContextVariant(working_context=wc, source=source, lod_hint=lod)
+
+    def _get_level_metadata_cached(
+        self,
+        tree: MegaContextTree,
+        lod: int,
+        cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        if lod in cache:
+            return cache[lod]
+        try:
+            metadata = tree.get_level_metadata(lod)
+        except ValueError:
+            return None
+        cache[lod] = metadata
+        return metadata
 
     def _configure_wc_positional(self, wc: WorkingContext) -> None:
         wc.set_positional_spec(
@@ -605,8 +701,14 @@ class MCController:
         gt_embeddings = self.embed(safe_tokens) * mask.unsqueeze(-1)
         gt_blocks = gt_embeddings.view(num_blocks, block, -1)
         pred_logits = horizon_logits[:, :trim, :]
-        pred_probs = F.softmax(pred_logits, dim=-1)
-        pred_embeds = torch.matmul(pred_probs, self.embed.weight)
+        top_k = min(self.config.loss_projection_top_k, pred_logits.size(-1))
+        probs = F.softmax(pred_logits, dim=-1)
+        if top_k < pred_logits.size(-1):
+            top_vals, top_idx = torch.topk(probs, top_k, dim=-1)
+            embed_weights = self.embed.weight[top_idx]
+            pred_embeds = (top_vals.unsqueeze(-1) * embed_weights).sum(dim=-2)
+        else:
+            pred_embeds = torch.matmul(probs, self.embed.weight)
         pred_blocks = pred_embeds.view(num_blocks, block, -1)
         gt_gists = self.gistnet(gt_blocks)
         pred_gists = self.gistnet(pred_blocks)

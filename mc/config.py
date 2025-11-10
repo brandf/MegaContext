@@ -58,6 +58,7 @@ class MCConfig:
     num_heads: int = 1
     positional_type: Optional[str] = "gaussian"
     random_seed: Optional[int] = None
+    loss_projection_top_k: int = 64
 
     tree_config: MegaContextConfig = field(init=False)
     wc_config: WorkingContextConfig = field(init=False)
