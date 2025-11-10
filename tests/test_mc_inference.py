@@ -48,3 +48,21 @@ def test_inference_facade_smoke():
     wc1 = controller.get_inference_working_context()
     assert wc1 is not None and wc1.length >= wc0.length
 
+
+def test_mc_controller_validates_head_divisibility():
+    vocab_size = 16
+    embed_dim = 10
+    model = DummyModel(vocab_size, embed_dim)
+    cfg = MCConfig(
+        embed_dim=embed_dim,
+        max_seq_len=16,
+        block_size=2,
+        device="cpu",
+        initial_working_contexts=1,
+        max_counterfactuals=1,
+        horizon_tokens=0,
+        allocator_recent_tokens=0,
+        num_heads=3,
+    )
+    with pytest.raises(ValueError, match="embed_dim must be divisible"):
+        MCController(model, cfg)

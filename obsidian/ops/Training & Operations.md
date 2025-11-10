@@ -57,6 +57,8 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
   - `--mc_token_loss_weight`, `--mc_lod1_loss_weight`, `--mc_lod2_loss_weight`, `--mc_lens_loss_weight` scale the auxiliary losses blended into the vanilla nanochat objective.
 - **Allocator**
   - `--allocator_type greedy|stochastic_greedy` toggles between deterministic focus edits and a top-|score| sampler (tunable via `--allocator_sample_top_k`, `--allocator_sample_temperature`). The other `--allocator_*` thresholds (`soft_max_length`, `recent_tokens`, expand/collapse thresholds, max replacements, iterations) shape how aggressively focus edits are applied per step.
+- **Positional caches**
+  - `MCController.process_batch` exposes `positional_caches` keyed by session id; the trainer stitches these into batched overrides so MC RoPE/ALiBi apply even when `B > 1`. You can still experiment with custom usage by intercepting the dict.
 
 All scripts perform the following stages in order:
 1. Install uv deps + Rust tokenizer (via `maturin`).

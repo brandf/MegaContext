@@ -310,7 +310,7 @@ class MegaContextTree:
         total = self.tokens.shape[1]
         start = max(0, min(start, total))
         end = max(start, min(end, total))
-        # Prefer cached embeddings if available
+        # Prefer cached embeddings when available to avoid recomputing the token embedder for repeated slices
         if self._lod0_cache is not None:
             self.access_counters["token_slice"] += 1
             return self._lod0_cache[:, start:end]

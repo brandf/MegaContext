@@ -42,7 +42,7 @@ These scripts run tokenizer → base → mid → chat SFT end-to-end, drop check
 > 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the MegaContext controller. The knobs below configure the tree/working-context components and their auxiliary losses:
 
 - `MCController.process_batch(...)` now returns `cached_embeddings` alongside the positional cache and auxiliary losses, so advanced callers can reuse the exact `[B, T, D]` embeddings when experimenting with counterfactual Working Context edits without re-running the token embedding layer.
-- The same call also exposes `positional_caches`, a dict keyed by session id that stores per-sample `(cos, sin, alibi)` tuples. Use it if you want to supply MC-conditioned RoPE/ALiBi selectively instead of sharing a single cache across the batch.
+- The same call also exposes `positional_caches`, a dict keyed by session id that stores per-sample `(cos, sin, alibi)` tuples; `scripts/base_train.py` now stitches these into batched overrides so MC RoPE applies even when `B > 1`.
 > - `--block_size` (default 32) controls how many tokens feed each gist.
 > - `--gistnet_type transformer|mean`, `--gistnet_layers {2,4}`, `--gistnet_pooling mean|query|cls`, `--gistnet_head linear|mlp` (defaults transformer/2/mean/mlp).
 > - `--lensnet_type transformer`, `--lensnet_layers {2,4,8}`, `--lensnet_head linear|mlp` (defaults transformer/2/mlp).

@@ -55,11 +55,13 @@ class MCConfig:
     allocator_collapse_threshold: float = 0.1
     allocator_max_replacements: int = 4
     allocator_iterations: int = 2
+    allocator_sample_top_k: int = 4
+    allocator_sample_temperature: float = 1.0
     num_heads: int = 1
     positional_type: Optional[str] = "gaussian"
     random_seed: Optional[int] = None
     loss_projection_top_k: int = 64
-    build_workers: int = 1
+    build_workers: int = 1  # TODO(mc): wire up parallel tree builds or remove this knob
     cache_lod0: bool = True
 
     tree_config: MegaContextConfig = field(init=False)

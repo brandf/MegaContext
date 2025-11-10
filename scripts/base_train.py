@@ -87,6 +87,8 @@ allocator_expand_threshold = 0.1
 allocator_collapse_threshold = 0.1
 allocator_max_replacements = 4
 allocator_iterations = 2
+allocator_sample_top_k = 4
+allocator_sample_temperature = 1.0
 mc_tree_type = "ram"
 mc_initial_wcs = 4
 mc_max_counterfactuals = 8
@@ -181,6 +183,8 @@ if mc_enabled:
         allocator_collapse_threshold=allocator_collapse_threshold,
         allocator_max_replacements=allocator_max_replacements,
         allocator_iterations=allocator_iterations,
+        allocator_sample_top_k=allocator_sample_top_k,
+        allocator_sample_temperature=allocator_sample_temperature,
         num_heads=num_heads,
         positional_type=positional_type,
     )

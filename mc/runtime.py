@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import random
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import uuid
@@ -108,6 +107,8 @@ class MCController:
             "sibling_collapses": 0,
             "allocator_edits": 0,
         }
+        if config.embed_dim % config.num_heads != 0:
+            raise ValueError("embed_dim must be divisible by num_heads for positional encodings")
         self.embed = self._resolve_embedding_layer(model)
         embed_dim = config.embed_dim
         self._head_dim = embed_dim // config.num_heads
@@ -133,6 +134,11 @@ class MCController:
         self.telemetry_provider = telemetry_provider or NoOpTelemetryProvider()
         self.positional_encoder: Optional[GaussianRoPE] = None
         if config.positional_type:
+            if config.positional_type in {"gaussian_lod2d", "gaussian_lod2d_alibi"}:
+                raise ValueError(
+                    "LOD-2D positional modes require a GPT rotary kernel that supports 2D; "
+                    "select one of {simple, gaussian, gaussian_alibi}."
+                )
             self.positional_encoder = build_positional(
                 config.positional_type,
                 head_dim=self._head_dim,
@@ -172,7 +178,7 @@ class MCController:
             "horizon_forward_ms": 0.0,
             "horizon_loss_ms": 0.0,
         }
-        # Build trees sequentially to avoid GPU stream contention and nondeterminism
+        # Build trees sequentially to avoid GPU stream contention and keep allocator edits deterministic across runs
         t_build0 = time.time()
         for idx in range(tokens_device.size(0)):
             seq = tokens_device[idx : idx + 1]
@@ -555,6 +561,8 @@ class MCController:
             recent_tokens=self.config.allocator_recent_tokens,
             expand_threshold=self.config.allocator_expand_threshold,
             collapse_threshold=self.config.allocator_collapse_threshold,
+            sample_top_k=self.config.allocator_sample_top_k,
+            sample_temperature=self.config.allocator_sample_temperature,
         )
         return build_focus_allocator(
             self.config.allocator_type,
