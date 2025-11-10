@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import uuid
@@ -165,27 +166,33 @@ class MCController:
         tokens_device = tokens.to(self.device)
         self._reset_batch_counters()
         cached_embeddings: List[torch.Tensor] = []
-        for idx in range(tokens_device.size(0)):
-            seq = tokens_device[idx : idx + 1]
-            session_id = f"train_step_{step}_sample_{idx}"
-            seq_embeds = self.embed(seq)
-            tree = build_mega_context(
-                self.config.mc_tree_type,
-                seq,
-                self.embed,
-                self.config.tree_config,
-                gistnet=self.gistnet,
-                precomputed_embeddings=seq_embeds,
-            )
-            self._log_tree_snapshot(session_id, tree, tag="training_build")
-            sample_state = self._build_sample_context(tree, session_id=session_id)
-            batch_states.append(sample_state)
-            for variant in sample_state.variants:
-                total_edits += max(0, variant.edits_applied)
-                if variant.edits_applied:
-                    self._increment_counter("allocator_edits", variant.edits_applied)
-            self.telemetry.log_tree(step, tree)
-            cached_embeddings.append(seq_embeds)
+        workers = max(1, self.config.build_workers)
+        if workers > 1 and tokens_device.size(0) > 1:
+            tasks = []
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for idx in range(tokens_device.size(0)):
+                    seq = tokens_device[idx : idx + 1]
+                    session_id = f"train_step_{step}_sample_{idx}"
+                    tasks.append(
+                        (session_id, pool.submit(self._build_tree_sample, seq, session_id))
+                    )
+                for session_id, task in tasks:
+                    tree, sample_state, seq_embeds, sample_edits = task.result()
+                    batch_states.append(sample_state)
+                    total_edits += sample_edits
+                    cached_embeddings.append(seq_embeds)
+                    self._log_tree_snapshot(session_id, tree, tag="training_build")
+                    self.telemetry.log_tree(step, tree)
+        else:
+            for idx in range(tokens_device.size(0)):
+                seq = tokens_device[idx : idx + 1]
+                session_id = f"train_step_{step}_sample_{idx}"
+                tree, sample_state, seq_embeds, sample_edits = self._build_tree_sample(seq, session_id)
+                batch_states.append(sample_state)
+                total_edits += sample_edits
+                cached_embeddings.append(seq_embeds)
+                self._log_tree_snapshot(session_id, tree, tag="training_build")
+                self.telemetry.log_tree(step, tree)
         self.current_batch_states = batch_states
         self.telemetry.log_focus(step, total_edits)
         positional_cache = self._build_primary_positional(batch_states) if len(batch_states) == 1 else None
@@ -202,6 +209,29 @@ class MCController:
         self.current_batch_states = []
         self._emit_batch_counters(step)
         return result
+
+    def _build_tree_sample(
+        self,
+        seq: torch.Tensor,
+        session_id: str,
+    ) -> Tuple[MegaContextTree, SampleContext, torch.Tensor, int]:
+        seq_embeds = self.embed(seq)
+        tree = build_mega_context(
+            self.config.mc_tree_type,
+            seq,
+            self.embed,
+            self.config.tree_config,
+            gistnet=self.gistnet,
+            precomputed_embeddings=seq_embeds,
+        )
+        sample_state = self._build_sample_context(tree, session_id=session_id)
+        sample_edits = 0
+        for variant in sample_state.variants:
+            edits = max(0, variant.edits_applied)
+            sample_edits += edits
+            if edits:
+                self._increment_counter("allocator_edits", edits)
+        return tree, sample_state, seq_embeds, sample_edits
 
     # ------------------------------------------------------------------ #
     # Training helpers
@@ -225,6 +255,8 @@ class MCController:
             rel = positions.unsqueeze(2) - positions.unsqueeze(1)
             slopes = alibi_slopes.to(self.device).view(1, self.config.num_heads, 1, 1)
             alibi_bias = (slopes * rel.unsqueeze(1)).bfloat16()
+        cos = cos.to(self.device)
+        sin = sin.to(self.device)
         return cos, sin, alibi_bias
 
     def _sample_initial_wcs(self, tree: MegaContextTree, session_id: str) -> List[WorkingContextVariant]:

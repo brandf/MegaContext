@@ -44,7 +44,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 | $100 speed tier | `bash speedrun.sh [--mc] ...` | 8×H100, depth 20 (Karpathy’s “best $100” recipe). |
 | $1000 tier | `bash run1000.sh [--mc] ...` | 8×H100, depth 32 with tuned accumulation. |
 
-`--mc` toggles the Phase 1 MegaContext instrumentation (tree/working-context/controller) without altering the default nanochat flow. Leave it off to reproduce the upstream baselines. The additional knobs control MC-specific behaviors as described below.
+`--mc` toggles the full MegaContext controller (tree/working-context/controller) without altering the default nanochat flow. Leave it off to reproduce the upstream baselines. The additional knobs control MC-specific behaviors as described below.
 
 ### MegaContext CLI knobs
 

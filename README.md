@@ -39,7 +39,7 @@ The detailed operating guide (env prep, telemetry, troubleshooting) lives in [`o
 
 These scripts run tokenizer → base → mid → chat SFT end-to-end, drop checkpoints in `~/.cache/nanochat`, and generate `report/report.md`. For chat/web demos after training, follow [[Base Runtime]](./obsidian/ops/Base%20Runtime.md).
 
-> 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the Phase 1 MegaContext instrumentation. Optional knobs let you pick the exact component configuration:
+> 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the MegaContext controller. The knobs below configure the tree/working-context components and their auxiliary losses:
 > - `--block_size` (default 32) controls how many tokens feed each gist.
 > - `--gistnet_type transformer|mean`, `--gistnet_layers {2,4}`, `--gistnet_pooling mean|query|cls`, `--gistnet_head linear|mlp` (defaults transformer/2/mean/mlp).
 > - `--lensnet_type transformer`, `--lensnet_layers {2,4,8}`, `--lensnet_head linear|mlp` (defaults transformer/2/mlp).
