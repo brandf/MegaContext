@@ -375,6 +375,9 @@ for step in range(num_iterations + 1):
                 mc_time_samples.append((t_mc1 - t_mc0) * 1000.0)
             except Exception as exc: # pragma: no cover - guard against optional path regressions
                 print0(f"[MegaContext] controller error at step {step}: {exc}")
+                import traceback
+
+                traceback.print_exc()
             else:
                 if mc_result is not None:
                     positional_cache = mc_result.positional_cache

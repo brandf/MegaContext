@@ -107,7 +107,7 @@ class MCController:
             "sibling_collapses": 0,
             "allocator_edits": 0,
         }
-        self._dtype_debug_logged = False
+        self._debug_flags: Dict[str, bool] = {}
         if config.embed_dim % config.num_heads != 0:
             raise ValueError("embed_dim must be divisible by num_heads for positional encodings")
         self.embed = self._resolve_embedding_layer(model)
@@ -709,11 +709,28 @@ class MCController:
             target_dtype = torch.get_autocast_gpu_dtype()
         else:
             target_dtype = next(self.model.parameters()).dtype
+        dtype_logged = False
         if wc_embeddings.dtype != target_dtype:
+            if not self._debug_flags.get("dtype_cast_wc", False):
+                print(f"[MegaContext] casting wc embeddings {wc_embeddings.dtype} -> {target_dtype}", flush=True)
+                self._debug_flags["dtype_cast_wc"] = True
             wc_embeddings = wc_embeddings.to(target_dtype)
+            dtype_logged = True
         if horizon_embeddings.dtype != target_dtype:
+            if not self._debug_flags.get("dtype_cast_horizon", False):
+                print(f"[MegaContext] casting horizon embeddings {horizon_embeddings.dtype} -> {target_dtype}", flush=True)
+                self._debug_flags["dtype_cast_horizon"] = True
             horizon_embeddings = horizon_embeddings.to(target_dtype)
+            dtype_logged = True
         combined = torch.cat([wc_embeddings, horizon_embeddings], dim=1)
+        if not self._debug_flags.get("dtype_state_logged", False):
+            print(
+                "[MegaContext] pre-forward dtype state: "
+                f"wc={wc_embeddings.dtype}, horizon={horizon_embeddings.dtype}, combined={combined.dtype}, "
+                f"target={target_dtype}, autocast={torch.is_autocast_enabled()}",
+                flush=True,
+            )
+            self._debug_flags["dtype_state_logged"] = True
         cos_sin = self._compose_positional_overrides(wc, last_pos, horizon_tokens.shape[1])
         dummy_idx = torch.zeros(
             (1, combined.shape[1]), dtype=torch.long, device=self.device
@@ -727,15 +744,13 @@ class MCController:
                 inputs_embeds=combined,
             )
         except RuntimeError as exc:
-            if not self._dtype_debug_logged:
-                print(
-                    "[MegaContext] model forward failed. "
-                    f"wc_dtype={wc_embeddings.dtype}, horizon_dtype={horizon_embeddings.dtype}, "
-                    f"combined_dtype={combined.dtype}, target_dtype={target_dtype}, "
-                    f"autocast={torch.is_autocast_enabled()}. Error: {exc}",
-                    flush=True,
-                )
-                self._dtype_debug_logged = True
+            print(
+                "[MegaContext] model forward failed. "
+                f"wc_dtype={wc_embeddings.dtype}, horizon_dtype={horizon_embeddings.dtype}, "
+                f"combined_dtype={combined.dtype}, target_dtype={target_dtype}, "
+                f"autocast={torch.is_autocast_enabled()}. Error: {exc}",
+                flush=True,
+            )
             raise
         t_forward1 = time.time()
         if timing_stats is not None:
