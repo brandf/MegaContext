@@ -39,6 +39,7 @@ class MegaContextTree:
         embedder: nn.Module,
         config: MegaContextConfig,
         gistnet: Optional["GistNetBase"] = None,
+        precomputed_embeddings: Optional[torch.Tensor] = None,
     ) -> "MegaContextTree":
         tree = cls(config, tokens.device)
         tree.attach_gistnet(gistnet)
@@ -46,7 +47,10 @@ class MegaContextTree:
         tree.tokens = tokens.to(tree.device).long()
         tree.batch_size = tokens.shape[0]
         batch, seq_len = tree.tokens.shape
-        lod0_embeddings = embedder(tree.tokens)
+        if precomputed_embeddings is not None:
+            lod0_embeddings = precomputed_embeddings.to(tree.device)
+        else:
+            lod0_embeddings = embedder(tree.tokens)
         tree._lod0_cache = lod0_embeddings
         tree._build_higher_levels(lod0_embeddings)
         return tree
@@ -330,6 +334,7 @@ def build_mega_context(
     embedder: nn.Module,
     config: MegaContextConfig,
     gistnet: Optional["GistNetBase"] = None,
+    precomputed_embeddings: Optional[torch.Tensor] = None,
 ) -> MegaContextTree:
     key = kind.lower()
     try:
@@ -338,7 +343,13 @@ def build_mega_context(
         target_device = tokens.device
     tokens = tokens.to(target_device)
     if key == "ram":
-        return MegaContextTree.from_tokens(tokens, embedder, config, gistnet=gistnet)
+        return MegaContextTree.from_tokens(
+            tokens,
+            embedder,
+            config,
+            gistnet=gistnet,
+            precomputed_embeddings=precomputed_embeddings,
+        )
     if key == "disk":
         raise NotImplementedError("Disk-backed MegaContextTree is not implemented yet")
     raise ValueError(f"Unknown MegaContext implementation: {kind}")

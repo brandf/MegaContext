@@ -79,7 +79,7 @@ gistnet_head = "mlp"  # mlp | linear
 lensnet_type = "transformer"
 lensnet_layers = 2
 lensnet_head = "mlp"
-allocator_type = "simple"
+allocator_type = "greedy"
 positional_type = "gaussian"
 allocator_soft_max = max_seq_len
 allocator_recent_tokens = 128
@@ -384,7 +384,16 @@ for step in range(num_iterations + 1):
                 cos_sin_override = positional_cache[:2]
                 if len(positional_cache) > 2:
                     alibi_override = positional_cache[2]
-            base_loss = model(x, y, cos_sin_override=cos_sin_override, alibi_override=alibi_override)
+            inputs_embeds_override = None
+            if mc_result is not None and mc_result.cached_embeddings is not None:
+                inputs_embeds_override = mc_result.cached_embeddings.to(device)
+            base_loss = model(
+                x,
+                y,
+                cos_sin_override=cos_sin_override,
+                alibi_override=alibi_override,
+                inputs_embeds=inputs_embeds_override,
+            )
             mc_extra_loss = base_loss.new_zeros(())
             if mc_controller is not None and mc_result is not None:
                 if mc_result.token_loss is not None:

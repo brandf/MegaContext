@@ -39,7 +39,7 @@ class MCConfig:
     lensnet_type: str = "transformer"
     lensnet_layers: int = 2
     lensnet_head: str = "mlp"  # mlp | linear
-    allocator_type: str = "transformer"
+    allocator_type: str = "greedy"
     mc_tree_type: str = "ram"
     initial_working_contexts: int = 4
     max_counterfactuals: int = 8
@@ -57,6 +57,7 @@ class MCConfig:
     allocator_iterations: int = 2
     num_heads: int = 1
     positional_type: Optional[str] = "gaussian"
+    random_seed: Optional[int] = None
 
     tree_config: MegaContextConfig = field(init=False)
     wc_config: WorkingContextConfig = field(init=False)

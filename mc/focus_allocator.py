@@ -239,8 +239,8 @@ def build_focus_allocator(
     config: FocusAllocatorConfig,
 ) -> FocusAllocatorBase:
     key = kind.lower()
-    if key not in {"transformer", "simple", "greedy"}:
-        raise ValueError(f"Unknown FocusAllocator implementation: {kind}")
+    if key != "greedy":
+        raise ValueError(f"Unsupported FocusAllocator implementation: {kind}")
     return GreedyFocusAllocator(
         tree=tree,
         working_context=working_context,

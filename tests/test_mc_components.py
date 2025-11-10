@@ -1,4 +1,5 @@
 import math
+from typing import List, Optional
 
 import pytest
 
@@ -12,7 +13,7 @@ from mc.gistnet import GistNetBase
 from mc.mega_context import MegaContextTree
 from mc.runtime import MCController
 import mc.runtime as mc_runtime
-from mc.telemetry import NoOpTelemetryProvider
+from mc.telemetry import NoOpTelemetryProvider, TelemetryEvent, TelemetryProvider
 from mc.working_context import WorkingContext, WorkingContextEdit
 
 
@@ -43,6 +44,14 @@ class DummyTransformer(nn.Module):
     def __init__(self, vocab_size: int, embed_dim: int) -> None:
         super().__init__()
         self.wte = nn.Embedding(vocab_size, embed_dim)
+
+
+class RecordingTelemetryProvider(TelemetryProvider):
+    def __init__(self) -> None:
+        self.events: List[TelemetryEvent] = []
+
+    def log_event(self, event: TelemetryEvent) -> None:
+        self.events.append(event)
 
 
 class DummyModel(nn.Module):
@@ -76,7 +85,13 @@ class DummyModel(nn.Module):
         )
 
 
-def _build_mc_controller(monkeypatch, embed_dim: int = 8, block_size: int = 2) -> MCController:
+def _build_mc_controller(
+    monkeypatch,
+    embed_dim: int = 8,
+    block_size: int = 2,
+    random_seed: Optional[int] = None,
+    telemetry_provider: Optional[TelemetryProvider] = None,
+) -> MCController:
     vocab_size = 32
     monkeypatch.setattr(mc_runtime, "get_report", lambda: DummyReport())
     model = DummyModel(vocab_size=vocab_size, embed_dim=embed_dim)
@@ -90,8 +105,10 @@ def _build_mc_controller(monkeypatch, embed_dim: int = 8, block_size: int = 2) -
         initial_working_contexts=1,
         max_counterfactuals=1,
         allocator_recent_tokens=0,
+        random_seed=random_seed,
     )
-    return MCController(model, config, telemetry_provider=NoOpTelemetryProvider())
+    provider = telemetry_provider or NoOpTelemetryProvider()
+    return MCController(model, config, telemetry_provider=provider)
 
 
 def test_mega_context_levels_shrink_progressively():
@@ -216,6 +233,31 @@ def test_focus_allocator_respects_supplied_scores():
     assert edits == 0
 
 
+def test_build_focus_allocator_rejects_unsupported_kind():
+    tree_config = MegaContextConfig(embed_dim=4, block_size=2, max_lod=1, device="cpu")
+    embedder = nn.Embedding(16, tree_config.embed_dim)
+    tokens = torch.arange(4).view(1, 4)
+    tree = MegaContextTree.from_tokens(tokens, embedder, tree_config)
+    wc_config = WorkingContextConfig(embed_dim=tree_config.embed_dim, max_length=16, device="cpu")
+    wc = WorkingContext(tree.get_level(0), tree.get_positions_for_lod(0), wc_config)
+    cfg = FocusAllocatorConfig(
+        block_size=tree_config.block_size,
+        max_lod=tree_config.max_lod,
+        soft_max_length=16,
+        recent_tokens=0,
+        expand_threshold=1.0,
+        collapse_threshold=1.0,
+    )
+    with pytest.raises(ValueError):
+        build_focus_allocator(
+            "simple",
+            tree=tree,
+            working_context=wc,
+            lensnet=ZeroLensNet(),
+            config=cfg,
+        )
+
+
 def test_mc_controller_positional_cache_requires_single_sample(monkeypatch):
     controller = _build_mc_controller(monkeypatch)
     tokens_multi = torch.randint(0, 16, (2, 8))
@@ -261,3 +303,40 @@ def test_mean_pooling_skips_padding():
     lod1 = tree.get_level(1)
     expected = torch.tensor([[[2.0, 2.0]]])
     assert torch.allclose(lod1, expected)
+
+
+def test_random_span_sampling_uses_seed(monkeypatch):
+    tokens = torch.arange(0, 64).view(1, 64)
+    controller_a = _build_mc_controller(monkeypatch, random_seed=42)
+    embedder_a = nn.Embedding(64, controller_a.config.embed_dim)
+    tree_a = MegaContextTree.from_tokens(tokens, embedder_a, controller_a.config.tree_config)
+    variant_a = controller_a._build_random_span_variant(tree_a)
+    controller_b = _build_mc_controller(monkeypatch, random_seed=42)
+    embedder_b = nn.Embedding(64, controller_b.config.embed_dim)
+    tree_b = MegaContextTree.from_tokens(tokens, embedder_b, controller_b.config.tree_config)
+    variant_b = controller_b._build_random_span_variant(tree_b)
+    assert variant_a is not None and variant_b is not None
+    assert variant_a.source == variant_b.source
+    controller_alt = _build_mc_controller(monkeypatch, random_seed=7)
+    embedder_alt = nn.Embedding(64, controller_alt.config.embed_dim)
+    tree_alt = MegaContextTree.from_tokens(tokens, embedder_alt, controller_alt.config.tree_config)
+    variant_c = controller_alt._build_random_span_variant(tree_alt)
+    assert variant_c is not None
+    assert variant_c.source != variant_a.source
+
+
+def test_mc_controller_logs_batch_counters(monkeypatch):
+    telemetry = RecordingTelemetryProvider()
+    controller = _build_mc_controller(monkeypatch, telemetry_provider=telemetry)
+    tokens = torch.randint(0, 16, (1, 4))
+    controller.process_batch(tokens, step=0)
+    assert any(event.event_type == "mc_batch_counters" for event in telemetry.events)
+
+
+def test_mc_controller_returns_cached_embeddings(monkeypatch):
+    controller = _build_mc_controller(monkeypatch)
+    tokens = torch.randint(0, 16, (1, 4))
+    result = controller.process_batch(tokens, step=0)
+    assert result.cached_embeddings is not None
+    direct = controller.embed(tokens.to(controller.device))
+    assert torch.allclose(result.cached_embeddings, direct)

@@ -58,6 +58,7 @@ class MCBatchResult:
     lod1_loss: Optional[torch.Tensor]
     lod2_loss: Optional[torch.Tensor]
     lens_loss: Optional[torch.Tensor]
+    cached_embeddings: Optional[torch.Tensor]
 
 
 class MCTelemetry:
@@ -97,6 +98,13 @@ class MCController:
         self.model = model
         self.config = config
         self.device = torch.device(config.device)
+        self._rng = random.Random(config.random_seed)
+        self._batch_counters = {
+            "horizon_triggers": 0,
+            "sibling_expands": 0,
+            "sibling_collapses": 0,
+            "allocator_edits": 0,
+        }
         self.embed = self._resolve_embedding_layer(model)
         embed_dim = config.embed_dim
         self._head_dim = embed_dim // config.num_heads
@@ -155,22 +163,29 @@ class MCController:
         batch_states: List[SampleContext] = []
         total_edits = 0
         tokens_device = tokens.to(self.device)
+        self._reset_batch_counters()
+        cached_embeddings: List[torch.Tensor] = []
         for idx in range(tokens_device.size(0)):
             seq = tokens_device[idx : idx + 1]
             session_id = f"train_step_{step}_sample_{idx}"
+            seq_embeds = self.embed(seq)
             tree = build_mega_context(
                 self.config.mc_tree_type,
                 seq,
                 self.embed,
                 self.config.tree_config,
                 gistnet=self.gistnet,
+                precomputed_embeddings=seq_embeds,
             )
             self._log_tree_snapshot(session_id, tree, tag="training_build")
             sample_state = self._build_sample_context(tree, session_id=session_id)
             batch_states.append(sample_state)
             for variant in sample_state.variants:
                 total_edits += max(0, variant.edits_applied)
+                if variant.edits_applied:
+                    self._increment_counter("allocator_edits", variant.edits_applied)
             self.telemetry.log_tree(step, tree)
+            cached_embeddings.append(seq_embeds)
         self.current_batch_states = batch_states
         self.telemetry.log_focus(step, total_edits)
         positional_cache = self._build_primary_positional(batch_states) if len(batch_states) == 1 else None
@@ -182,8 +197,10 @@ class MCController:
             lod1_loss=lod1_loss,
             lod2_loss=lod2_loss,
             lens_loss=lens_loss,
+            cached_embeddings=torch.cat(cached_embeddings, dim=0) if cached_embeddings else None,
         )
         self.current_batch_states = []
+        self._emit_batch_counters(step)
         return result
 
     # ------------------------------------------------------------------ #
@@ -282,7 +299,7 @@ class MCController:
         window = self.config.wc_config.max_length
         if total <= window:
             return None
-        start = random.randint(0, max(0, total - window))
+        start = self._rng.randint(0, max(0, total - window))
         end = start + window
         span_embeddings = embeddings[:, start:end]
         span_positions = positions[:, start:end]
@@ -355,6 +372,7 @@ class MCController:
             sibling = self._force_expand_variant(tree, variant, idx)
             if sibling is not None:
                 siblings.append(sibling)
+                self._increment_counter("sibling_expands")
                 break
         # Force a collapse on the strongest negative score.
         collapse_indices = torch.argsort(scores, descending=False).tolist()
@@ -362,6 +380,7 @@ class MCController:
             sibling = self._force_collapse_variant(tree, variant, idx)
             if sibling is not None:
                 siblings.append(sibling)
+                self._increment_counter("sibling_collapses")
                 break
         return siblings
 
@@ -397,6 +416,18 @@ class MCController:
     def _log_event(self, session_id: str, event_type: str, payload: Dict[str, any]) -> None:
         event = TelemetryEvent(session_id=session_id, event_type=event_type, payload=payload)
         self.telemetry_provider.log_event(event)
+
+    def _reset_batch_counters(self) -> None:
+        for key in self._batch_counters:
+            self._batch_counters[key] = 0
+
+    def _increment_counter(self, name: str, value: int = 1) -> None:
+        self._batch_counters[name] = self._batch_counters.get(name, 0) + int(value)
+
+    def _emit_batch_counters(self, step: int) -> None:
+        payload = {"step": int(step)}
+        payload.update({k: int(v) for k, v in self._batch_counters.items()})
+        self._log_event(f"train_step_{step}", "mc_batch_counters", payload)
 
     def _clone_working_context(self, wc: WorkingContext) -> WorkingContext:
         embeddings = wc.to_tensor().clone()
@@ -471,6 +502,7 @@ class MCController:
         if horizon_tokens is None:
             return None, None, None
         if use_lod2:
+            self._increment_counter("horizon_triggers")
             self._log_event(
                 sample.session_id,
                 "horizon_trigger",
