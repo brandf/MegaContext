@@ -18,6 +18,9 @@ class FocusAllocatorConfig:
     recent_tokens: int = 0
     expand_threshold: float = 0.1
     collapse_threshold: float = 0.1
+    # Stochastic-greedy options (optional)
+    sample_top_k: int = 4
+    sample_temperature: float = 1.0
 
 
 class FocusAllocatorBase:
@@ -298,11 +301,65 @@ def build_focus_allocator(
     config: FocusAllocatorConfig,
 ) -> FocusAllocatorBase:
     key = kind.lower()
-    if key != "greedy":
-        raise ValueError(f"Unsupported FocusAllocator implementation: {kind}")
-    return GreedyFocusAllocator(
-        tree=tree,
-        working_context=working_context,
-        lensnet=lensnet,
-        config=config,
-    )
+    if key == "greedy":
+        return GreedyFocusAllocator(
+            tree=tree,
+            working_context=working_context,
+            lensnet=lensnet,
+            config=config,
+        )
+    if key == "stochastic_greedy":
+        return StochasticGreedyFocusAllocator(
+            tree=tree,
+            working_context=working_context,
+            lensnet=lensnet,
+            config=config,
+        )
+    raise ValueError(f"Unsupported FocusAllocator implementation: {kind}")
+
+
+class StochasticGreedyFocusAllocator(GreedyFocusAllocator):
+    """
+    Stochastic variant: sample among top-k |score| candidates using a softmax over
+    magnitudes with temperature, while preserving protections and thresholds.
+    """
+
+    def _select_edits(
+        self,
+        scores: torch.Tensor,
+        max_replacements: int,
+        prefer_collapse: bool,
+    ) -> List[WorkingContextEdit]:
+        edits: List[WorkingContextEdit] = []
+        lods = self.working_context.get_lod_tensor()[0]
+        positions = self.working_context.get_positions()[0]
+        length = scores.numel()
+        protected_start = max(0, length - self.cfg.recent_tokens)
+        # Candidate indices sorted by |score|
+        order = torch.argsort(torch.abs(scores), descending=True)
+        pool: List[int] = [int(i.item()) for i in order if int(i.item()) < protected_start]
+        # Sampling loop
+        while pool and len(edits) < max_replacements:
+            top_k = min(self.cfg.sample_top_k, len(pool))
+            cand = pool[:top_k]
+            mags = torch.tensor([abs(float(scores[i])) for i in cand], dtype=torch.float32)
+            if mags.sum().item() == 0:
+                # nothing to do
+                break
+            probs = torch.softmax(mags / max(self.cfg.sample_temperature, 1e-6), dim=0)
+            choice_idx = int(torch.multinomial(probs, num_samples=1).item())
+            idx = cand[choice_idx]
+            score = float(scores[idx].item())
+            lod = int(lods[idx].item())
+            global_pos = int(positions[idx].item())
+            edit: Optional[WorkingContextEdit] = None
+            # Match greedy thresholds; when over soft length, favor collapse by disabling expand
+            if score >= self.cfg.expand_threshold and lod > 0 and not prefer_collapse:
+                edit = self._build_expand_edit(idx, lod, global_pos)
+            elif score <= -self.cfg.collapse_threshold and lod < self.cfg.max_lod:
+                edit = self._build_collapse_edit(idx, lod, global_pos)
+            if edit is not None:
+                edits.append(edit)
+            # Remove chosen index from pool regardless to avoid repeats
+            pool = [p for p in pool if p != idx]
+        return edits

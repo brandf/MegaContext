@@ -92,7 +92,9 @@ class MegaContextTree:
             if self.gistnet is not None:
                 masked = grouped * mask
                 flat = masked.view(-1, self.config.block_size, self.config.embed_dim)
-                pooled = self.gistnet(flat).view(batch, new_len, self.config.embed_dim)
+                mask2d = mask.view(batch, new_len, self.config.block_size, 1).squeeze(-1)
+                mask2d = mask2d.reshape(-1, self.config.block_size)
+                pooled = self._apply_gistnet(flat, mask2d).view(batch, new_len, self.config.embed_dim)
             else:
                 weighted = grouped * mask
                 counts = mask.sum(dim=2).clamp_min(1.0)
@@ -175,10 +177,34 @@ class MegaContextTree:
             return
         child_block = self._gather_child_block(lod, node_index)
         if self.gistnet is not None:
-            gist = self.gistnet(child_block).unsqueeze(1)
+            # Build a per-block mask for padded children
+            block_size = self.config.block_size
+            child_lod = lod - 1
+            start = node_index * block_size
+            valid = block_size
+            if child_lod == 0:
+                total = self.num_tokens()
+                valid = max(0, min(block_size, total - start))
+            else:
+                children = self.levels[child_lod]
+                valid = max(0, min(block_size, children.shape[1] - start))
+            mask2d = torch.zeros(child_block.shape[0], child_block.shape[1], dtype=torch.bool, device=child_block.device)
+            if valid > 0:
+                mask2d[:, :valid] = True
+            gist = self._apply_gistnet(child_block, mask2d).unsqueeze(1)
         else:
             gist = child_block.mean(dim=1, keepdim=True)
         self.levels[lod][:, node_index : node_index + 1] = gist
+
+    def _apply_gistnet(self, blocks: torch.Tensor, mask: Optional[torch.Tensor]) -> torch.Tensor:
+        if self.gistnet is None:
+            raise ValueError("GistNet not attached")
+        if mask is not None:
+            try:
+                return self.gistnet(blocks, key_padding_mask=mask)
+            except TypeError:
+                return self.gistnet(blocks)
+        return self.gistnet(blocks)
 
     def _gather_child_block(self, lod: int, node_index: int) -> torch.Tensor:
         child_lod = lod - 1

@@ -46,7 +46,7 @@ These scripts run tokenizer → base → mid → chat SFT end-to-end, drop check
 > - `--block_size` (default 32) controls how many tokens feed each gist.
 > - `--gistnet_type transformer|mean`, `--gistnet_layers {2,4}`, `--gistnet_pooling mean|query|cls`, `--gistnet_head linear|mlp` (defaults transformer/2/mean/mlp).
 > - `--lensnet_type transformer`, `--lensnet_layers {2,4,8}`, `--lensnet_head linear|mlp` (defaults transformer/2/mlp).
-> - `--allocator greedy` is the current policy. Advanced knobs—`--allocator_soft_max`, `--allocator_recent_tokens`, `--allocator_expand_threshold`, `--allocator_collapse_threshold`, `--allocator_max_replacements`, `--allocator_iterations`—are exposed through `scripts/base_train.py` for fine-grained control over the greedy expand/collapse loop.
+> - `--allocator greedy|stochastic_greedy` picks the focus policy. `stochastic_greedy` samples among the top-|score| candidates (tune via `--allocator_sample_top_k`, `--allocator_sample_temperature`) while respecting recent-token protection and soft length. Advanced knobs—`--allocator_soft_max`, `--allocator_recent_tokens`, `--allocator_expand_threshold`, `--allocator_collapse_threshold`, `--allocator_max_replacements`, `--allocator_iterations`—are exposed through `scripts/base_train.py` for fine-grained control.
 > - `--mc_tree ram` selects the MegaContext backing store (current release accepts only `ram`). A future `disk` mode is reserved for a MegaCache-backed implementation.
 > - `--mc_initial_wcs`, `--mc_max_counterfactuals` tune how many Working Contexts (initial + LensNet siblings) are sampled per training sequence.
 > - `--mc_horizon`, `--mc_long_horizon_multiplier` control the opportunistic LOD1/LOD2 teacher-forced horizon (defaults give 32-token LOD1 horizons that upgrade to 1024-token LOD2 horizons whenever the sequence is long enough).
@@ -55,7 +55,7 @@ These scripts run tokenizer → base → mid → chat SFT end-to-end, drop check
 
 When comparing MC-enabled vs. vanilla runs, normalize by tokens, FLOPs, or wall-clock time rather than raw `step` counts (MC batches perform more work per update). `scripts/base_train.py` already logs `total_training_flops`, `total_training_time`, and `mc/*` loss metrics so you can overlay both training curves fairly in W&B or Grafana.
 
-Telemetry: the training scripts now instantiate the built-in OpenTelemetry provider (OTLP exporter) whenever `--mc` is set. Point it at Tempo/Grafana (or any OTLP-compatible backend) by exporting `MC_OTEL_ENDPOINT` (e.g., `http://localhost:4318`) and `MC_OTEL_INSECURE=1` if needed. Each MC session emits structured spans (`mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `horizon_trigger`, etc.) that you can visualize alongside WANDB metrics.
+Telemetry: the training scripts now instantiate the built-in OpenTelemetry provider (OTLP exporter) whenever `--mc` is set. Point it at Tempo/Grafana (or any OTLP-compatible backend) by exporting `MC_OTEL_ENDPOINT` (e.g., `http://localhost:4318`) and `MC_OTEL_INSECURE=1` if needed. Each MC session emits structured spans (`mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `horizon_trigger`, `mc_timing`, etc.) that you can visualize alongside WANDB metrics, and `scripts/base_train.py` logs `mc/time_controller_ms` so you can catch controller slowdowns.
 
 ---
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -167,7 +168,12 @@ class MCController:
         tokens_device = tokens.to(self.device)
         self._reset_batch_counters()
         cached_embeddings: List[torch.Tensor] = []
+        timing_details = {
+            "horizon_forward_ms": 0.0,
+            "horizon_loss_ms": 0.0,
+        }
         # Build trees sequentially to avoid GPU stream contention and nondeterminism
+        t_build0 = time.time()
         for idx in range(tokens_device.size(0)):
             seq = tokens_device[idx : idx + 1]
             session_id = f"train_step_{step}_sample_{idx}"
@@ -177,12 +183,19 @@ class MCController:
             cached_embeddings.append(seq_embeds)
             self._log_tree_snapshot(session_id, tree, tag="training_build")
             self.telemetry.log_tree(step, tree)
+        t_build1 = time.time()
         self.current_batch_states = batch_states
         self.telemetry.log_focus(step, total_edits)
+        t_pos0 = time.time()
         positional_cache = self._build_primary_positional(batch_states) if len(batch_states) == 1 else None
         positional_cache_map = self._build_session_positional(batch_states)
-        token_loss, lod1_loss, lod2_loss = self._aggregate_horizon_losses(batch_states)
+        t_pos1 = time.time()
+        t_hor0 = time.time()
+        token_loss, lod1_loss, lod2_loss = self._aggregate_horizon_losses(batch_states, timing_details)
+        t_hor1 = time.time()
+        t_lens0 = time.time()
         lens_loss = self._compute_lens_losses(batch_states)
+        t_lens1 = time.time()
         result = MCBatchResult(
             positional_cache=positional_cache,
             token_loss=token_loss,
@@ -194,6 +207,19 @@ class MCController:
         )
         self.current_batch_states = []
         self._emit_batch_counters(step)
+        # Emit timing telemetry (ms)
+        self._log_event(
+            f"train_step_{step}",
+            "mc_timing",
+            {
+                "build_ms": (t_build1 - t_build0) * 1000.0,
+                "positional_ms": (t_pos1 - t_pos0) * 1000.0,
+                "horizon_ms": (t_hor1 - t_hor0) * 1000.0,
+                "lens_ms": (t_lens1 - t_lens0) * 1000.0,
+                "horizon_forward_ms": timing_details["horizon_forward_ms"],
+                "horizon_loss_ms": timing_details["horizon_loss_ms"],
+            },
+        )
         return result
 
     def _build_tree_sample(
@@ -210,6 +236,8 @@ class MCController:
             gistnet=self.gistnet,
             precomputed_embeddings=seq_embeds,
         )
+        if not self.config.cache_lod0:
+            tree.release_lod0_cache(disable_future_cache=True)
         sample_state = self._build_sample_context(tree, session_id=session_id)
         sample_edits = 0
         for variant in sample_state.variants:
@@ -574,13 +602,15 @@ class MCController:
         return clone
 
     def _aggregate_horizon_losses(
-        self, batch_states: List[SampleContext]
+        self,
+        batch_states: List[SampleContext],
+        timing_stats: Optional[Dict[str, float]] = None,
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         token_losses = []
         lod1_losses = []
         lod2_losses = []
         for sample in batch_states:
-            token_loss, lod1_loss, lod2_loss = self._compute_horizon_losses_for_sample(sample)
+            token_loss, lod1_loss, lod2_loss = self._compute_horizon_losses_for_sample(sample, timing_stats)
             if token_loss is not None:
                 token_losses.append(token_loss)
             if lod1_loss is not None:
@@ -593,13 +623,15 @@ class MCController:
         return agg_token, agg_lod1, agg_lod2
 
     def _compute_horizon_losses_for_sample(
-        self, sample: SampleContext
+        self,
+        sample: SampleContext,
+        timing_stats: Optional[Dict[str, float]] = None,
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         token_losses = []
         lod1_losses = []
         lod2_losses = []
         for variant in sample.variants:
-            token_loss, lod1_loss, lod2_loss = self._evaluate_variant_horizon(sample, variant)
+            token_loss, lod1_loss, lod2_loss = self._evaluate_variant_horizon(sample, variant, timing_stats)
             if token_loss is not None:
                 variant.token_loss_value = token_loss
                 token_losses.append(token_loss)
@@ -640,6 +672,7 @@ class MCController:
         self,
         sample: SampleContext,
         variant: WorkingContextVariant,
+        timing_stats: Optional[Dict[str, float]] = None,
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
         base_horizon = self.config.horizon_tokens
         if base_horizon <= 0 or sample.tree.tokens is None:
@@ -668,19 +701,27 @@ class MCController:
         dummy_idx = torch.zeros(
             (1, combined.shape[1]), dtype=torch.long, device=self.device
         )
+        t_forward0 = time.time()
         logits = self.model(
             dummy_idx,
             targets=None,
             cos_sin_override=cos_sin,
             inputs_embeds=combined,
         )
+        t_forward1 = time.time()
+        if timing_stats is not None:
+            timing_stats["horizon_forward_ms"] += (t_forward1 - t_forward0) * 1000.0
         horizon_logits = logits[:, -horizon_tokens.shape[1]:, :]
+        t_loss0 = time.time()
         token_loss = F.cross_entropy(
             horizon_logits.reshape(-1, horizon_logits.size(-1)),
             horizon_tokens.view(-1),
             ignore_index=-1,
         )
         lod1_loss, lod2_loss = self._compute_lod_losses(horizon_tokens, horizon_logits, use_lod2=use_lod2)
+        if timing_stats is not None:
+            t_loss1 = time.time()
+            timing_stats["horizon_loss_ms"] += (t_loss1 - t_loss0) * 1000.0
         return token_loss, lod1_loss, lod2_loss
 
     def _compose_positional_overrides(
@@ -1036,6 +1077,8 @@ class MCController:
                 self.config.tree_config,
                 gistnet=self.gistnet,
             )
+        if not self.config.cache_lod0:
+            tree.release_lod0_cache(disable_future_cache=True)
         # Build a recency-based working context with a local level cache,
         # mirroring the training path.
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}

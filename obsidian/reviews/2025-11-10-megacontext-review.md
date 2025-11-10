@@ -13,6 +13,8 @@ Scope: MC core (tree, working context, gist/lens, allocator, positional), the MC
 - The training script integration is mature for single-batch positional override and loss mixing, with thoughtful telemetry hooks (OpenTelemetry) and reproducibility knobs.
 - A few correctness/performance edge cases and polish opportunities remain, especially around positional variants, GistNet padding semantics, and making ablation workflows smoother for tomorrow’s runs.
 
+Update (2025-11-10): Batched MC RoPE is now applied for B>1 training by stacking per-sample `(cos, sin, alibi)` from `MCController.process_batch(...).positional_caches`; see `scripts/base_train.py` and `tests/test_mc_batched_rope.py`. Single-sample fast path unchanged. Controller instrumentation now surfaces `mc/time_controller_ms` in WANDB and emits `mc_timing` spans (`build_ms`, `positional_ms`, `horizon_ms`, `lens_ms`, `horizon_forward_ms`, `horizon_loss_ms`).
+
 ## High‑Priority Issues (fix before long runs)
 - Positional “LOD 2D” compatibility
   - Risk: `gaussian_lod2d*` doubles cos/sin channels in `GaussianRoPE` but `nanochat.gpt.apply_rotary_emb` expects cos/sin with head_dim/2. Using 2D variants will mis-shape rotary embedding and likely error or silently mis-apply.
@@ -139,4 +141,3 @@ Scope: MC core (tree, working context, gist/lens, allocator, positional), the MC
 - Track `mc/*` metrics and the OTEL spans; compare curves normalized by tokens/time.
 
 If you want, I can implement the guardrail for 2D positional modes and add a brief README note before you run.
-

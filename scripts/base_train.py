@@ -275,6 +275,7 @@ for step in range(num_iterations + 1):
     mc_lod1_loss_samples = []
     mc_lod2_loss_samples = []
     mc_lens_loss_samples = []
+    mc_time_samples: list[float] = []
 
     # once in a while: evaluate the val bpb (all ranks participate)
     if last_step or step % eval_every == 0:
@@ -363,7 +364,11 @@ for step in range(num_iterations + 1):
         positional_cache = None
         if mc_controller is not None:
             try:
+                t_mc0 = time.time()
                 mc_result = mc_controller.process_batch(x.detach(), step, context="train")
+                t_mc1 = time.time()
+                # Collect MC controller timing (ms) for logging later
+                mc_time_samples.append((t_mc1 - t_mc0) * 1000.0)
             except Exception as exc: # pragma: no cover - guard against optional path regressions
                 print0(f"[MegaContext] controller error at step {step}: {exc}")
             else:
@@ -381,9 +386,41 @@ for step in range(num_iterations + 1):
             cos_sin_override = None
             alibi_override = None
             if positional_cache is not None:
+                # Single-sample fast path: controller provided a batch-level cache
                 cos_sin_override = positional_cache[:2]
                 if len(positional_cache) > 2:
                     alibi_override = positional_cache[2]
+            elif mc_result is not None and hasattr(mc_result, "positional_caches") and mc_result.positional_caches:
+                # Batched path: assemble per-sample caches returned by the controller
+                try:
+                    B = x.size(0)
+                    cos_list, sin_list, alibi_list = [], [], []
+                    for b in range(B):
+                        key = f"train_step_{step}_sample_{b}"
+                        if key not in mc_result.positional_caches:
+                            raise KeyError(key)
+                        cos_b, sin_b, alibi_b = mc_result.positional_caches[key]
+                        cos_list.append(cos_b.to(device))
+                        sin_list.append(sin_b.to(device))
+                        alibi_list.append(alibi_b.to(device) if alibi_b is not None else None)
+                    cos = torch.cat(cos_list, dim=0)
+                    sin = torch.cat(sin_list, dim=0)
+                    cos_sin_override = (cos, sin)
+                    if any(a is not None for a in alibi_list):
+                        # Fill missing per-sample ALiBi with zeros of the correct shape
+                        T = cos_list[0].size(1)
+                        H = mc_controller.config.num_heads if mc_controller is not None else 1
+                        filled = []
+                        for a in alibi_list:
+                            if a is None:
+                                filled.append(torch.zeros((1, H, T, T), dtype=torch.bfloat16, device=device))
+                            else:
+                                filled.append(a.to(device))
+                        alibi_override = torch.cat(filled, dim=0)
+                except Exception as _:
+                    # Fallback to default RoPE if assembly fails; training still proceeds
+                    cos_sin_override = None
+                    alibi_override = None
             inputs_embeds_override = None
             if mc_result is not None and mc_result.cached_embeddings is not None:
                 inputs_embeds_override = mc_result.cached_embeddings.to(device)
@@ -459,6 +496,9 @@ for step in range(num_iterations + 1):
         }
         if grad_clip_enabled:
             log_data["train/grad_norm"] = grad_norm
+        if mc_time_samples:
+            log_data["mc/time_controller_ms"] = sum(mc_time_samples) / len(mc_time_samples)
+            mc_time_samples.clear()
         if mc_token_loss_val is not None:
             log_data["mc/token_loss"] = mc_token_loss_val
         if mc_lod1_loss_val is not None:

@@ -56,7 +56,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
   - `--mc_long_horizon_multiplier` (defaults to 32) opportunistically upgrades to a LOD2 horizon (`block_size * multiplier` tokens) whenever enough context remains; the controller emits `horizon_trigger` telemetry each time this path runs.
   - `--mc_token_loss_weight`, `--mc_lod1_loss_weight`, `--mc_lod2_loss_weight`, `--mc_lens_loss_weight` scale the auxiliary losses blended into the vanilla nanochat objective.
 - **Allocator**
-  - `--allocator_type greedy` is the only supported policy in the current codebase; the various `--allocator_*` thresholds (`soft_max_length`, `recent_tokens`, expand/collapse thresholds, max replacements, iterations) shape how aggressively focus edits are applied per step.
+  - `--allocator_type greedy|stochastic_greedy` toggles between deterministic focus edits and a top-|score| sampler (tunable via `--allocator_sample_top_k`, `--allocator_sample_temperature`). The other `--allocator_*` thresholds (`soft_max_length`, `recent_tokens`, expand/collapse thresholds, max replacements, iterations) shape how aggressively focus edits are applied per step.
 
 All scripts perform the following stages in order:
 1. Install uv deps + Rust tokenizer (via `maturin`).
@@ -72,9 +72,9 @@ All scripts perform the following stages in order:
 2. **Launch script** appropriate to your hardware.
 3. **Monitor**:
    - `tail -f report/log.txt` (if running inside `screen`/`tmux`).
-   - WANDB dashboard for ΔNLL@H, swap rate, residency, MFU, plus the new `mc/token_loss`, `mc/lod1_loss`, `mc/lod2_loss`, and `mc/lens_loss` curves.
+   - WANDB dashboard for ΔNLL@H, swap rate, residency, MFU, the `mc/token_loss|lod*_loss|lens_loss` curves, and the controller latency gauge `mc/time_controller_ms` (watch for spikes >200 ms).
    - `nvidia-smi` for memory/utilization sanity.
-   - MC telemetry backend (Grafana/Kibana/etc.) for tree/WC/focus visualizations if you’ve configured a `TelemetryProvider`.
+   - MC telemetry backend (Grafana/Kibana/etc.) for tree/WC/focus visualizations if you’ve configured a `TelemetryProvider`; chart `mc_timing` span fields (`build_ms`, `horizon_ms`, `lens_ms`, `horizon_forward_ms`, `horizon_loss_ms`) alongside WANDB metrics to catch regressions early.
 4. **Resume if interrupted**: re-run the same script with the same `WANDB_RUN`. The scripts load checkpoints from `NANOCHAT_BASE_DIR` and continue.
 5. **Evaluate & demo** once the script finishes:
    ```bash
@@ -129,7 +129,7 @@ export MC_OTEL_INSECURE=1  # set only if you’re skipping TLS
 
 If you need to disable telemetry entirely, unset `MC_OTEL_ENDPOINT` (the provider falls back to OTLP defaults) or patch the script to use `NoOpTelemetryProvider`.
 
-Once enabled, expect event types such as `mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `horizon_trigger`, and `inference_update`. Use them to drive Grafana dashboards / alerts (see [[Telemetry]] for schema details).
+Once enabled, expect event types such as `mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `horizon_trigger`, `mc_timing`, and `inference_update`. `mc_timing` exposes per-batch timings (`build_ms`, `positional_ms`, `horizon_ms`, `lens_ms`, `horizon_forward_ms`, `horizon_loss_ms`) so you can correlate controller overhead with ΔNLL/AUX curves. Use these to drive Grafana dashboards / alerts (see [[Telemetry]] for schema details).
 
 ## 6. Fair MC vs. vanilla comparisons
 

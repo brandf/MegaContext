@@ -60,6 +60,7 @@ class MCConfig:
     random_seed: Optional[int] = None
     loss_projection_top_k: int = 64
     build_workers: int = 1
+    cache_lod0: bool = True
 
     tree_config: MegaContextConfig = field(init=False)
     wc_config: WorkingContextConfig = field(init=False)

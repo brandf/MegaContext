@@ -209,11 +209,28 @@ class TransformerGistNet(GistNetBase):
             self.register_parameter("cls_token", None)
         self.head = head_module
 
-    def forward(self, blocks: torch.Tensor) -> torch.Tensor:
+    def forward(self, blocks: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Forward with optional key padding mask.
+
+        Args:
+            blocks: [B, T, D] block sequences
+            key_padding_mask: [B, T] boolean mask where True marks valid tokens
+        """
         x = blocks
+        mask_bool = None
+        if key_padding_mask is not None:
+            mask_bool = key_padding_mask.to(torch.bool)
+        # If CLS is used, prepend it and extend mask accordingly
         if self.summary_mode == "cls":
             cls = self.cls_token.to(x.device).expand(x.size(0), -1, -1)
             x = torch.cat([cls, x], dim=1)
+            if mask_bool is not None:
+                pad_true = torch.ones((mask_bool.size(0), 1), dtype=torch.bool, device=mask_bool.device)
+                mask_bool = torch.cat([pad_true, mask_bool], dim=1)
+        # Zero out padded tokens before attention
+        if mask_bool is not None:
+            mask_expanded = mask_bool.unsqueeze(-1).to(x.device)
+            x = x.masked_fill(~mask_expanded, 0.0)
         cos, sin = build_rotary_cos_sin(
             seq_len=x.size(1),
             head_dim=self.head_dim,
@@ -221,8 +238,18 @@ class TransformerGistNet(GistNetBase):
             device=x.device,
         )
         cos_sin = (cos, sin)
+        # Build attention bias from key_padding_mask if provided: mask padded keys across all queries
+        alibi_bias = None
+        if mask_bool is not None:
+            # True = keep, False = mask; convert to bias with large negative penalty
+            B, Tk = mask_bool.shape
+            Tq = x.size(1)
+            penalty = -1e4  # use finite value to avoid NaNs in bfloat16
+            bias = (~mask_bool).to(torch.float32) * penalty  # [B, Tk]
+            bias = bias.view(B, 1, 1, Tk).expand(B, 1, Tq, Tk)  # [B, 1, Tq, Tk]
+            alibi_bias = bias.to(torch.bfloat16)
         for block in self.blocks:
-            x = block(x, cos_sin, kv_cache=None, alibi=None)
+            x = block(x, cos_sin, kv_cache=None, alibi=alibi_bias)
         return self.head(x)
 
 
