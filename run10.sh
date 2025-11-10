@@ -24,7 +24,8 @@ GISTNET_HEAD="mlp"
 LENSNET_TYPE="transformer"
 LENSNET_LAYERS=2
 LENSNET_HEAD="mlp"
-ALLOCATOR_TYPE="simple"
+# Use the only supported allocator implementation
+ALLOCATOR_TYPE="greedy"
 POSITIONAL_TYPE="gaussian"
 MC_TREE_TYPE="ram"
 while [[ $# -gt 0 ]]; do

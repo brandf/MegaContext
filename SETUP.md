@@ -30,18 +30,17 @@ cd MegaContext
 
 ## 4. Bootstrap the repository
 
-We ship an interactive helper that creates the virtualenv, installs dependencies, and (optionally) runs lint/tests:
+Create the venv, install deps, and run a quick smoke of tests locally:
 
 ```bash
-bash scripts/setup_megacontext.sh
+uv venv
+uv sync --extra gpu
+source .venv/bin/activate
+uv run pytest -q
 ```
 
-Use flags such as `--yes` (non-interactive) or `--skip-tests`; run `bash scripts/setup_megacontext.sh --help` for the full menu.
+Operational guidance (training recipes, telemetry, troubleshooting) now lives in `obsidian/ops/Training & Operations.md` and `README.md`. Follow those for `run10.sh`/`speedrun.sh`/`run1000.sh` usage.
 
-## 5. Launch the research notebook
-- Start Jupyter (e.g. `uv run jupyter lab`) and open `notebooks/megacontext.ipynb`.
-- The notebook guides you through environment checks, dataset prep, training config overrides, Lightning runs, and artifact export. Enable Weights & Biases in the notebook UI if you want live metrics.
-
-## 6. Shut down when idle
+## 5. Shut down when idle
 - Use `nvidia-smi` to confirm utilisation during runs.
 - Stop or snapshot the instance when you’re done to avoid extra charges.

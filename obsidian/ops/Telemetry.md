@@ -11,6 +11,13 @@ Instrumentation and telemetry system tracking compression quality, focus behavio
 
 MegaContext's telemetry infrastructure provides **real-time and post-hoc** analysis of system behavior during training and runtime. Comprehensive logging enables debugging focus allocation issues, validating compression quality, profiling resource usage, and ensuring acceptance criteria are met.
 
+### Current Status (implemented vs. planned)
+
+- Implemented events/metrics (emitted today):
+  - `mc_tree_snapshot` (tree summary, token counts), `working_context_snapshot` (positions, LODs), `focus_allocator` (score stats, edits), `horizon_trigger` (LOD2 upgrade), `mc_batch_counters` (per-step counters).
+- Planned (not yet emitted):
+  - Swap rate, residency histograms, token budget utilization, ΔNLL@H time series, latency streams. Dashboards should treat these as placeholders until the controller wires them up.
+
 ### Core Purposes
 
 1. **Training feedback:** Monitor loss convergence, substitutability quality (ΔNLL@`H`), and module co-adaptation during [[MegaContext End-to-End Training]].

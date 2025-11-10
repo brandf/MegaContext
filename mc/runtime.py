@@ -1003,7 +1003,10 @@ class MCController:
                 self.config.tree_config,
                 gistnet=self.gistnet,
             )
-        recency_variant = self._build_recency_variant(tree)
+        # Build a recency-based working context with a local level cache,
+        # mirroring the training path.
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+        recency_variant = self._build_recency_variant(tree, level_cache)
         if recency_variant is None:
             raise ValueError("Unable to build initial working context for inference")
         allocator = self._build_allocator(tree, recency_variant.working_context)

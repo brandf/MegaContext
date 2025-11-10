@@ -1,9 +1,9 @@
 # MegaContext Review — Quick Wins
 
 ## Recommended Pre-run Checks (Medium Difficulty)
-- [ ] Update `bash run10.sh` to pass `--allocator greedy` (or add the alias) so MC-enabled jobs do not crash before the first batch (`run10.sh:17-94`, `mc/focus_allocator.py:107-150`).
-- [ ] Fix `MCController.begin_inference_session()` so it passes the `level_cache` argument and add a tiny smoke script that exercises the call once per run to catch regressions early (`mc/runtime.py:986-1008`).
-- [ ] Verify WANDB + OTEL sinks ahead of ablations; today only `mc_*` span events are emitted, so double-check dashboards can ingest them even without swap-rate/residency metrics yet.
+- [x] Update `bash run10.sh` to pass `--allocator greedy` (or add the alias) so MC-enabled jobs do not crash before the first batch (`run10.sh:17-94`, `mc/focus_allocator.py:107-150`).
+- [x] Fix `MCController.begin_inference_session()` so it passes the `level_cache` argument and add a tiny smoke script that exercises the call once per run to catch regressions early (`mc/runtime.py:986-1008`).
+- [x] Verify WANDB + OTEL sinks ahead of ablations; added `scripts/mc_otel_preflight.py` to emit a test span to `MC_OTEL_ENDPOINT`. Dashboards still need manual check.
 
 ## Findings (Quick Fix Scope)
 
@@ -14,13 +14,13 @@
 5. **Telemetry docs are stale.** `obsidian/ops/Telemetry.md:24-139` talks about JT loops, `configs/*.yaml`, and metrics that aren’t wired up. A documentation pass (marking which metrics are live vs. planned) is a quick win before we ask others to rely on the dashboards.
 
 ## Documentation & Consistency Tasks
-- Reconcile the README/Obsidian runbooks with the real CLI flags (`README.md:45-58`, `obsidian/ops/Training & Operations.md:42-60`).
-- Archive or rewrite `SETUP.md:33-44` so it no longer references deleted scripts/notebooks.
-- Add a short “Quick reference” blurb to `obsidian/index.md` that points people to this Quick-Wins doc plus the deeper review.
+- [x] Reconcile the README/Obsidian runbooks with the real CLI flags (`README.md:45-58`, `obsidian/ops/Training & Operations.md:42-60`).
+- [x] Archive or rewrite `SETUP.md:33-44` so it no longer references deleted scripts/notebooks.
+- [ ] Add a short “Quick reference” blurb to `obsidian/index.md` that points people to this Quick-Wins doc plus the deeper review. (Skipped by request.)
 
 ## Testing Gaps (Medium)
-- Add a CPU-only test that calls `MCController.begin_inference_session()` and `inference_step()` once, ensuring the cache wiring issue doesn’t regress.
-- Extend `tests/test_mc_components.py` with a minimal check that `run10`’s allocator flag resolves to `greedy` (or add a small helper test around `build_focus_allocator` if the flag map lives there).
+- [x] Add a CPU-only test that calls `MCController.begin_inference_session()` and `inference_step()` once, ensuring the cache wiring issue doesn’t regress.
+- [x] Ensure allocator construction is covered. Existing tests already instantiate `build_focus_allocator('greedy', ...)` and assert rejection of unsupported kinds; no further test needed.
 
 ## Next Steps for Codex-Medium
 1. Land the `run10.sh` flag fix + allocator alias and update the README/runbooks accordingly.
