@@ -192,14 +192,14 @@ if mc_enabled:
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,
         allocator_max_replacements=allocator_max_replacements,
-        allocator_iterations=allocator_iterations,
-        allocator_sample_top_k=allocator_sample_top_k,
-        allocator_sample_temperature=allocator_sample_temperature,
-        num_heads=num_heads,
-        positional_type=positional_type,
-        auxiliary_dtype=mc_aux_dtype,
-    )
-otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
+            allocator_iterations=allocator_iterations,
+            allocator_sample_top_k=allocator_sample_top_k,
+            allocator_sample_temperature=allocator_sample_temperature,
+            num_heads=num_heads,
+            positional_type=positional_type,
+            auxiliary_dtype=mc_aux_dtype,
+        )
+    otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
     otel_insecure = os.getenv("MC_OTEL_INSECURE", "0") == "1"
     disable_otel = os.getenv("MC_DISABLE_TELEMETRY", "0").lower() in {"1", "true", "yes"}
     if disable_otel or not otel_endpoint or OpenTelemetryProvider is None:
@@ -211,8 +211,8 @@ otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
             insecure=otel_insecure,
             resource_attributes={"run.id": run},
         )
-mc_controller = MCController(model, mc_config, telemetry_provider=telemetry_provider)
-eval_every = 25
+    mc_controller = MCController(model, mc_config, telemetry_provider=telemetry_provider)
+    eval_every = 25
 orig_model = model # original, uncompiled model, for saving raw model state_dict
 model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
 num_params = sum(p.numel() for p in model.parameters())
