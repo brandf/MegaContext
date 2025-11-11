@@ -31,12 +31,19 @@ from scripts.base_eval import evaluate_model
 try:
     from mc.config import MCConfig
     from mc.runtime import MCController
-    from mc.telemetry import OpenTelemetryProvider
+    from mc.telemetry import OpenTelemetryProvider, NoOpTelemetryProvider
 except ImportError:  # pragma: no cover - optional dependency during early development
     MCController = None
     MCConfig = None
     OpenTelemetryProvider = None
+    NoOpTelemetryProvider = None
 print_banner()
+
+if NoOpTelemetryProvider is None:
+    class _FallbackTelemetry:
+        def log_event(self, event):
+            return
+    NoOpTelemetryProvider = _FallbackTelemetry  # type: ignore[assignment]
 
 # -----------------------------------------------------------------------------
 # User settings
@@ -192,12 +199,16 @@ if mc_enabled:
     )
     otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
     otel_insecure = os.getenv("MC_OTEL_INSECURE", "0") == "1"
-    telemetry_provider = OpenTelemetryProvider(
-        service_name="megacontext-train",
-        endpoint=otel_endpoint,
-        insecure=otel_insecure,
-        resource_attributes={"run.id": run},
-    )
+    disable_otel = os.getenv("MC_DISABLE_TELEMETRY", "0").lower() in {"1", "true", "yes"}
+    if disable_otel or not otel_endpoint or OpenTelemetryProvider is None:
+        telemetry_provider = NoOpTelemetryProvider()
+    else:
+        telemetry_provider = OpenTelemetryProvider(
+            service_name="megacontext-train",
+            endpoint=otel_endpoint,
+            insecure=otel_insecure,
+            resource_attributes={"run.id": run},
+        )
     mc_controller = MCController(model, mc_config, telemetry_provider=telemetry_provider)
 orig_model = model # original, uncompiled model, for saving raw model state_dict
 model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
