@@ -349,8 +349,26 @@ def _run_variant_batch_forward(
         variant = entry["variant"]
         embeddings = entry["embeddings"]
         batch_idx = variant.batch_index
-        inputs_slice = original_inputs[batch_idx : batch_idx + 1]
-        labels_slice = original_labels[batch_idx : batch_idx + 1]
+        max_seq = original_inputs.size(1)
+        if embeddings.shape[1] > max_seq:
+            embeddings = embeddings[:, -max_seq:, :]
+        seq_len = embeddings.shape[1]
+        inputs_slice = original_inputs[batch_idx : batch_idx + 1, :seq_len]
+        labels_slice = original_labels[batch_idx : batch_idx + 1, :seq_len]
+        if inputs_slice.shape[1] < seq_len:
+            pad = torch.zeros(
+                (1, seq_len - inputs_slice.shape[1]),
+                dtype=inputs_slice.dtype,
+                device=inputs_slice.device,
+            )
+            inputs_slice = torch.cat([pad, inputs_slice], dim=1)
+            labels_pad = torch.full(
+                (1, seq_len - labels_slice.shape[1]),
+                -1,
+                dtype=labels_slice.dtype,
+                device=labels_slice.device,
+            )
+            labels_slice = torch.cat([labels_pad, labels_slice], dim=1)
         loss = model(
             inputs_slice,
             labels_slice,
