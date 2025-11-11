@@ -724,10 +724,7 @@ class MCController:
                 {"variant": variant.source, "lod": 2, "length": horizon},
             )
         horizon_embeddings = self._embed_with_padding(horizon_tokens)
-        if torch.is_autocast_enabled():
-            target_dtype = torch.get_autocast_gpu_dtype()
-        else:
-            target_dtype = next(self.model.parameters()).dtype
+        target_dtype = next(self.model.parameters()).dtype
         dtype_logged = False
         if wc_embeddings.dtype != target_dtype:
             if not self._debug_flags.get("dtype_cast_wc", False):
