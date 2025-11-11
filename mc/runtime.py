@@ -687,11 +687,14 @@ class MCController:
     ) -> torch.Tensor:
         wc = variant.working_context
         embeddings = wc.to_tensor().to(self.device)
+        target_dtype = next(self.model.parameters()).dtype
+        if embeddings.dtype != target_dtype:
+            embeddings = embeddings.to(target_dtype)
         seq_len = embeddings.shape[1]
         cos, sin, alibi = wc.get_positional_encodings()
-        cos = cos.to(self.device)
-        sin = sin.to(self.device)
-        alibi = alibi.to(self.device) if alibi is not None else None
+        cos = cos.to(self.device).to(target_dtype)
+        sin = sin.to(self.device).to(target_dtype)
+        alibi = alibi.to(self.device).to(target_dtype) if alibi is not None else None
         batch_idx = getattr(variant, "batch_index", 0)
         token_slice = original_tokens[batch_idx : batch_idx + 1]
         token_slice = self._align_tokens_to_embeddings(token_slice, seq_len)
