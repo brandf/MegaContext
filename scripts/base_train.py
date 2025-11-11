@@ -70,7 +70,7 @@ warmup_ratio = 0.0 # ratio of iterations for LR warmup
 warmdown_ratio = 0.2 # ratio of iterations for LR warmdown
 final_lr_frac = 0.0 # final LR is this fraction of the initial LR
 # Evaluation
-eval_every = 250 # every how many steps to evaluate the model for val bpb
+eval_every = 250 # every how many steps to evaluate the model for val bpb (overridden to 25 when mc_enabled=1)
 eval_tokens = 20*524288 # number of tokens to evaluate val loss on
 core_metric_every = 2000 # every how many steps to evaluate the core metric (-1 = disable)
 core_metric_max_per_task = 500 # examples per task in estimating the core metric
@@ -197,7 +197,7 @@ if mc_enabled:
         positional_type=positional_type,
         auxiliary_dtype=mc_aux_dtype,
     )
-    otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
+otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
     otel_insecure = os.getenv("MC_OTEL_INSECURE", "0") == "1"
     disable_otel = os.getenv("MC_DISABLE_TELEMETRY", "0").lower() in {"1", "true", "yes"}
     if disable_otel or not otel_endpoint or OpenTelemetryProvider is None:
@@ -209,7 +209,8 @@ if mc_enabled:
             insecure=otel_insecure,
             resource_attributes={"run.id": run},
         )
-    mc_controller = MCController(model, mc_config, telemetry_provider=telemetry_provider)
+mc_controller = MCController(model, mc_config, telemetry_provider=telemetry_provider)
+eval_every = 25
 orig_model = model # original, uncompiled model, for saving raw model state_dict
 model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
 num_params = sum(p.numel() for p in model.parameters())
