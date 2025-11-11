@@ -35,7 +35,6 @@ def test_session_positional_prefers_recency_baseline():
         device="cpu",
         initial_working_contexts=1,
         max_counterfactuals=1,
-        horizon_tokens=0,
         allocator_recent_tokens=0,
         num_heads=1,
     )
@@ -54,4 +53,3 @@ def test_session_positional_prefers_recency_baseline():
     pos = controller._build_session_positional([sample])
     (cos, sin, _alibi) = pos["s1"]
     assert cos.shape[1] == 3  # should prefer recency WC length
-

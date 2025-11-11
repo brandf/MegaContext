@@ -38,7 +38,6 @@ def test_batched_rope_shapes_and_forward():
         device="cpu",
         initial_working_contexts=1,
         max_counterfactuals=1,
-        horizon_tokens=0,
         allocator_recent_tokens=0,
         num_heads=num_heads,
     )
@@ -64,4 +63,3 @@ def test_batched_rope_shapes_and_forward():
         alibi_override=(torch.cat(alibi_list, dim=0) if any(a is not None for a in alibi_list) else None),
         inputs_embeds=inputs_embeds,
     )
-

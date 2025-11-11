@@ -35,7 +35,6 @@ def test_inference_facade_smoke():
         device="cpu",
         initial_working_contexts=1,
         max_counterfactuals=1,
-        horizon_tokens=0,
         allocator_recent_tokens=0,
         num_heads=1,
     )
@@ -60,7 +59,6 @@ def test_mc_controller_validates_head_divisibility():
         device="cpu",
         initial_working_contexts=1,
         max_counterfactuals=1,
-        horizon_tokens=0,
         allocator_recent_tokens=0,
         num_heads=3,
     )

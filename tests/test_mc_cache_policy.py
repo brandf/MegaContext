@@ -36,7 +36,6 @@ def test_lod0_cache_policy_disables_cache_on_init():
         device="cpu",
         initial_working_contexts=1,
         max_counterfactuals=1,
-        horizon_tokens=0,
         allocator_recent_tokens=0,
         num_heads=1,
     )
@@ -46,4 +45,3 @@ def test_lod0_cache_policy_disables_cache_on_init():
     assert controller.inference_state is not None
     tree = controller.inference_state.tree
     assert tree._lod0_cache is None
-

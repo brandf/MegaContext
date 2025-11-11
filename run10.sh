@@ -36,7 +36,6 @@ POSITIONAL_TYPE="gaussian"
 MC_TREE_TYPE="ram"
 SKIP_DATA_PREP=${SKIP_DATA_PREP:-0}
 MC_AUX_DTYPE="auto"
-MC_ENABLE_HORIZON=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -101,11 +100,6 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_aux_dtype" >&2; exit 1; }
             MC_AUX_DTYPE="$1"
-            ;;
-        --mc_enable_horizon)
-            shift
-            [[ $# -gt 0 ]] || { echo "Missing value for --mc_enable_horizon" >&2; exit 1; }
-            MC_ENABLE_HORIZON="$1"
             ;;
         --block_size)
             shift
@@ -221,8 +215,7 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --allocator_type="$ALLOCATOR_TYPE" \
     --mc_tree_type="$MC_TREE_TYPE" \
     --positional_type="$POSITIONAL_TYPE" \
-    --mc_aux_dtype="$MC_AUX_DTYPE" \
-    --mc_enable_horizon="$MC_ENABLE_HORIZON"
+    --mc_aux_dtype="$MC_AUX_DTYPE"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

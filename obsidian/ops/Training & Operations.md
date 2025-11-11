@@ -39,7 +39,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 
 | Scenario | Command | Notes |
 | --- | --- | --- |
-| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--block_size 8|32|128] [--gistnet_* ...] [--lensnet_* ...] [--allocator ...] [--mc_tree ram|disk] [--mc_initial_wcs N --mc_max_counterfactuals N] [--mc_horizon 32 --mc_long_horizon_multiplier 32] [--mc_token_loss_weight 1.0 --mc_lod1_loss_weight 0.1 --mc_lod2_loss_weight 0.05 --mc_lens_loss_weight 0.1]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
+| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--block_size 8|32|128] [--gistnet_* ...] [--lensnet_* ...] [--allocator ...] [--mc_tree ram|disk] [--mc_initial_wcs N --mc_max_counterfactuals N] [--mc_lens_loss_weight 0.1]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
 | Single H100 (80 GB) | `bash run10.sh --gpu h100 [--mc] ...` | Doubles device batch size, halves iteration count for the same token budget. |
 | $100 speed tier | `bash speedrun.sh [--mc] ...` | 8×H100, depth 20 (Karpathy’s “best $100” recipe). |
 | $1000 tier | `bash run1000.sh [--mc] ...` | 8×H100, depth 32 with tuned accumulation. |
@@ -54,9 +54,8 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
   - `--mc_tree ram` (disk-backed MegaContext is on the roadmap; today only the in-memory tree is wired up and the scripts will error if another value is provided).
   - `--mc_initial_wcs` (N1) and `--mc_max_counterfactuals` (N2) define how many Working Contexts we evaluate per training sequence (initial samples + LensNet siblings). Raise them for richer ΔNLL supervision; lower to save compute.
 - **Horizon & losses**
-  - `--mc_horizon` sets the base teacher-forced horizon (LOD1).  
-  - `--mc_long_horizon_multiplier` (defaults to 32) opportunistically upgrades to a LOD2 horizon (`block_size * multiplier` tokens) whenever enough context remains; the controller emits `horizon_trigger` telemetry each time this path runs.
-  - `--mc_token_loss_weight`, `--mc_lod1_loss_weight`, `--mc_lod2_loss_weight`, `--mc_lens_loss_weight` scale the auxiliary losses blended into the vanilla nanochat objective.
+  - `--mc_initial_wcs` / `--mc_max_counterfactuals` control how many WC variants are sampled per sequence. Each variant now trains directly against the next-token objective, so no separate horizon tuning is required.
+  - `--mc_lens_loss_weight` scales the LensNet supervision that rides on top of the core loss.
 - **Allocator**
   - `--allocator_type greedy|stochastic_greedy` toggles between deterministic focus edits and a top-|score| sampler (tunable via `--allocator_sample_top_k`, `--allocator_sample_temperature`). The other `--allocator_*` thresholds (`soft_max_length`, `recent_tokens`, expand/collapse thresholds, max replacements, iterations) shape how aggressively focus edits are applied per step.
 - **Auxiliary precision**
@@ -80,7 +79,7 @@ All scripts perform the following stages in order:
    - `tail -f report/log.txt` (if running inside `screen`/`tmux`).
    - WANDB dashboard for ΔNLL@H, swap rate, residency, MFU, the `mc/token_loss|lod*_loss|lens_loss` curves, and the controller latency gauge `mc/time_controller_ms` (watch for spikes >200 ms).
    - `nvidia-smi` for memory/utilization sanity.
-   - MC telemetry backend (Grafana/Kibana/etc.) for tree/WC/focus visualizations if you’ve configured a `TelemetryProvider`; chart `mc_timing` span fields (`build_ms`, `horizon_ms`, `lens_ms`, `horizon_forward_ms`, `horizon_loss_ms`) alongside WANDB metrics to catch regressions early.
+  - MC telemetry backend (Grafana/Kibana/etc.) for tree/WC/focus visualizations if you’ve configured a `TelemetryProvider`; chart `mc_timing` span fields (`build_ms`, `positional_ms`, `lens_ms`) alongside WANDB metrics to catch regressions early.
 4. **Resume if interrupted**: re-run the same script with the same `WANDB_RUN`. The scripts load checkpoints from `NANOCHAT_BASE_DIR` and continue.
 5. **Evaluate & demo** once the script finishes:
    ```bash
@@ -109,13 +108,13 @@ Before sharing a checkpoint or moving to downstream experiments:
 | Residency | 90–100 % | <80 % | Allocator collapsing too aggressively; verify Lens logits and budget constraints. |
 | MFU per GPU | 45–55 % | <40 % | Check `--device_batch_size`, accumulation steps, and host I/O stalls. |
 | `mc/token_loss` | Should trend down, ideally ≤ baseline loss | Flat or rising | Horizon eval unstable; revisit WC sampling or loss weights. |
-| `mc/lod1_loss`, `mc/lod2_loss` | ≤0.3 / ≤0.2 | Flatlines >0.5 | GistNet not learning higher LODs; ensure long horizons are triggering and look at telemetry. |
+| `mc/variants_total` | consistent with `mc_initial_wcs` × batch size | Drops to 0 | Controller isn’t sampling WC variants; inspect `mc_batch_stats`. |
 | `mc/lens_loss` | →0 | >0.1 | LensNet disagreeing with ΔNLL argmin; inspect focus telemetry. |
 | WANDB heartbeat | steady | Missing for >15 min | Ensure networking available; scripts fall back to DummyWandb if `WANDB_RUN=dummy`. |
 
 ## 5. Telemetry providers
 
-The MC controller now emits structured `TelemetryEvent`s every time a session (training or inference) touches the tree, WC, allocator, or opportunistic LOD2 horizon. Plug one of these backends into `TelemetryProvider` to capture them:
+The MC controller now emits structured `TelemetryEvent`s every time a session (training or inference) touches the tree, WC, or allocator. Plug one of these backends into `TelemetryProvider` to capture them:
 
 | Provider | Pros | Cons |
 | --- | --- | --- |
@@ -135,11 +134,11 @@ export MC_OTEL_INSECURE=1  # set only if you’re skipping TLS
 
 If you need to disable telemetry entirely, unset `MC_OTEL_ENDPOINT` (the provider falls back to OTLP defaults) or patch the script to use `NoOpTelemetryProvider`.
 
-Once enabled, expect event types such as `mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `horizon_trigger`, `mc_timing`, and `inference_update`. `mc_timing` exposes per-batch timings (`build_ms`, `positional_ms`, `horizon_ms`, `lens_ms`, `horizon_forward_ms`, `horizon_loss_ms`) so you can correlate controller overhead with ΔNLL/AUX curves. Use these to drive Grafana dashboards / alerts (see [[Telemetry]] for schema details).
+Once enabled, expect event types such as `mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `mc_timing`, and `inference_update`. `mc_timing` exposes per-batch timings (`build_ms`, `positional_ms`, `lens_ms`) so you can correlate controller overhead with ΔNLL/AUX curves. Use these to drive Grafana dashboards / alerts (see [[Telemetry]] for schema details).
 
 ## 6. Fair MC vs. vanilla comparisons
 
-MC-enabled steps perform extra work per batch (multiple WC evaluations, opportunistic 1024-token horizons), so raw `step` comparisons with vanilla nanochat are misleading. When plotting/alerting:
+MC-enabled steps perform extra work per batch (multiple WC evaluations), so raw `step` comparisons with vanilla nanochat are misleading. When plotting/alerting:
 
 1. Use **tokens processed** (`total_batch_size * steps`) or **total FLOPs** (`total_training_flops`) on the x-axis when overlaying MC and vanilla loss curves.
 2. Track **wall-clock time** (`total_training_time`) to compare throughput regardless of mix.

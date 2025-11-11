@@ -47,7 +47,6 @@ def test_inference_emits_focus_telemetry_with_residency():
         max_counterfactuals=1,
         allocator_recent_tokens=0,
         allocator_iterations=1,  # ensure one update tick
-        horizon_tokens=0,
         num_heads=1,
     )
     controller = MCController(model, cfg, telemetry_provider=telemetry)
@@ -60,4 +59,3 @@ def test_inference_emits_focus_telemetry_with_residency():
     # Check newly added telemetry fields
     for key in ["swap_rate", "num_expand", "num_collapse", "wc_length", "utilization", "residency_mean", "residency_p95"]:
         assert key in payload
-

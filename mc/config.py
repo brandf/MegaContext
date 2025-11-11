@@ -43,11 +43,7 @@ class MCConfig:
     mc_tree_type: str = "ram"
     initial_working_contexts: int = 2
     max_counterfactuals: int = 4
-    horizon_tokens: int = 32
-    long_horizon_multiplier: int = 32
     token_loss_weight: float = 1.0
-    lod1_loss_weight: float = 0.1
-    lod2_loss_weight: float = 0.05
     lens_loss_weight: float = 0.1
     soft_max_length: Optional[int] = None
     allocator_recent_tokens: int = 128
@@ -60,11 +56,9 @@ class MCConfig:
     num_heads: int = 1
     positional_type: Optional[str] = "gaussian"
     random_seed: Optional[int] = None
-    loss_projection_top_k: int = 64
     build_workers: int = 1  # TODO(mc): wire up parallel tree builds or remove this knob
     cache_lod0: bool = True
     auxiliary_dtype: str = "auto"  # auto | fp32 | bf16
-    enable_horizon: bool = True
 
     tree_config: MegaContextConfig = field(init=False)
     wc_config: WorkingContextConfig = field(init=False)
@@ -91,4 +85,3 @@ class MCConfig:
             self.soft_max_length = self.wc_config.max_length
         self.initial_working_contexts = max(1, self.initial_working_contexts)
         self.max_counterfactuals = max(self.initial_working_contexts, self.max_counterfactuals)
-        self.horizon_tokens = max(1, self.horizon_tokens)

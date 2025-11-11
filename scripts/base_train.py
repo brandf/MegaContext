@@ -102,13 +102,7 @@ mc_aux_dtype = "auto"
 mc_tree_type = "ram"
 mc_initial_wcs = 4
 mc_max_counterfactuals = 8
-mc_enable_horizon = 1
-mc_horizon = 32
-mc_long_horizon_multiplier = 32
-mc_token_loss_weight = 1.0
-mc_lod1_loss_weight = 0.1
 mc_lens_loss_weight = 0.1
-mc_lod2_loss_weight = 0.05
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -182,11 +176,6 @@ if mc_enabled:
         mc_tree_type=mc_tree_type,
         initial_working_contexts=mc_initial_wcs,
         max_counterfactuals=mc_max_counterfactuals,
-        horizon_tokens=mc_horizon,
-        long_horizon_multiplier=mc_long_horizon_multiplier,
-        token_loss_weight=mc_token_loss_weight,
-        lod1_loss_weight=mc_lod1_loss_weight,
-        lod2_loss_weight=mc_lod2_loss_weight,
         lens_loss_weight=mc_lens_loss_weight,
         soft_max_length=allocator_soft_max,
         allocator_recent_tokens=allocator_recent_tokens,
@@ -199,7 +188,6 @@ if mc_enabled:
             num_heads=num_heads,
             positional_type=positional_type,
             auxiliary_dtype=mc_aux_dtype,
-            enable_horizon=bool(mc_enable_horizon),
         )
     otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
     otel_insecure = os.getenv("MC_OTEL_INSECURE", "0") == "1"
@@ -457,21 +445,13 @@ total_training_time = 0 # total wall-clock time of training
 for step in range(num_iterations + 1):
     last_step = step == num_iterations
     flops_so_far = num_flops_per_token * total_batch_size * step
-    mc_token_loss_val = None
-    mc_lod1_loss_val = None
-    mc_lod2_loss_val = None
     mc_lens_loss_val = None
-    mc_token_loss_samples = []
-    mc_lod1_loss_samples = []
-    mc_lod2_loss_samples = []
     mc_lens_loss_samples = []
     mc_time_samples: list[float] = []
     forward_time_samples: list[float] = []
     optimizer_time_samples: list[float] = []
     loader_time_samples: list[float] = []
     mc_variant_counts: list[int] = []
-    mc_horizon_eval_total = 0
-    mc_horizon_token_total = 0
     vanilla_loss_samples: list[float] = []
 
     # once in a while: evaluate the val bpb (all ranks participate)
@@ -572,8 +552,6 @@ for step in range(num_iterations + 1):
                 profile = getattr(mc_controller, "last_batch_profile", None)
                 if profile:
                     mc_variant_counts.extend(profile.get("variant_counts", []))
-                    mc_horizon_eval_total += int(profile.get("horizon_evals", 0))
-                    mc_horizon_token_total += int(profile.get("horizon_tokens", 0))
             except Exception as exc: # pragma: no cover - guard against optional path regressions
                 print0(f"[MegaContext] controller error at step {step}: {exc}")
                 import traceback
@@ -582,12 +560,6 @@ for step in range(num_iterations + 1):
             else:
                 if mc_result is not None:
                     positional_cache = mc_result.positional_cache
-                    if mc_result.token_loss is not None:
-                        mc_token_loss_samples.append(float(mc_result.token_loss.detach()))
-                    if mc_result.lod1_loss is not None:
-                        mc_lod1_loss_samples.append(float(mc_result.lod1_loss.detach()))
-                    if mc_result.lod2_loss is not None:
-                        mc_lod2_loss_samples.append(float(mc_result.lod2_loss.detach()))
                     if mc_result.lens_loss is not None:
                         mc_lens_loss_samples.append(float(mc_result.lens_loss.detach()))
         with autocast_ctx:
@@ -630,23 +602,13 @@ for step in range(num_iterations + 1):
                     cos_sin_override = None
                     alibi_override = None
             inputs_embeds_override = None
-            variant_entries = None
-            if mc_result is not None:
-                if mc_result.variants:
-                    variant_entries = _assemble_mc_variant_batch(mc_result, device)
-                elif mc_result.cached_embeddings is not None:
-                    inputs_embeds_override = mc_result.cached_embeddings.to(device)
+            if mc_result is not None and mc_result.cached_embeddings is not None:
+                inputs_embeds_override = mc_result.cached_embeddings.to(device)
             t_fw0 = time.time()
-            if variant_entries is not None:
-                base_loss, vanilla_loss = _run_variant_batch_forward(
-                    model,
-                    x,
-                    y,
-                    variant_entries,
-                    cos_sin_override,
-                    alibi_override,
-                )
-                vanilla_loss_samples.append(vanilla_loss)
+            if mc_result is not None and mc_result.variant_loss is not None:
+                base_loss = mc_result.variant_loss
+                lod0_loss = mc_result.lod0_loss if mc_result.lod0_loss is not None else float(base_loss.detach())
+                vanilla_loss_samples.append(lod0_loss)
             else:
                 base_loss = model(
                     x,
@@ -658,12 +620,6 @@ for step in range(num_iterations + 1):
                 vanilla_loss_samples.append(float(base_loss.detach()))
             mc_extra_loss = base_loss.new_zeros(())
             if mc_controller is not None and mc_result is not None:
-                if mc_result.token_loss is not None:
-                    mc_extra_loss = mc_extra_loss + mc_result.token_loss * mc_controller.config.token_loss_weight
-                if mc_result.lod1_loss is not None:
-                    mc_extra_loss = mc_extra_loss + mc_result.lod1_loss * mc_controller.config.lod1_loss_weight
-                if mc_result.lod2_loss is not None:
-                    mc_extra_loss = mc_extra_loss + mc_result.lod2_loss * mc_controller.config.lod2_loss_weight
                 if mc_result.lens_loss is not None:
                     mc_extra_loss = mc_extra_loss + mc_result.lens_loss * mc_controller.config.lens_loss_weight
             loss = base_loss + mc_extra_loss
@@ -675,9 +631,6 @@ for step in range(num_iterations + 1):
         x, y = next(train_loader) # prefetch the next batch while the GPU is busy with forward/backward
         loader_time_samples.append((time.time() - t_loader0) * 1000.0)
     t_opt0 = time.time()
-    mc_token_loss_val = _mean_or_none(mc_token_loss_samples)
-    mc_lod1_loss_val = _mean_or_none(mc_lod1_loss_samples)
-    mc_lod2_loss_val = _mean_or_none(mc_lod2_loss_samples)
     mc_lens_loss_val = _mean_or_none(mc_lens_loss_samples)
     vanilla_loss_val = _mean_or_none(vanilla_loss_samples)
     # gradient clipping
@@ -744,20 +697,8 @@ for step in range(num_iterations + 1):
             log_data["mc/variants_mean"] = sum(mc_variant_counts) / len(mc_variant_counts)
             log_data["mc/variants_total"] = sum(mc_variant_counts)
             mc_variant_counts.clear()
-        if mc_horizon_eval_total:
-            log_data["mc/horizon_evals"] = mc_horizon_eval_total
-            mc_horizon_eval_total = 0
-        if mc_horizon_token_total:
-            log_data["mc/horizon_tokens"] = mc_horizon_token_total
-            mc_horizon_token_total = 0
         if vanilla_loss_val is not None:
             log_data["train/loss_lod0"] = vanilla_loss_val
-        if mc_token_loss_val is not None:
-            log_data["mc/token_loss"] = mc_token_loss_val
-        if mc_lod1_loss_val is not None:
-            log_data["mc/lod1_loss"] = mc_lod1_loss_val
-        if mc_lod2_loss_val is not None:
-            log_data["mc/lod2_loss"] = mc_lod2_loss_val
         if mc_lens_loss_val is not None:
             log_data["mc/lens_loss"] = mc_lens_loss_val
         wandb_run.log(log_data)

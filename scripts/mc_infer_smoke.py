@@ -40,7 +40,6 @@ def main() -> None:
         device=device,
         initial_working_contexts=1,
         max_counterfactuals=1,
-        horizon_tokens=0,
         allocator_recent_tokens=0,
         num_heads=1,
     )
@@ -55,4 +54,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

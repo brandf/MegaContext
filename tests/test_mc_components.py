@@ -100,8 +100,6 @@ def _build_mc_controller(
         max_seq_len=16,
         block_size=block_size,
         device="cpu",
-        horizon_tokens=0,  # skip expensive model forward passes in tests
-        long_horizon_multiplier=block_size,
         initial_working_contexts=1,
         max_counterfactuals=1,
         allocator_recent_tokens=0,
@@ -354,12 +352,3 @@ def test_mc_controller_provides_per_sample_positional(monkeypatch):
         cos, sin, alibi = cache
         assert cos.shape[0] == 1
         assert sin.shape == cos.shape
-
-
-def test_horizon_loss_topk_projection(monkeypatch):
-    controller = _build_mc_controller(monkeypatch)
-    controller.config.loss_projection_top_k = 1
-    tokens = torch.randint(0, 16, (1, 8))
-    logits = torch.randn(1, tokens.shape[1], controller.embed.weight.shape[0])
-    lod1, lod2 = controller._compute_lod_losses(tokens, logits, use_lod2=False)
-    assert lod1 is None or lod1 >= 0

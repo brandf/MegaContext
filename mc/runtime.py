@@ -5,7 +5,7 @@ import random
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import uuid
 
 import torch
@@ -58,9 +58,8 @@ class InferenceState:
 @dataclass
 class MCBatchResult:
     positional_cache: Optional[Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]]
-    token_loss: Optional[torch.Tensor]
-    lod1_loss: Optional[torch.Tensor]
-    lod2_loss: Optional[torch.Tensor]
+    variant_loss: Optional[torch.Tensor]
+    lod0_loss: Optional[float]
     lens_loss: Optional[torch.Tensor]
     cached_embeddings: Optional[torch.Tensor]
     positional_caches: Dict[str, Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = field(default_factory=dict)
@@ -106,7 +105,6 @@ class MCController:
         self.device = torch.device(config.device)
         self._rng = random.Random(config.random_seed)
         self._batch_counters = {
-            "horizon_triggers": 0,
             "sibling_expands": 0,
             "sibling_collapses": 0,
             "allocator_edits": 0,
@@ -202,12 +200,6 @@ class MCController:
         cached_embeddings: List[torch.Tensor] = []
         train_variants: List[WorkingContextVariant] = []
         variant_counts: List[int] = []
-        timing_details = {
-            "horizon_forward_ms": 0.0,
-            "horizon_loss_ms": 0.0,
-            "horizon_evals": 0,
-            "horizon_tokens": 0,
-        }
         # Build trees sequentially to avoid GPU stream contention and keep allocator edits deterministic across runs
         t_build0 = time.time()
         for idx in range(tokens_device.size(0)):
@@ -234,9 +226,8 @@ class MCController:
         if context != "train":
             result = MCBatchResult(
                 positional_cache=positional_cache,
-                token_loss=None,
-                lod1_loss=None,
-                lod2_loss=None,
+                variant_loss=None,
+                lod0_loss=None,
                 lens_loss=None,
                 cached_embeddings=torch.cat(cached_embeddings, dim=0) if cached_embeddings else None,
                 positional_caches=positional_cache_map,
@@ -245,24 +236,12 @@ class MCController:
             self.current_batch_states = []
             self._emit_batch_counters(step)
             return result
-        token_loss = None
-        lod1_loss = None
-        lod2_loss = None
-        lens_loss = None
-        if self.config.enable_horizon:
-            t_hor0 = time.time()
-            token_loss, lod1_loss, lod2_loss = self._aggregate_horizon_losses(batch_states, timing_details)
-            t_hor1 = time.time()
-            t_lens0 = time.time()
-            lens_loss = self._compute_lens_losses(batch_states)
-            t_lens1 = time.time()
-        else:
-            t_hor0 = t_hor1 = t_lens0 = t_lens1 = time.time()
+        variant_loss, lod0_loss = self._compute_variant_losses(batch_states, tokens_device)
+        lens_loss = self._compute_lens_losses(batch_states)
         result = MCBatchResult(
             positional_cache=positional_cache,
-            token_loss=token_loss,
-            lod1_loss=lod1_loss,
-            lod2_loss=lod2_loss,
+            variant_loss=variant_loss,
+            lod0_loss=lod0_loss,
             lens_loss=lens_loss,
             cached_embeddings=torch.cat(cached_embeddings, dim=0) if cached_embeddings else None,
             positional_caches=positional_cache_map,
@@ -274,22 +253,7 @@ class MCController:
         self.last_batch_profile = {
             "variant_counts": variant_counts,
             "total_variants": total_variants,
-            "horizon_evals": timing_details["horizon_evals"],
-            "horizon_tokens": timing_details["horizon_tokens"],
         }
-        # Emit timing telemetry (ms)
-        self._log_event(
-            f"train_step_{step}",
-            "mc_timing",
-            {
-                "build_ms": (t_build1 - t_build0) * 1000.0,
-                "positional_ms": (t_pos1 - t_pos0) * 1000.0,
-                "horizon_ms": (t_hor1 - t_hor0) * 1000.0 if self.config.enable_horizon else 0.0,
-                "lens_ms": (t_lens1 - t_lens0) * 1000.0 if self.config.enable_horizon else 0.0,
-                "horizon_forward_ms": timing_details["horizon_forward_ms"],
-                "horizon_loss_ms": timing_details["horizon_loss_ms"],
-            },
-        )
         self._log_event(
             f"train_step_{step}",
             "mc_batch_stats",
@@ -298,8 +262,6 @@ class MCController:
                 "variants_mean": (total_variants / max(1, len(variant_counts))),
                 "variants_max": max(variant_counts) if variant_counts else 0,
                 "variants_min": min(variant_counts) if variant_counts else 0,
-                "horizon_evals": timing_details["horizon_evals"],
-                "horizon_tokens": timing_details["horizon_tokens"],
             },
         )
         return result
@@ -700,331 +662,58 @@ class MCController:
         self._configure_wc_positional(clone)
         return clone
 
-    def _aggregate_horizon_losses(
+    def _compute_variant_losses(
         self,
         batch_states: List[SampleContext],
-        timing_stats: Optional[Dict[str, float]] = None,
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        examples = self._collect_horizon_examples(batch_states, timing_stats)
-        if not examples:
-            return None, None, None
-        token_losses: List[torch.Tensor] = []
-        lod1_losses: List[torch.Tensor] = []
-        lod2_losses: List[torch.Tensor] = []
-        for group in self._group_horizon_examples(examples):
-            group_losses = self._run_horizon_group(group, timing_stats)
-            for variant, token_loss, lod1_loss, lod2_loss in group_losses:
-                if token_loss is not None:
-                    variant.token_loss_value = token_loss
-                    token_losses.append(token_loss)
-                if lod1_loss is not None:
-                    variant.lod1_loss_value = lod1_loss
-                    lod1_losses.append(lod1_loss)
-                if lod2_loss is not None:
-                    variant.lod2_loss_value = lod2_loss
-                    lod2_losses.append(lod2_loss)
-        agg_token = torch.stack(token_losses).mean() if token_losses else None
-        agg_lod1 = torch.stack(lod1_losses).mean() if lod1_losses else None
-        agg_lod2 = torch.stack(lod2_losses).mean() if lod2_losses else None
-        self._log_delta_nll(batch_states)
-        return agg_token, agg_lod1, agg_lod2
-
-    def _collect_horizon_examples(
-        self,
-        batch_states: List[SampleContext],
-        timing_stats: Optional[Dict[str, float]] = None,
-    ) -> List[Dict[str, Any]]:
-        examples: List[Dict[str, Any]] = []
+        original_tokens: torch.Tensor,
+    ) -> Tuple[Optional[torch.Tensor], Optional[float]]:
+        losses: List[torch.Tensor] = []
+        lod0_loss = None
         for sample in batch_states:
             for variant in sample.variants:
-                example = self._prepare_horizon_example(sample, variant, timing_stats)
-                if example is not None:
-                    examples.append(example)
-        return examples
+                loss = self._run_variant_forward(variant, original_tokens)
+                variant.token_loss_value = loss.detach()
+                losses.append(loss)
+                if lod0_loss is None and variant.lod_hint == 0:
+                    lod0_loss = float(loss.detach())
+        if not losses:
+            return None, lod0_loss
+        return torch.stack(losses).mean(), lod0_loss
 
-    def _prepare_horizon_example(
+    def _run_variant_forward(
         self,
-        sample: SampleContext,
         variant: WorkingContextVariant,
-        timing_stats: Optional[Dict[str, float]] = None,
-    ) -> Optional[Dict[str, Any]]:
-        base_horizon = self.config.horizon_tokens
-        if base_horizon <= 0 or sample.tree.tokens is None:
-            return None
+        original_tokens: torch.Tensor,
+    ) -> torch.Tensor:
         wc = variant.working_context
-        wc_embeddings = wc.to_tensor()
-        wc_positions = wc.get_positions()
-        last_pos = int(wc_positions[0, -1].item())
-        available = sample.tree.tokens.shape[1] - (last_pos + 1)
-        lod2_horizon = self.config.block_size * self.config.long_horizon_multiplier
-        use_lod2 = available >= lod2_horizon >= base_horizon
-        horizon = lod2_horizon if use_lod2 else base_horizon
-        horizon_tokens = self._slice_tokens(sample.tree, last_pos + 1, horizon)
-        if horizon_tokens is None:
-            return None
-        if timing_stats is not None:
-            timing_stats["horizon_evals"] = timing_stats.get("horizon_evals", 0) + 1
-            timing_stats["horizon_tokens"] = timing_stats.get("horizon_tokens", 0) + int(horizon_tokens.shape[1])
-        if use_lod2:
-            self._increment_counter("horizon_triggers")
-            self._log_event(
-                sample.session_id,
-                "horizon_trigger",
-                {"variant": variant.source, "lod": 2, "length": horizon},
-            )
-        horizon_embeddings = self._embed_with_padding(horizon_tokens)
-        target_dtype = next(self.model.parameters()).dtype
-        dtype_logged = False
-        if wc_embeddings.dtype != target_dtype:
-            if not self._debug_flags.get("dtype_cast_wc", False):
-                print(f"[MegaContext] casting wc embeddings {wc_embeddings.dtype} -> {target_dtype}", flush=True)
-                self._debug_flags["dtype_cast_wc"] = True
-            wc_embeddings = wc_embeddings.to(target_dtype)
-            dtype_logged = True
-        if horizon_embeddings.dtype != target_dtype:
-            if not self._debug_flags.get("dtype_cast_horizon", False):
-                print(f"[MegaContext] casting horizon embeddings {horizon_embeddings.dtype} -> {target_dtype}", flush=True)
-                self._debug_flags["dtype_cast_horizon"] = True
-            horizon_embeddings = horizon_embeddings.to(target_dtype)
-            dtype_logged = True
-        combined = torch.cat([wc_embeddings, horizon_embeddings], dim=1)
-        if not self._debug_flags.get("dtype_state_logged", False):
-            print(
-                "[MegaContext] pre-forward dtype state: "
-                f"wc={wc_embeddings.dtype}, horizon={horizon_embeddings.dtype}, combined={combined.dtype}, "
-                f"target={target_dtype}, autocast={torch.is_autocast_enabled()}",
-                flush=True,
-            )
-            self._debug_flags["dtype_state_logged"] = True
-        if self._mem_debug:
-            print(
-                "[MegaContext][mem] horizon batch "
-                f"B={combined.shape[0]} wc_len={wc_embeddings.shape[1]} "
-                f"horizon_len={horizon_embeddings.shape[1]} combined_len={combined.shape[1]} dtype={combined.dtype}",
-                flush=True,
-            )
-            self._log_memory("horizon_pre_forward")
-        cos_sin = self._compose_positional_overrides(wc, last_pos, horizon_tokens.shape[1])
-        example = {
-            "variant": variant,
-            "sample": sample,
-            "combined": combined,
-            "horizon_tokens": horizon_tokens,
-            "cos": cos_sin[0] if cos_sin is not None else None,
-            "sin": cos_sin[1] if cos_sin is not None else None,
-            "use_lod2": use_lod2,
-            "seq_len": combined.shape[1],
-            "horizon_len": horizon_tokens.shape[1],
-        }
-        return example
-
-    def _group_horizon_examples(self, examples: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        groups: Dict[int, List[Dict[str, Any]]] = {}
-        for example in examples:
-            groups.setdefault(example["seq_len"], []).append(example)
-        return list(groups.values())
-
-    def _run_horizon_group(
-        self,
-        group: List[Dict[str, Any]],
-        timing_stats: Optional[Dict[str, float]] = None,
-    ) -> List[Tuple[WorkingContextVariant, Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]]:
-        if not group:
-            return []
-        batch_size = len(group)
-        seq_len = group[0]["seq_len"]
-        combined = torch.cat([ex["combined"] for ex in group], dim=0)
-        cos = None
-        sin = None
-        if all(ex["cos"] is not None and ex["sin"] is not None for ex in group):
-            cos = torch.cat([ex["cos"] for ex in group], dim=0)
-            sin = torch.cat([ex["sin"] for ex in group], dim=0)
-        dummy_idx = torch.zeros(
-            (batch_size, seq_len), dtype=torch.long, device=self.device
+        embeddings = wc.to_tensor().to(self.device)
+        seq_len = embeddings.shape[1]
+        cos, sin, alibi = wc.get_positional_encodings()
+        cos = cos.to(self.device)
+        sin = sin.to(self.device)
+        alibi = alibi.to(self.device) if alibi is not None else None
+        batch_idx = getattr(variant, "batch_index", 0)
+        token_slice = original_tokens[batch_idx : batch_idx + 1]
+        token_slice = self._align_tokens_to_embeddings(token_slice, seq_len)
+        dummy_idx = torch.zeros((1, seq_len), dtype=torch.long, device=self.device)
+        return self.model(
+            dummy_idx,
+            token_slice,
+            cos_sin_override=(cos, sin),
+            alibi_override=alibi,
+            inputs_embeds=embeddings,
         )
-        autocast_ctx = nullcontext()
-        target_dtype = combined.dtype
-        if self.device.type == "cuda" and target_dtype == torch.bfloat16:
-            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
-        if self._mem_debug:
-            print(
-                "[MegaContext][mem] horizon batch "
-                f"B={batch_size} seq_len={seq_len} dtype={combined.dtype}",
-                flush=True,
-            )
-            self._log_memory("horizon_pre_forward")
-        t_forward0 = time.time()
-        with autocast_ctx:
-            logits = self.model(
-                dummy_idx,
-                targets=None,
-                cos_sin_override=(cos, sin) if cos is not None and sin is not None else None,
-                inputs_embeds=combined,
-            )
-        t_forward1 = time.time()
-        if self._mem_debug:
-            self._log_memory("horizon_post_forward")
-        if timing_stats is not None:
-            timing_stats["horizon_forward_ms"] += (t_forward1 - t_forward0) * 1000.0
-        results = []
-        t_loss0 = time.time()
-        for idx, example in enumerate(group):
-            horizon_len = example["horizon_len"]
-            horizon_logits = logits[idx : idx + 1, -horizon_len:, :]
-            horizon_tokens = example["horizon_tokens"]
-            token_loss = F.cross_entropy(
-                horizon_logits.reshape(-1, horizon_logits.size(-1)),
-                horizon_tokens.view(-1),
-                ignore_index=-1,
-            )
-            lod1_loss, lod2_loss = self._compute_lod_losses(
-                horizon_tokens, horizon_logits, use_lod2=example["use_lod2"]
-            )
-            results.append((example["variant"], token_loss, lod1_loss, lod2_loss))
-        if timing_stats is not None:
-            t_loss1 = time.time()
-            timing_stats["horizon_loss_ms"] += (t_loss1 - t_loss0) * 1000.0
-        return results
 
-    def _log_delta_nll(self, batch_states: List[SampleContext]) -> None:
-        for sample in batch_states:
-            try:
-                baseline = None
-                for v in sample.variants:
-                    if v.token_loss_value is not None and (v.source.startswith("recency_baseline") or v.lod_hint == 0):
-                        baseline = v.token_loss_value
-                        break
-                if baseline is None:
-                    continue
-                deltas = []
-                for v in sample.variants:
-                    if v.token_loss_value is None:
-                        continue
-                    deltas.append((v.token_loss_value - baseline).detach())
-                if not deltas:
-                    continue
-                d = torch.stack(deltas)
-                payload = {
-                    "mean": float(d.mean().item()),
-                    "p95": float(torch.quantile(d, 0.95).item()),
-                    "count": int(d.numel()),
-                }
-                self._log_event(sample.session_id, "delta_nll", payload)
-            except Exception:
-                continue
-
-    def _compose_positional_overrides(
-        self,
-        wc: WorkingContext,
-        last_pos: int,
-        horizon_len: int,
-    ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        if self.positional_encoder is None:
-            return None
-        wc_cos, wc_sin, _ = wc.get_positional_encodings()
-        horizon_positions = torch.arange(
-            last_pos + 1,
-            last_pos + 1 + horizon_len,
-            device=self.device,
-            dtype=torch.long,
-        ).unsqueeze(0)
-        lod_tensor = torch.zeros_like(horizon_positions)
-        hor_cos, hor_sin, _ = self.positional_encoder(
-            horizon_positions,
-            lod_tensor,
-            device=self.device,
+    def _align_tokens_to_embeddings(self, tokens: torch.Tensor, target_len: int) -> torch.Tensor:
+        if tokens.shape[1] >= target_len:
+            return tokens[:, -target_len:]
+        pad = torch.full(
+            (tokens.shape[0], target_len - tokens.shape[1]),
+            -1,
+            dtype=tokens.dtype,
+            device=tokens.device,
         )
-        cos = torch.cat([wc_cos, hor_cos], dim=1)
-        sin = torch.cat([wc_sin, hor_sin], dim=1)
-        return cos, sin
-
-    def _embed_with_padding(self, tokens: torch.Tensor) -> torch.Tensor:
-        mask = tokens != -1
-        safe_tokens = tokens.clone()
-        safe_tokens[~mask] = 0
-        embeddings = self.embed(safe_tokens)
-        embeddings = embeddings * mask.unsqueeze(-1)
-        return embeddings
-
-    def _slice_tokens(
-        self, tree: MegaContextTree, start: int, length: int
-    ) -> Optional[torch.Tensor]:
-        if tree.tokens is None or length <= 0:
-            return None
-        total = tree.tokens.shape[1]
-        if start >= total:
-            return None
-        end = min(total, start + length)
-        slice_tokens = tree.tokens[:, start:end]
-        if slice_tokens.shape[1] < length:
-            pad = torch.full(
-                (slice_tokens.shape[0], length - slice_tokens.shape[1]),
-                -1,
-                dtype=slice_tokens.dtype,
-                device=slice_tokens.device,
-            )
-            slice_tokens = torch.cat([slice_tokens, pad], dim=1)
-        return slice_tokens
-
-    def _compute_lod_losses(
-        self,
-        tokens: torch.Tensor,
-        horizon_logits: torch.Tensor,
-        use_lod2: bool = False,
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
-        block = self.config.block_size
-        if block <= 0:
-            return None, None
-        horizon_len = tokens.shape[1]
-        num_blocks = horizon_len // block
-        if num_blocks == 0:
-            return None, None
-        trim = num_blocks * block
-        valid_tokens = tokens[:, :trim]
-        mask = valid_tokens != -1
-        if not mask.any():
-            return None, None
-        safe_tokens = valid_tokens.clone()
-        safe_tokens[~mask] = 0
-        gt_embeddings = self.embed(safe_tokens) * mask.unsqueeze(-1)
-        gt_blocks = gt_embeddings.view(num_blocks, block, -1)
-        pred_logits = horizon_logits[:, :trim, :]
-        pred_embeds = self._project_logits_to_embeddings(pred_logits)
-        pred_blocks = pred_embeds.view(num_blocks, block, -1)
-        gt_gists = self.gistnet(gt_blocks)
-        pred_gists = self.gistnet(pred_blocks)
-        lod1_loss = 1 - F.cosine_similarity(pred_gists, gt_gists, dim=-1)
-        lod1_mean = lod1_loss.mean()
-        lod2_mean = None
-        if use_lod2 and pred_gists.numel() > 0:
-            num_lod1 = pred_gists.shape[0]
-            lod2_block = self.config.long_horizon_multiplier
-            if num_lod1 >= lod2_block:
-                trim = (num_lod1 // lod2_block) * lod2_block
-                if trim > 0:
-                    pred_lod2 = self.gistnet(pred_gists[:trim].view(1, trim, -1)).view(-1, self.config.embed_dim)
-                    gt_lod2 = self.gistnet(gt_gists[:trim].view(1, trim, -1)).view(-1, self.config.embed_dim)
-                    lod2 = 1 - F.cosine_similarity(pred_lod2, gt_lod2, dim=-1)
-                    lod2_mean = lod2.mean()
-        return lod1_mean, lod2_mean
-
-    def _project_logits_to_embeddings(self, pred_logits: torch.Tensor) -> torch.Tensor:
-        """Project token logits to embedding space using (truncated) probability mass.
-
-        Applies softmax, keeps top-k mass if configured, renormalizes, and
-        returns the expected embedding per position.
-        """
-        top_k = min(self.config.loss_projection_top_k, pred_logits.size(-1))
-        probs = F.softmax(pred_logits, dim=-1)
-        if top_k < pred_logits.size(-1):
-            top_vals, top_idx = torch.topk(probs, top_k, dim=-1)
-            norm = top_vals.sum(dim=-1, keepdim=True).clamp_min(1e-9)
-            top_vals = top_vals / norm
-            embed_weights = self.embed.weight[top_idx]
-            pred_embeds = (top_vals.unsqueeze(-1) * embed_weights).sum(dim=-2)
-        else:
-            pred_embeds = torch.matmul(probs, self.embed.weight)
-        return pred_embeds
+        return torch.cat([pad, tokens], dim=1)
 
     def _compute_lens_losses(
         self, batch_states: List[SampleContext]

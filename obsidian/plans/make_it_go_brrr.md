@@ -21,23 +21,20 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
    - When `MC_MEMORY_DEBUG` is set, dump `torch.cuda.memory_summary()` after each phase, tied to the timing logs.  
    - Store summaries in `report/` so we have persistent evidence when tuning knobs.
 
-> Deliverable: WANDB dashboard that shows `build_ms`, `variants`, `horizon_ms`, `lens_ms`, `base_forward_ms`, `optimizer_ms`, `tokens/sec`.
+> Deliverable: WANDB dashboard that shows `build_ms`, `variants`, `lens_ms`, `base_forward_ms`, `optimizer_ms`, `tokens/sec`.
 
 ---
 
-## Phase 1 — Make Horizons Optional & Cheap
+## Phase 1 — Remove Horizon Dependency
 
-1. **Config gate**  
-   - Add `--mc_enable_horizon` (default `1` for parity, but allow disabling).  
-   - When disabled, still build all WC variants and run them through the base model for full next-token loss; simply skip the extra horizon-specific ΔNLL bookkeeping so “pure focus allocator” mode is just variants + regular NLL.
+1. **Single-source supervision** *(DONE)*  
+   - Controller no longer evaluates teacher-forced horizons; all WC variants train directly on the next-token objective, and LensNet targets are derived from those losses.
 2. **Packed batching** *(DONE: controller groups equal-length variants into shared forwards; further padding optimizations remain optional)*  
-   - When horizons are enabled, batch all variants for the teacher-forced window into shared forwards instead of serialized loops.  
-   - Use padding or length-based grouping so the GPU sees large batches rather than many tiny ones.
-3. **Teacher-forced superset** *(DONE: base forward now iterates over all variants and logs LOD0-only loss separately)*  
-   - Compute the full next-token loss for **every** variant (LOD0 and LOD1+) so the training signal is a superset of the vanilla objective.  
-   - Keep track of which variant is “pure LOD0 recency” so we can still report a vanilla-compatible loss metric even if we drop the separate baseline forward.
+   - Variant forwards share batches so we avoid serialized micro-runs.
+3. **Teacher-forced superset** *(DONE)*  
+   - Every variant contributes to the main loss, and the recency LOD0 loss is logged separately for vanilla comparisons.
 
-> Exit: Able to flip horizons off to validate speed, and when enabled they add ≤20% overhead because they’re batched.
+> Exit: One forward path per batch (`process_batch`) replaces “baseline + horizon”; the trainer only consumes the aggregated loss.
 
 ---
 
@@ -46,7 +43,7 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 1. **LOD0 guarantee** *(DONE)*  
    - Controller always tags the recency-baseline WC (`lod_hint == 0`) so `train/loss_lod0` can be logged even when the main forward consumes every variant.
 2. **Variant-forward replacement** *(DONE)*  
-   - `MCController.process_batch` now returns the sampled variants and their embeddings; the main training loop iterates over them and accumulates the per-variant next-token losses instead of running a duplicate “baseline” forward.
+   - `MCController.process_batch` now runs the variant forwards itself and returns the aggregated loss, so the main training loop no longer touches MC-specific embeddings.
 3. **Grad weighting** *(Deferred until Phase 3)*  
    - Current implementation averages per-variant losses (fixed count), so gradient magnitude stays stable. If we add dynamic variant counts later, revisit weighting to keep LR comparable.
 
