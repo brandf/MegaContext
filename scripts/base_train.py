@@ -339,13 +339,17 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         if autocast_enabled:
             autocast_ctx = torch.cuda.amp.autocast(dtype=autocast_dtype)
         with autocast_ctx:
+            embeds = inputs_embeds_override
+            target_dtype = autocast_dtype if autocast_enabled else next(model.parameters()).dtype
+            if embeds.dtype != target_dtype:
+                embeds = embeds.to(target_dtype)
             loss2d = model(
                 x,
                 y,
                 loss_reduction="none",
                 cos_sin_override=cos_sin_override,
                 alibi_override=alibi_override,
-                inputs_embeds=inputs_embeds_override,
+                inputs_embeds=embeds,
             )
         loss2d = loss2d.view(-1)
         y = y.view(-1)
