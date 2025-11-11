@@ -328,7 +328,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         x, y = next(batch_iter)
         x = x.to(device)
         y = y.to(device)
-        session_id = controller.begin_inference_session(x)
+        session_id = controller.begin_inference_session(x, rebuild=False)
         wc = controller.get_inference_working_context()
         if wc is None:
             raise RuntimeError("Inference working context is None during validation")

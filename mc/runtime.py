@@ -1167,6 +1167,7 @@ class MCController:
         self,
         initial_tokens: torch.Tensor,
         session_id: Optional[str] = None,
+        rebuild: bool = True,
     ) -> str:
         """
         Initialize a persistent MegaContext for inference/autoregressive decoding.
@@ -1192,10 +1193,11 @@ class MCController:
         if recency_variant is None:
             raise ValueError("Unable to build initial working context for inference")
         allocator = self._build_allocator(tree, recency_variant.working_context)
-        allocator.rebuild(
-            max_replacements_per_iteration=self.config.allocator_max_replacements,
-            num_iterations=self.config.allocator_iterations,
-        )
+        if rebuild:
+            allocator.rebuild(
+                max_replacements_per_iteration=self.config.allocator_max_replacements,
+                num_iterations=self.config.allocator_iterations,
+            )
         self._log_tree_snapshot(session, tree, tag="inference_init")
         self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
         self.inference_state = InferenceState(
