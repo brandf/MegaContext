@@ -319,6 +319,55 @@ def _assemble_positional_override(x, mc_result, step, device, mc_controller):
     return (cos, sin), alibi
 
 
+def _assemble_mc_variant_batch(mc_result, device):
+    variants: list[WorkingContextVariant] = getattr(mc_result, "variants", [])
+    if not variants:
+        return None
+    entries = []
+    for variant in variants:
+        embeddings = variant.working_context.to_tensor().to(device)
+        entries.append(
+            {
+                "variant": variant,
+                "embeddings": embeddings,
+            }
+        )
+    return entries
+
+
+def _run_variant_batch_forward(
+    model,
+    original_inputs,
+    original_labels,
+    variant_entries,
+    cos_sin_override,
+    alibi_override,
+):
+    total_loss = 0.0
+    lod0_loss = None
+    for entry in variant_entries:
+        variant = entry["variant"]
+        embeddings = entry["embeddings"]
+        batch_idx = variant.batch_index
+        inputs_slice = original_inputs[batch_idx : batch_idx + 1]
+        labels_slice = original_labels[batch_idx : batch_idx + 1]
+        loss = model(
+            inputs_slice,
+            labels_slice,
+            cos_sin_override=cos_sin_override,
+            alibi_override=alibi_override,
+            inputs_embeds=embeddings,
+        )
+        variant.token_loss_value = loss.detach()
+        total_loss = total_loss + loss
+        if lod0_loss is None and variant.lod_hint == 0:
+            lod0_loss = float(loss.detach())
+    total_loss = total_loss / max(1, len(variant_entries))
+    if lod0_loss is None:
+        lod0_loss = float(total_loss.detach())
+    return total_loss, lod0_loss
+
+
 @torch.no_grad()
 def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device):
     total_nats = torch.tensor(0.0, dtype=torch.float32, device=device)
@@ -729,52 +778,3 @@ get_report().log(section="Base model training", data=[
 # cleanup
 wandb_run.finish() # wandb run finish
 compute_cleanup()
-
-
-def _assemble_mc_variant_batch(mc_result, device):
-    variants: list[WorkingContextVariant] = getattr(mc_result, "variants", [])
-    if not variants:
-        return None
-    entries = []
-    for variant in variants:
-        embeddings = variant.working_context.to_tensor().to(device)
-        entries.append(
-            {
-                "variant": variant,
-                "embeddings": embeddings,
-            }
-        )
-    return entries
-
-
-def _run_variant_batch_forward(
-    model,
-    original_inputs,
-    original_labels,
-    variant_entries,
-    cos_sin_override,
-    alibi_override,
-):
-    total_loss = 0.0
-    lod0_loss = None
-    for entry in variant_entries:
-        variant = entry["variant"]
-        embeddings = entry["embeddings"]
-        batch_idx = variant.batch_index
-        inputs_slice = original_inputs[batch_idx : batch_idx + 1]
-        labels_slice = original_labels[batch_idx : batch_idx + 1]
-        loss = model(
-            inputs_slice,
-            labels_slice,
-            cos_sin_override=cos_sin_override,
-            alibi_override=alibi_override,
-            inputs_embeds=embeddings,
-        )
-        variant.token_loss_value = loss.detach()
-        total_loss = total_loss + loss
-        if lod0_loss is None and variant.lod_hint == 0:
-            lod0_loss = float(loss.detach())
-    total_loss = total_loss / max(1, len(variant_entries))
-    if lod0_loss is None:
-        lod0_loss = float(total_loss.detach())
-    return total_loss, lod0_loss
