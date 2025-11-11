@@ -5,7 +5,7 @@ import random
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 import torch
@@ -237,12 +237,19 @@ class MCController:
             self.current_batch_states = []
             self._emit_batch_counters(step)
             return result
-        t_hor0 = time.time()
-        token_loss, lod1_loss, lod2_loss = self._aggregate_horizon_losses(batch_states, timing_details)
-        t_hor1 = time.time()
-        t_lens0 = time.time()
-        lens_loss = self._compute_lens_losses(batch_states)
-        t_lens1 = time.time()
+        token_loss = None
+        lod1_loss = None
+        lod2_loss = None
+        lens_loss = None
+        if self.config.enable_horizon:
+            t_hor0 = time.time()
+            token_loss, lod1_loss, lod2_loss = self._aggregate_horizon_losses(batch_states, timing_details)
+            t_hor1 = time.time()
+            t_lens0 = time.time()
+            lens_loss = self._compute_lens_losses(batch_states)
+            t_lens1 = time.time()
+        else:
+            t_hor0 = t_hor1 = t_lens0 = t_lens1 = time.time()
         result = MCBatchResult(
             positional_cache=positional_cache,
             token_loss=token_loss,
@@ -268,8 +275,8 @@ class MCController:
             {
                 "build_ms": (t_build1 - t_build0) * 1000.0,
                 "positional_ms": (t_pos1 - t_pos0) * 1000.0,
-                "horizon_ms": (t_hor1 - t_hor0) * 1000.0,
-                "lens_ms": (t_lens1 - t_lens0) * 1000.0,
+                "horizon_ms": (t_hor1 - t_hor0) * 1000.0 if self.config.enable_horizon else 0.0,
+                "lens_ms": (t_lens1 - t_lens0) * 1000.0 if self.config.enable_horizon else 0.0,
                 "horizon_forward_ms": timing_details["horizon_forward_ms"],
                 "horizon_loss_ms": timing_details["horizon_loss_ms"],
             },
@@ -689,77 +696,52 @@ class MCController:
         batch_states: List[SampleContext],
         timing_stats: Optional[Dict[str, float]] = None,
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        token_losses = []
-        lod1_losses = []
-        lod2_losses = []
-        for sample in batch_states:
-            token_loss, lod1_loss, lod2_loss = self._compute_horizon_losses_for_sample(sample, timing_stats)
-            if token_loss is not None:
-                token_losses.append(token_loss)
-            if lod1_loss is not None:
-                lod1_losses.append(lod1_loss)
-            if lod2_loss is not None:
-                lod2_losses.append(lod2_loss)
+        examples = self._collect_horizon_examples(batch_states, timing_stats)
+        if not examples:
+            return None, None, None
+        token_losses: List[torch.Tensor] = []
+        lod1_losses: List[torch.Tensor] = []
+        lod2_losses: List[torch.Tensor] = []
+        for group in self._group_horizon_examples(examples):
+            group_losses = self._run_horizon_group(group, timing_stats)
+            for variant, token_loss, lod1_loss, lod2_loss in group_losses:
+                if token_loss is not None:
+                    variant.token_loss_value = token_loss
+                    token_losses.append(token_loss)
+                if lod1_loss is not None:
+                    variant.lod1_loss_value = lod1_loss
+                    lod1_losses.append(lod1_loss)
+                if lod2_loss is not None:
+                    variant.lod2_loss_value = lod2_loss
+                    lod2_losses.append(lod2_loss)
         agg_token = torch.stack(token_losses).mean() if token_losses else None
         agg_lod1 = torch.stack(lod1_losses).mean() if lod1_losses else None
         agg_lod2 = torch.stack(lod2_losses).mean() if lod2_losses else None
+        self._log_delta_nll(batch_states)
         return agg_token, agg_lod1, agg_lod2
 
-    def _compute_horizon_losses_for_sample(
+    def _collect_horizon_examples(
         self,
-        sample: SampleContext,
+        batch_states: List[SampleContext],
         timing_stats: Optional[Dict[str, float]] = None,
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        token_losses = []
-        lod1_losses = []
-        lod2_losses = []
-        for variant in sample.variants:
-            token_loss, lod1_loss, lod2_loss = self._evaluate_variant_horizon(sample, variant, timing_stats)
-            if token_loss is not None:
-                variant.token_loss_value = token_loss
-                token_losses.append(token_loss)
-            if lod1_loss is not None:
-                variant.lod1_loss_value = lod1_loss
-                lod1_losses.append(lod1_loss)
-            if lod2_loss is not None:
-                lod2_losses.append(lod2_loss)
-        token_loss = torch.stack(token_losses).mean() if token_losses else None
-        lod1_loss = torch.stack(lod1_losses).mean() if lod1_losses else None
-        lod2_loss = torch.stack(lod2_losses).mean() if lod2_losses else None
-        # Telemetry: ΔNLL vs. recency baseline when available
-        try:
-            baseline = None
-            for v in sample.variants:
-                if v.token_loss_value is not None and (v.source.startswith("recency_baseline") or v.lod_hint == 0):
-                    baseline = v.token_loss_value
-                    break
-            if baseline is not None:
-                deltas = []
-                for v in sample.variants:
-                    if v.token_loss_value is None:
-                        continue
-                    deltas.append((v.token_loss_value - baseline).detach())
-                if deltas:
-                    d = torch.stack(deltas)
-                    payload = {
-                        "mean": float(d.mean().item()),
-                        "p95": float(torch.quantile(d, 0.95).item()),
-                        "count": int(d.numel()),
-                    }
-                    self._log_event(sample.session_id, "delta_nll", payload)
-        except Exception:
-            pass
-        return token_loss, lod1_loss, lod2_loss
+    ) -> List[Dict[str, Any]]:
+        examples: List[Dict[str, Any]] = []
+        for sample in batch_states:
+            for variant in sample.variants:
+                example = self._prepare_horizon_example(sample, variant, timing_stats)
+                if example is not None:
+                    examples.append(example)
+        return examples
 
-    def _evaluate_variant_horizon(
+    def _prepare_horizon_example(
         self,
         sample: SampleContext,
         variant: WorkingContextVariant,
         timing_stats: Optional[Dict[str, float]] = None,
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+    ) -> Optional[Dict[str, Any]]:
         base_horizon = self.config.horizon_tokens
         if base_horizon <= 0 or sample.tree.tokens is None:
-            return None, None, None
+            return None
         wc = variant.working_context
         wc_embeddings = wc.to_tensor()
         wc_positions = wc.get_positions()
@@ -770,7 +752,7 @@ class MCController:
         horizon = lod2_horizon if use_lod2 else base_horizon
         horizon_tokens = self._slice_tokens(sample.tree, last_pos + 1, horizon)
         if horizon_tokens is None:
-            return None, None, None
+            return None
         if timing_stats is not None:
             timing_stats["horizon_evals"] = timing_stats.get("horizon_evals", 0) + 1
             timing_stats["horizon_tokens"] = timing_stats.get("horizon_tokens", 0) + int(horizon_tokens.shape[1])
@@ -814,49 +796,113 @@ class MCController:
             )
             self._log_memory("horizon_pre_forward")
         cos_sin = self._compose_positional_overrides(wc, last_pos, horizon_tokens.shape[1])
+        example = {
+            "variant": variant,
+            "sample": sample,
+            "combined": combined,
+            "horizon_tokens": horizon_tokens,
+            "cos": cos_sin[0] if cos_sin is not None else None,
+            "sin": cos_sin[1] if cos_sin is not None else None,
+            "use_lod2": use_lod2,
+            "seq_len": combined.shape[1],
+            "horizon_len": horizon_tokens.shape[1],
+        }
+        return example
+
+    def _group_horizon_examples(self, examples: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+        groups: Dict[int, List[Dict[str, Any]]] = {}
+        for example in examples:
+            groups.setdefault(example["seq_len"], []).append(example)
+        return list(groups.values())
+
+    def _run_horizon_group(
+        self,
+        group: List[Dict[str, Any]],
+        timing_stats: Optional[Dict[str, float]] = None,
+    ) -> List[Tuple[WorkingContextVariant, Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]]:
+        if not group:
+            return []
+        batch_size = len(group)
+        seq_len = group[0]["seq_len"]
+        combined = torch.cat([ex["combined"] for ex in group], dim=0)
+        cos = None
+        sin = None
+        if all(ex["cos"] is not None and ex["sin"] is not None for ex in group):
+            cos = torch.cat([ex["cos"] for ex in group], dim=0)
+            sin = torch.cat([ex["sin"] for ex in group], dim=0)
         dummy_idx = torch.zeros(
-            (1, combined.shape[1]), dtype=torch.long, device=self.device
+            (batch_size, seq_len), dtype=torch.long, device=self.device
         )
-        t_forward0 = time.time()
         autocast_ctx = nullcontext()
+        target_dtype = combined.dtype
         if self.device.type == "cuda" and target_dtype == torch.bfloat16:
             autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
-        try:
-            with autocast_ctx:
-                logits = self.model(
-                    dummy_idx,
-                    targets=None,
-                    cos_sin_override=cos_sin,
-                    inputs_embeds=combined,
-                )
-        except RuntimeError as exc:
+        if self._mem_debug:
             print(
-                "[MegaContext] model forward failed. "
-                f"wc_dtype={wc_embeddings.dtype}, horizon_dtype={horizon_embeddings.dtype}, "
-                f"combined_dtype={combined.dtype}, target_dtype={target_dtype}, "
-                f"autocast={torch.is_autocast_enabled()}. Error: {exc}",
+                "[MegaContext][mem] horizon batch "
+                f"B={batch_size} seq_len={seq_len} dtype={combined.dtype}",
                 flush=True,
             )
-            self._log_memory("horizon_forward_failed")
-            raise
-        else:
-            if self._mem_debug:
-                self._log_memory("horizon_post_forward")
+            self._log_memory("horizon_pre_forward")
+        t_forward0 = time.time()
+        with autocast_ctx:
+            logits = self.model(
+                dummy_idx,
+                targets=None,
+                cos_sin_override=(cos, sin) if cos is not None and sin is not None else None,
+                inputs_embeds=combined,
+            )
         t_forward1 = time.time()
+        if self._mem_debug:
+            self._log_memory("horizon_post_forward")
         if timing_stats is not None:
             timing_stats["horizon_forward_ms"] += (t_forward1 - t_forward0) * 1000.0
-        horizon_logits = logits[:, -horizon_tokens.shape[1]:, :]
+        results = []
         t_loss0 = time.time()
-        token_loss = F.cross_entropy(
-            horizon_logits.reshape(-1, horizon_logits.size(-1)),
-            horizon_tokens.view(-1),
-            ignore_index=-1,
-        )
-        lod1_loss, lod2_loss = self._compute_lod_losses(horizon_tokens, horizon_logits, use_lod2=use_lod2)
+        for idx, example in enumerate(group):
+            horizon_len = example["horizon_len"]
+            horizon_logits = logits[idx : idx + 1, -horizon_len:, :]
+            horizon_tokens = example["horizon_tokens"]
+            token_loss = F.cross_entropy(
+                horizon_logits.reshape(-1, horizon_logits.size(-1)),
+                horizon_tokens.view(-1),
+                ignore_index=-1,
+            )
+            lod1_loss, lod2_loss = self._compute_lod_losses(
+                horizon_tokens, horizon_logits, use_lod2=example["use_lod2"]
+            )
+            results.append((example["variant"], token_loss, lod1_loss, lod2_loss))
         if timing_stats is not None:
             t_loss1 = time.time()
             timing_stats["horizon_loss_ms"] += (t_loss1 - t_loss0) * 1000.0
-        return token_loss, lod1_loss, lod2_loss
+        return results
+
+    def _log_delta_nll(self, batch_states: List[SampleContext]) -> None:
+        for sample in batch_states:
+            try:
+                baseline = None
+                for v in sample.variants:
+                    if v.token_loss_value is not None and (v.source.startswith("recency_baseline") or v.lod_hint == 0):
+                        baseline = v.token_loss_value
+                        break
+                if baseline is None:
+                    continue
+                deltas = []
+                for v in sample.variants:
+                    if v.token_loss_value is None:
+                        continue
+                    deltas.append((v.token_loss_value - baseline).detach())
+                if not deltas:
+                    continue
+                d = torch.stack(deltas)
+                payload = {
+                    "mean": float(d.mean().item()),
+                    "p95": float(torch.quantile(d, 0.95).item()),
+                    "count": int(d.numel()),
+                }
+                self._log_event(sample.session_id, "delta_nll", payload)
+            except Exception:
+                continue
 
     def _compose_positional_overrides(
         self,

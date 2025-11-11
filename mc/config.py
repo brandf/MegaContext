@@ -64,6 +64,7 @@ class MCConfig:
     build_workers: int = 1  # TODO(mc): wire up parallel tree builds or remove this knob
     cache_lod0: bool = True
     auxiliary_dtype: str = "auto"  # auto | fp32 | bf16
+    enable_horizon: bool = True
 
     tree_config: MegaContextConfig = field(init=False)
     wc_config: WorkingContextConfig = field(init=False)

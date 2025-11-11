@@ -5,7 +5,7 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 ---
 # Make It Go BRRR — MegaContext Throughput Recovery
 
-> Goal: bring the `--mc` pipeline back into the same order-of-magnitude throughput as vanilla nanochat while preserving end-to-end supervision. The plan below moves from “measure” → “simplify” → “re-architect”.
+> Goal: bring the `--mc` pipeline back into the same order-of-magnitude throughput as vanilla nanochat while preserving end-to-end supervision. The plan below moves from "measure"  "simplify"  "re-architect".
 
 ---
 
@@ -25,16 +25,17 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 
 ---
 
-## Phase 1 — Make Horizon Optional & Cheap
+## Phase 1 — Make Horizons Optional & Cheap
 
 1. **Config gate**  
-   - Add `--mc_enable_horizon` (default `1` for parity, but let Brent flip to `0`).  
-   - When disabled, skip `_aggregate_horizon_losses` entirely and only return cached embeddings + positional caches. This gives us a “pure focus allocator” mode.
-2. **Packed batching**  
-   - When horizons are enabled, batch all variants with the same length into a single `torch.cat` and run one model forward instead of serialized loops.  
-   - Use padding + attention masks so the GPU sees large batches rather than many tiny ones.
+   - Add `--mc_enable_horizon` (default `1` for parity, but allow disabling).  
+   - When disabled, still build all WC variants and run them through the base model for full next-token loss; simply skip the extra horizon-specific ΔNLL bookkeeping so “pure focus allocator” mode is just variants + regular NLL.
+2. **Packed batching** *(in-progress: controller now groups equal-length variants into shared forwards)*  
+   - When horizons are enabled, batch all variants for the teacher-forced window into shared forwards instead of serialized loops.  
+   - Use padding or length-based grouping so the GPU sees large batches rather than many tiny ones.
 3. **Teacher-forced superset**  
-   - For LOD0 variants, compute the full next-token loss over the entire continuation (not just `H` tokens) so we can optionally drop the baseline forward later.
+   - Compute the full next-token loss for **every** variant (LOD0 and LOD1+) so the training signal is a superset of the vanilla objective.  
+   - Keep track of which variant is “pure LOD0 recency” so we can still report a vanilla-compatible loss metric even if we drop the separate baseline forward.
 
 > Exit: Able to flip horizons off to validate speed, and when enabled they add ≤20% overhead because they’re batched.
 

@@ -102,6 +102,7 @@ mc_aux_dtype = "auto"
 mc_tree_type = "ram"
 mc_initial_wcs = 4
 mc_max_counterfactuals = 8
+mc_enable_horizon = 1
 mc_horizon = 32
 mc_long_horizon_multiplier = 32
 mc_token_loss_weight = 1.0
@@ -198,6 +199,7 @@ if mc_enabled:
             num_heads=num_heads,
             positional_type=positional_type,
             auxiliary_dtype=mc_aux_dtype,
+            enable_horizon=bool(mc_enable_horizon),
         )
     otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
     otel_insecure = os.getenv("MC_OTEL_INSECURE", "0") == "1"
@@ -403,6 +405,7 @@ for step in range(num_iterations + 1):
     mc_variant_counts: list[int] = []
     mc_horizon_eval_total = 0
     mc_horizon_token_total = 0
+    vanilla_loss_samples: list[float] = []
 
     # once in a while: evaluate the val bpb (all ranks participate)
     if last_step or step % eval_every == 0:
@@ -570,6 +573,7 @@ for step in range(num_iterations + 1):
                 alibi_override=alibi_override,
                 inputs_embeds=inputs_embeds_override,
             )
+            vanilla_loss_samples.append(float(base_loss.detach()))
             mc_extra_loss = base_loss.new_zeros(())
             if mc_controller is not None and mc_result is not None:
                 if mc_result.token_loss is not None:
@@ -593,6 +597,7 @@ for step in range(num_iterations + 1):
     mc_lod1_loss_val = _mean_or_none(mc_lod1_loss_samples)
     mc_lod2_loss_val = _mean_or_none(mc_lod2_loss_samples)
     mc_lens_loss_val = _mean_or_none(mc_lens_loss_samples)
+    vanilla_loss_val = _mean_or_none(vanilla_loss_samples)
     # gradient clipping
     grad_clip_enabled = grad_clip > 0.0
     if grad_clip_enabled:
@@ -663,6 +668,8 @@ for step in range(num_iterations + 1):
         if mc_horizon_token_total:
             log_data["mc/horizon_tokens"] = mc_horizon_token_total
             mc_horizon_token_total = 0
+        if vanilla_loss_val is not None:
+            log_data["train/loss_lod0"] = vanilla_loss_val
         if mc_token_loss_val is not None:
             log_data["mc/token_loss"] = mc_token_loss_val
         if mc_lod1_loss_val is not None:
