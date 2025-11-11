@@ -113,7 +113,10 @@ user_config = {k: globals()[k] for k in config_keys} # will be useful for loggin
 device_type = autodetect_device_type() if device_type == "" else device_type
 ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
 master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
-autocast_ctx = torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16) if device_type == "cuda" else nullcontext()
+def _training_autocast():
+    if device_type == "cuda":
+        return torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+    return nullcontext()
 synchronize = torch.cuda.synchronize if device_type == "cuda" else lambda: None
 get_max_memory = torch.cuda.max_memory_allocated if device_type == "cuda" else lambda: 0
 
@@ -396,7 +399,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         autocast_ctx = nullcontext()
         if autocast_enabled:
             autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=autocast_dtype)
-        with autocast_ctx:
+        with _training_autocast():
             embeds = inputs_embeds_override
             target_dtype = autocast_dtype if autocast_enabled else next(model.parameters()).dtype
             if embeds.dtype != target_dtype:
@@ -462,7 +465,7 @@ for step in range(num_iterations + 1):
         if mc_controller is not None:
             val_bpb = evaluate_bpb_with_mc(eval_model, mc_controller, val_loader, eval_steps, token_bytes, device)
         else:
-            with autocast_ctx:
+            with _training_autocast():
                 val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
         print0(f"Step {step:05d} | Validation bpb: {val_bpb:.4f}")
         if val_bpb < min_val_bpb:
@@ -480,7 +483,7 @@ for step in range(num_iterations + 1):
     results = {}
     if core_metric_every > 0 and (last_step or (step > 0 and step % core_metric_every == 0)):
         model.eval()
-        with autocast_ctx:
+        with _training_autocast():
             results = evaluate_model(orig_model, tokenizer, device, max_per_task=core_metric_max_per_task)
         print0(f"Step {step:05d} | CORE metric: {results['core_metric']:.4f}")
         wandb_run.log({
@@ -507,7 +510,7 @@ for step in range(num_iterations + 1):
         engine = Engine(orig_model, tokenizer) # use orig_model to avoid recompilation
         for prompt in prompts:
             tokens = tokenizer(prompt, prepend="<|bos|>")
-            with autocast_ctx:
+            with _training_autocast():
                 sample, _ = engine.generate_batch(tokens, num_samples=1, max_tokens=16, temperature=0)
             print0(tokenizer.decode(sample[0]))
         model.train()
@@ -545,7 +548,8 @@ for step in range(num_iterations + 1):
         if mc_controller is not None:
             try:
                 t_mc0 = time.time()
-                mc_result = mc_controller.process_batch(x.detach(), step, context="train")
+                with _training_autocast():
+                    mc_result = mc_controller.process_batch(x.detach(), step, context="train")
                 t_mc1 = time.time()
                 # Collect MC controller timing (ms) for logging later
                 mc_time_samples.append((t_mc1 - t_mc0) * 1000.0)
@@ -562,7 +566,7 @@ for step in range(num_iterations + 1):
                     positional_cache = mc_result.positional_cache
                     if mc_result.lens_loss is not None:
                         mc_lens_loss_samples.append(float(mc_result.lens_loss.detach()))
-        with autocast_ctx:
+        with _training_autocast():
             cos_sin_override = None
             alibi_override = None
             if positional_cache is not None:

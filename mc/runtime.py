@@ -214,7 +214,7 @@ class MCController:
                 variant.batch_index = idx
             batch_states.append(sample_state)
             total_edits += sample_edits
-            cached_embeddings.append(seq_embeds)
+            cached_embeddings.append(self._to_model_dtype(seq_embeds))
             variant_counts.append(len(sample_state.variants))
             if context == "train":
                 train_variants.extend(sample_state.variants)
@@ -695,9 +695,9 @@ class MCController:
         cos, sin, alibi = wc.get_positional_encodings()
         cos = self._to_model_dtype(cos)
         sin = self._to_model_dtype(sin)
-        alibi = self._to_model_dtype(alibi) if alibi is not None else None
+        alibi = self._to_model_dtype(alibi)
         batch_idx = getattr(variant, "batch_index", 0)
-        token_slice = original_tokens[batch_idx : batch_idx + 1]
+        token_slice = original_tokens[batch_idx : batch_idx + 1].to(torch.long)
         token_slice = self._align_tokens_to_embeddings(token_slice, seq_len)
         dummy_idx = torch.zeros((1, seq_len), dtype=torch.long, device=self.device)
         autocast_ctx = nullcontext()
@@ -723,7 +723,9 @@ class MCController:
         )
         return torch.cat([pad, tokens], dim=1)
 
-    def _to_model_dtype(self, tensor: torch.Tensor) -> torch.Tensor:
+    def _to_model_dtype(self, tensor: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+        if tensor is None:
+            return None
         return tensor.to(device=self.device, dtype=self._target_dtype)
 
     def _compute_lens_losses(

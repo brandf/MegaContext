@@ -267,12 +267,11 @@ def test_mc_controller_positional_cache_requires_single_sample(monkeypatch):
     assert result_single.positional_cache is not None
 
 
-def test_mc_controller_lod_losses_return_tuple(monkeypatch):
+def test_mc_controller_handles_short_sequences(monkeypatch):
     controller = _build_mc_controller(monkeypatch, block_size=4)
     short_tokens = torch.randint(0, 16, (1, 2))  # shorter than block_size
-    logits = torch.randn(1, short_tokens.shape[1], 32)
-    lod1, lod2 = controller._compute_lod_losses(short_tokens, logits, use_lod2=False)
-    assert lod1 is None and lod2 is None
+    result = controller.process_batch(short_tokens, step=0)
+    assert result.variant_loss is not None
 
 
 def test_working_context_replace_preserves_positions():

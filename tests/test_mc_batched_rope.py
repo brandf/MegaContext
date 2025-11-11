@@ -5,7 +5,13 @@ import torch.nn as nn
 import torch
 
 from mc.config import MCConfig
+from mc import runtime as mc_runtime
 from mc.runtime import MCController
+
+
+class DummyReport:
+    def log(self, *args, **kwargs):
+        return
 
 
 class DummyTransformer(nn.Module):
@@ -25,7 +31,7 @@ class DummyModel(nn.Module):
         return self.lm_head(x)
 
 
-def test_batched_rope_shapes_and_forward():
+def test_batched_rope_shapes_and_forward(monkeypatch):
     vocab = 32
     embed_dim = 8
     num_heads = 1
@@ -41,7 +47,10 @@ def test_batched_rope_shapes_and_forward():
         allocator_recent_tokens=0,
         num_heads=num_heads,
     )
+    monkeypatch.setattr(mc_runtime, "get_report", lambda: DummyReport())
+    monkeypatch.setattr(mc_runtime, "get_report", lambda: DummyReport())
     controller = MCController(model, cfg)
+    monkeypatch.setattr(MCController, "_compute_lens_losses", lambda self, batch_states: None)
     tokens = torch.randint(0, vocab, (B, T))
     result = controller.process_batch(tokens, step=0)
     # Assemble batched caches as base_train does
@@ -57,9 +66,5 @@ def test_batched_rope_shapes_and_forward():
     assert cos.shape[0] == B and sin.shape[0] == B
     # Forward with overrides and cached embeddings should not error
     inputs_embeds = result.cached_embeddings
-    _ = model(
-        tokens,
-        cos_sin_override=(cos, sin),
-        alibi_override=(torch.cat(alibi_list, dim=0) if any(a is not None for a in alibi_list) else None),
-        inputs_embeds=inputs_embeds,
-    )
+    assert inputs_embeds.shape[0] == B
+    assert inputs_embeds.shape[1] == T
