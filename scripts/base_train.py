@@ -214,10 +214,8 @@ if mc_enabled:
     mc_controller = MCController(model, mc_config, telemetry_provider=telemetry_provider)
     eval_every = 25
 orig_model = model # original, uncompiled model, for saving raw model state_dict
-if mc_enabled:
-    print0("Skipping torch.compile because MegaContext introduces dynamic positional overrides.")
-else:
-    model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
+model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
+eval_model = orig_model if mc_enabled else model
 num_params = sum(p.numel() for p in model.parameters())
 print0(f"Number of parameters: {num_params:,}")
 num_flops_per_token = model.estimate_flops()
@@ -406,7 +404,7 @@ for step in range(num_iterations + 1):
         val_loader = build_val_loader()
         eval_steps = eval_tokens // (device_batch_size * max_seq_len * ddp_world_size)
         if mc_controller is not None:
-            val_bpb = evaluate_bpb_with_mc(model, mc_controller, val_loader, eval_steps, token_bytes, device)
+        val_bpb = evaluate_bpb_with_mc(eval_model, mc_controller, val_loader, eval_steps, token_bytes, device)
         else:
             with autocast_ctx:
                 val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
