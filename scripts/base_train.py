@@ -406,7 +406,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         x, y = next(batch_iter)
         x = x.to(device)
         y = y.to(device)
-        session_id = controller.begin_inference_session(x, rebuild=False)
+        session_id = controller.begin_inference_session(x, rebuild=True)
         wc = controller.get_inference_working_context()
         if wc is None:
             raise RuntimeError("Inference working context is None during validation")
@@ -721,6 +721,13 @@ for step in range(num_iterations + 1):
             log_data["mc/variants_mean"] = sum(mc_variant_counts) / len(mc_variant_counts)
             log_data["mc/variants_total"] = sum(mc_variant_counts)
             mc_variant_counts.clear()
+        if mc_result is not None and mc_result.delta_mean is not None:
+            log_data["mc/delta_mean"] = mc_result.delta_mean
+        if mc_result is not None and mc_result.delta_p95 is not None:
+            log_data["mc/delta_p95"] = mc_result.delta_p95
+        if mc_result is not None and mc_result.lod_metrics:
+            for lod, val in mc_result.lod_metrics.items():
+                log_data[f"mc/lod_loss/{lod}"] = val
         if vanilla_loss_val is not None:
             log_data["train/loss_lod0"] = vanilla_loss_val
         if mc_lens_loss_val is not None:

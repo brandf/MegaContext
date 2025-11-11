@@ -64,6 +64,9 @@ class MCBatchResult:
     cached_embeddings: Optional[torch.Tensor]
     positional_caches: Dict[str, Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = field(default_factory=dict)
     variants: List["WorkingContextVariant"] = field(default_factory=list)
+    delta_mean: Optional[float] = None
+    delta_p95: Optional[float] = None
+    lod_metrics: Dict[int, float] = field(default_factory=dict)
 
 
 class MCTelemetry:
@@ -240,7 +243,7 @@ class MCController:
             self.current_batch_states = []
             self._emit_batch_counters(step)
             return result
-        variant_loss, lod0_loss = self._compute_variant_losses(batch_states, tokens_device)
+        variant_loss, lod0_loss, delta_mean, delta_p95, lod_metrics = self._compute_variant_losses(batch_states, tokens_device)
         lens_loss = self._compute_lens_losses(batch_states)
         result = MCBatchResult(
             positional_cache=positional_cache,
@@ -250,6 +253,9 @@ class MCController:
             cached_embeddings=torch.cat(cached_embeddings, dim=0) if cached_embeddings else None,
             positional_caches=positional_cache_map,
             variants=train_variants,
+            delta_mean=delta_mean,
+            delta_p95=delta_p95,
+            lod_metrics=lod_metrics,
         )
         self.current_batch_states = []
         self._emit_batch_counters(step)
@@ -258,6 +264,18 @@ class MCController:
             "variant_counts": variant_counts,
             "total_variants": total_variants,
         }
+        if delta_mean is not None:
+            self._log_event(
+                f"train_step_{step}",
+                "delta_nll",
+                {"mean": float(delta_mean), "p95": float(delta_p95 or delta_mean)},
+            )
+        if lod_metrics:
+            self._log_event(
+                f"train_step_{step}",
+                "lod_metrics",
+                {f"lod_{lod}_loss": float(val) for lod, val in lod_metrics.items()},
+            )
         self._log_event(
             f"train_step_{step}",
             "mc_batch_stats",
@@ -670,19 +688,124 @@ class MCController:
         self,
         batch_states: List[SampleContext],
         original_tokens: torch.Tensor,
-    ) -> Tuple[Optional[torch.Tensor], Optional[float]]:
-        losses: List[torch.Tensor] = []
+    ) -> Tuple[Optional[torch.Tensor], Optional[float], Optional[float], Optional[float], Dict[int, float]]:
+        entries = self._prepare_variant_entries(batch_states, original_tokens)
+        if not entries:
+            return None, None, None, None, {}
+        losses = []
+        for seq_len, group in entries.items():
+            losses.extend(self._run_variant_batch(group, seq_len))
+        if not losses:
+            return None, None, None, None, {}
+        loss_tensor = torch.stack(losses)
         lod0_loss = None
+        delta_values: List[float] = []
+        lod_buckets: Dict[int, List[float]] = {}
+        for sample in batch_states:
+            baseline = None
+            for variant in sample.variants:
+                if variant.lod_hint == 0 and variant.token_loss_value is not None:
+                    baseline = float(variant.token_loss_value.detach())
+                    lod0_loss = baseline if lod0_loss is None else lod0_loss
+                    break
+            for variant in sample.variants:
+                if variant.token_loss_value is None:
+                    continue
+                val = float(variant.token_loss_value.detach())
+                lod_buckets.setdefault(variant.lod_hint, []).append(val)
+                if baseline is not None and variant is not None and variant.lod_hint != 0:
+                    delta_values.append(val - baseline)
+        delta_mean = float(torch.tensor(delta_values).mean().item()) if delta_values else None
+        delta_p95 = (
+            float(torch.quantile(torch.tensor(delta_values), 0.95).item())
+            if delta_values
+            else None
+        )
+        lod_metrics = {
+            lod: float(torch.tensor(vals).mean().item())
+            for lod, vals in lod_buckets.items()
+            if vals
+        }
+        return loss_tensor.mean(), lod0_loss, delta_mean, delta_p95, lod_metrics
+
+    def _prepare_variant_entries(
+        self,
+        batch_states: List[SampleContext],
+        original_tokens: torch.Tensor,
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        groups: Dict[int, List[Dict[str, Any]]] = {}
         for sample in batch_states:
             for variant in sample.variants:
-                loss = self._run_variant_forward(variant, original_tokens)
-                variant.token_loss_value = loss.detach()
-                losses.append(loss)
-                if lod0_loss is None and variant.lod_hint == 0:
-                    lod0_loss = float(loss.detach())
-        if not losses:
-            return None, lod0_loss
-        return torch.stack(losses).mean(), lod0_loss
+                wc = variant.working_context
+                embeddings = self._to_model_dtype(wc.to_tensor())
+                seq_len = embeddings.shape[1]
+                cos, sin, alibi = wc.get_positional_encodings()
+                entry = {
+                    "variant": variant,
+                    "embeddings": embeddings,
+                    "cos": self._to_model_dtype(cos),
+                    "sin": self._to_model_dtype(sin),
+                    "alibi": self._to_model_dtype(alibi),
+                    "seq_len": seq_len,
+                    "batch_idx": getattr(variant, "batch_index", 0),
+                    "original_tokens": original_tokens,
+                }
+                groups.setdefault(seq_len, []).append(entry)
+        return groups
+
+    def _run_variant_batch(
+        self,
+        group: List[Dict[str, Any]],
+        seq_len: int,
+    ) -> List[torch.Tensor]:
+        batch_size = len(group)
+        embeddings = torch.cat([entry["embeddings"] for entry in group], dim=0)
+        cos = None
+        sin = None
+        alibi = None
+        if all(entry["cos"] is not None for entry in group):
+            cos = torch.cat([entry["cos"] for entry in group], dim=0)
+        if all(entry["sin"] is not None for entry in group):
+            sin = torch.cat([entry["sin"] for entry in group], dim=0)
+        if any(entry["alibi"] is not None for entry in group):
+            alibi_list = [
+                entry["alibi"]
+                if entry["alibi"] is not None
+                else torch.zeros((1, self.config.num_heads, seq_len, seq_len), dtype=self._target_dtype, device=self.device)
+                for entry in group
+            ]
+            alibi = torch.cat(alibi_list, dim=0)
+        token_batch = torch.cat(
+            [
+                self._align_tokens_to_embeddings(
+                    entry["original_tokens"][entry["batch_idx"] : entry["batch_idx"] + 1].to(torch.long),
+                    seq_len,
+                )
+                for entry in group
+            ],
+            dim=0,
+        )
+        dummy_idx = torch.zeros((batch_size, seq_len), dtype=torch.long, device=self.device)
+        autocast_ctx = nullcontext()
+        if self.device.type == "cuda" and self._target_dtype in (torch.bfloat16, torch.float16):
+            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=self._target_dtype)
+        with autocast_ctx:
+            loss2d = self.model(
+                dummy_idx,
+                token_batch,
+                loss_reduction="none",
+                cos_sin_override=(cos, sin) if cos is not None and sin is not None else None,
+                alibi_override=alibi,
+                inputs_embeds=embeddings,
+            )
+        loss2d = loss2d.view(batch_size, -1)
+        valid = (token_batch.view(batch_size, -1) >= 0).to(loss2d.dtype)
+        sample_losses = (loss2d * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)
+        outputs = []
+        for entry, loss in zip(group, sample_losses):
+            entry["variant"].token_loss_value = loss.detach()
+            outputs.append(loss)
+        return outputs
 
     def _run_variant_forward(
         self,
