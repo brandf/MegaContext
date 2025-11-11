@@ -90,6 +90,19 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 
 ---
 
+## Phase 6 — Effective Batch Normalization
+
+1. **Variant-aware batch math** *(DONE: script now divides `device_batch_size` by `mc_max_counterfactuals` and rescales iterations when `--mc_auto_batch=1`)*  
+   - Derive an “effective batch size” so MC runs scale the base batch size automatically as variant counts change.
+2. **Auto-downscale & compensate** *(DONE)*  
+   - When `--mc` is enabled, reduce `device_batch_size` by the variant multiplier and increase `num_iterations` proportionally so token throughput matches the vanilla run without manual tuning.
+3. **Telemetry feedback** *(TODO)*  
+   - Log `mc/effective_batch_size` and `mc/variants_per_sample` to WANDB so OOMs can be tied back to variant choices and we can refine the heuristic (e.g., include LensNet/GistNet overhead).
+
+> Exit: flipping `--mc` on no longer surprises you with OOMs; the script automatically keeps the total work per step in the same ballpark as the vanilla recipe.
+
+---
+
 ## Open Questions
 
 - How small can we make `H` before ΔNLL supervision becomes noisy?  

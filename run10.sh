@@ -36,6 +36,7 @@ POSITIONAL_TYPE="gaussian"
 MC_TREE_TYPE="ram"
 SKIP_DATA_PREP=${SKIP_DATA_PREP:-0}
 MC_AUX_DTYPE="auto"
+MC_AUTO_BATCH=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -101,6 +102,11 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_aux_dtype" >&2; exit 1; }
             MC_AUX_DTYPE="$1"
             ;;
+        --mc_auto_batch)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_auto_batch" >&2; exit 1; }
+            MC_AUTO_BATCH="$1"
+            ;;
         --block_size)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --block_size" >&2; exit 1; }
@@ -128,8 +134,8 @@ case "$GPU_PROFILE" in
         NUM_ITERATIONS=75500
         ;;
     h100)
-        DEVICE_BATCH_SIZE=20
-        NUM_ITERATIONS=75500
+        DEVICE_BATCH_SIZE=40
+        NUM_ITERATIONS=37750
         ;;
     *)
         echo "Unsupported GPU profile: $GPU_PROFILE (expected 5090 or h100)" >&2
@@ -215,7 +221,8 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --allocator_type="$ALLOCATOR_TYPE" \
     --mc_tree_type="$MC_TREE_TYPE" \
     --positional_type="$POSITIONAL_TYPE" \
-    --mc_aux_dtype="$MC_AUX_DTYPE"
+    --mc_aux_dtype="$MC_AUX_DTYPE" \
+    --mc_auto_batch="$MC_AUTO_BATCH"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

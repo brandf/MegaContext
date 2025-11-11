@@ -39,7 +39,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 
 | Scenario | Command | Notes |
 | --- | --- | --- |
-| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--block_size 8|32|128] [--gistnet_* ...] [--lensnet_* ...] [--allocator ...] [--mc_tree ram|disk] [--mc_initial_wcs N --mc_max_counterfactuals N] [--mc_lens_loss_weight 0.1]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
+| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--block_size 8|32|128] [--gistnet_* ...] [--lensnet_* ...] [--allocator ...] [--mc_tree ram|disk] [--mc_initial_wcs N --mc_max_counterfactuals N] [--mc_lens_loss_weight 0.1] [--mc_auto_batch 1|0]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
 | Single H100 (80 GB) | `bash run10.sh --gpu h100 [--mc] ...` | Doubles device batch size, halves iteration count for the same token budget. |
 | $100 speed tier | `bash speedrun.sh [--mc] ...` | 8×H100, depth 20 (Karpathy’s “best $100” recipe). |
 | $1000 tier | `bash run1000.sh [--mc] ...` | 8×H100, depth 32 with tuned accumulation. |
@@ -55,6 +55,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
   - `--mc_initial_wcs` (N1) and `--mc_max_counterfactuals` (N2) define how many Working Contexts we evaluate per training sequence (initial samples + LensNet siblings). Raise them for richer ΔNLL supervision; lower to save compute.
 - **Horizon & losses**
   - `--mc_initial_wcs` / `--mc_max_counterfactuals` control how many WC variants are sampled per sequence. Each variant now trains directly against the next-token objective, so no separate horizon tuning is required.
+  - `--mc_auto_batch` (default `1`) automatically scales `device_batch_size` and `num_iterations` based on the variant multiplier so MC runs keep a similar token budget to vanilla; set it to `0` if you want to manage batch math manually.
   - `--mc_lens_loss_weight` scales the LensNet supervision that rides on top of the core loss.
 - **Allocator**
   - `--allocator_type greedy|stochastic_greedy` toggles between deterministic focus edits and a top-|score| sampler (tunable via `--allocator_sample_top_k`, `--allocator_sample_temperature`). The other `--allocator_*` thresholds (`soft_max_length`, `recent_tokens`, expand/collapse thresholds, max replacements, iterations) shape how aggressively focus edits are applied per step.

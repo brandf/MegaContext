@@ -103,11 +103,31 @@ mc_tree_type = "ram"
 mc_initial_wcs = 4
 mc_max_counterfactuals = 8
 mc_lens_loss_weight = 0.1
+mc_auto_batch = 1
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
+
+# Auto-adjust batch size for MC variant amplification
+if mc_enabled and mc_auto_batch:
+    variant_multiplier = max(1, mc_max_counterfactuals)
+    if variant_multiplier > 1:
+        original_device_batch_size = device_batch_size
+        original_total_batch_size = total_batch_size
+        original_num_iterations = num_iterations
+        device_batch_size = max(1, device_batch_size // variant_multiplier)
+        total_batch_size = device_batch_size * max_seq_len
+        target_tokens = original_total_batch_size * max(1, original_num_iterations)
+        if total_batch_size > 0:
+            num_iterations = max(1, math.ceil(target_tokens / total_batch_size))
+        print0(
+            "[MegaContext] auto batch adjust: "
+            f"device_batch_size {original_device_batch_size} -> {device_batch_size}, "
+            f"total_batch_size {original_total_batch_size} -> {total_batch_size}, "
+            f"num_iterations {original_num_iterations} -> {num_iterations}"
+        )
 
 # Compute init
 device_type = autodetect_device_type() if device_type == "" else device_type
