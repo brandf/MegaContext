@@ -165,6 +165,7 @@ class MCController:
             device=config.device,
         )
         self.last_inference_report: Optional[Dict[str, Any]] = None
+        self.last_train_report: Optional[Dict[str, Any]] = None
         if config.positional_type:
             if config.positional_type in {"gaussian_lod2d", "gaussian_lod2d_alibi"}:
                 raise ValueError(
@@ -259,6 +260,7 @@ class MCController:
             )
             self.current_batch_states = []
             self._emit_batch_counters(step)
+            self.last_train_report = None
             return result
         variant_loss, lod0_loss, delta_mean, delta_p95, lod_metrics, lod_counts = self._compute_variant_losses(batch_states, tokens_device)
         lens_loss = self._compute_lens_losses(batch_states)
@@ -277,6 +279,7 @@ class MCController:
         )
         self.current_batch_states = []
         self._emit_batch_counters(step)
+        self._refresh_train_report(batch_states)
         total_variants = sum(variant_counts) if variant_counts else 0
         self.last_batch_profile = {
             "variant_counts": variant_counts,
@@ -1005,6 +1008,31 @@ class MCController:
         }
         self.last_inference_report = report
 
+    def _refresh_train_report(self, batch_states: List[SampleContext]) -> None:
+        if not batch_states:
+            self.last_train_report = None
+            return
+        sample = batch_states[0]
+        report_variant: Optional[WorkingContextVariant] = None
+        for variant in sample.variants:
+            if variant.lod_hint == 0:
+                report_variant = variant
+                break
+        if report_variant is None and sample.variants:
+            report_variant = sample.variants[0]
+        if report_variant is None:
+            self.last_train_report = None
+            return
+        wc = report_variant.working_context
+        stats = getattr(report_variant.allocator, "_last_edit_stats", {}) or {}
+        self.last_train_report = {
+            "original_length": int(sample.tree.num_tokens()),
+            "wc_length": int(wc.length),
+            "lod_counts": self._lod_histogram(wc),
+            "focus_iterations": int(stats.get("iterations", 0)),
+            "focus_replacements": int(stats.get("total", 0)),
+        }
+
     def _select_best_variant(
         self, variants: List[WorkingContextVariant]
     ) -> Optional[WorkingContextVariant]:
@@ -1272,3 +1300,6 @@ class MCController:
 
     def get_inference_report(self) -> Optional[Dict[str, Any]]:
         return self.last_inference_report
+
+    def get_training_report(self) -> Optional[Dict[str, Any]]:
+        return self.last_train_report

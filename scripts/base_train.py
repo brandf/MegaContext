@@ -110,6 +110,8 @@ mc_infer_allocator_iterations = None
 mc_infer_refocus_interval = 32
 mc_infer_rebuild_max_replacements = None
 mc_infer_rebuild_iterations = None
+mc_train_report = 0
+mc_val_report = 1
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -118,6 +120,15 @@ def _parse_optional_int(value):
         return None
     return int(value)
 
+def _parse_bool_flag(value):
+    if isinstance(value, str):
+        val = value.strip().lower()
+        if val in {"", "0", "false", "no"}:
+            return False
+        if val in {"1", "true", "yes"}:
+            return True
+    return bool(int(value))
+
 
 mc_eval_soft_max_length = _parse_optional_int(mc_eval_soft_max_length)
 mc_infer_allocator_max_replacements = _parse_optional_int(mc_infer_allocator_max_replacements)
@@ -125,6 +136,8 @@ mc_infer_allocator_iterations = _parse_optional_int(mc_infer_allocator_iteration
 mc_infer_rebuild_max_replacements = _parse_optional_int(mc_infer_rebuild_max_replacements)
 mc_infer_rebuild_iterations = _parse_optional_int(mc_infer_rebuild_iterations)
 mc_infer_refocus_interval = int(mc_infer_refocus_interval)
+mc_train_report = _parse_bool_flag(mc_train_report)
+mc_val_report = _parse_bool_flag(mc_val_report)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
 
@@ -422,7 +435,7 @@ def _run_variant_batch_forward(
 
 
 @torch.no_grad()
-def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device):
+def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device, report_enabled=True):
     total_nats = torch.tensor(0.0, dtype=torch.float32, device=device)
     total_bytes = torch.tensor(0, dtype=torch.int64, device=device)
     batch_iter = iter(batches)
@@ -432,7 +445,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         x = x.to(device)
         y = y.to(device)
         session_id = controller.begin_inference_session(x, rebuild=True)
-        if not report_printed:
+        if report_enabled and not report_printed:
             report = controller.get_inference_report() if hasattr(controller, "get_inference_report") else None
             if report:
                 lod_counts = report.get("lod_counts", {})
@@ -532,7 +545,15 @@ for step in range(num_iterations + 1):
         val_loader = build_val_loader()
         eval_steps = eval_tokens // (device_batch_size * max_seq_len * ddp_world_size)
         if mc_controller is not None:
-            val_bpb = evaluate_bpb_with_mc(eval_model, mc_controller, val_loader, eval_steps, token_bytes, device)
+            val_bpb = evaluate_bpb_with_mc(
+                eval_model,
+                mc_controller,
+                val_loader,
+                eval_steps,
+                token_bytes,
+                device,
+                report_enabled=mc_val_report,
+            )
         else:
             with _training_autocast():
                 val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
@@ -611,6 +632,7 @@ for step in range(num_iterations + 1):
     # evaluate the gradient
     synchronize()
     t0 = time.time()
+    train_report_printed = False
     for micro_step in range(grad_accum_steps):
         mc_result = None
         positional_cache = None
@@ -635,6 +657,20 @@ for step in range(num_iterations + 1):
                     positional_cache = mc_result.positional_cache
                     if mc_result.lens_loss is not None:
                         mc_lens_loss_samples.append(float(mc_result.lens_loss.detach()))
+                    if mc_train_report and not train_report_printed:
+                        report = mc_controller.get_training_report() if hasattr(mc_controller, "get_training_report") else None
+                        if report:
+                            lod_counts = report.get("lod_counts", {})
+                            lod_parts = [f"LOD{lod}:{count}" for lod, count in sorted(lod_counts.items())]
+                            lod_line = ", ".join(lod_parts) if lod_parts else "none"
+                            print0(
+                                "🛠️ MegaContext Train Report\n"
+                                f"   📜 Original seq: {report.get('original_length', 'n/a')} tokens\n"
+                                f"   🗂️ Working context: {report.get('wc_length', 'n/a')} tokens\n"
+                                f"   🧩 LOD mix: {lod_line}\n"
+                                f"   🔧 Focus: {report.get('focus_iterations', 0)} iterations / {report.get('focus_replacements', 0)} replacements"
+                            )
+                            train_report_printed = True
         with _training_autocast():
             cos_sin_override = None
             alibi_override = None
