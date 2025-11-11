@@ -86,9 +86,9 @@ class FocusAllocatorBase:
             self._residency = torch.cat([self._residency, torch.zeros(1, dtype=torch.long)])
 
     def rebuild(self, max_replacements_per_iteration: int, num_iterations: int) -> int:
-        target_lod = self._choose_rebuild_lod()
-        embeddings, positions = self.tree.get_level_metadata(target_lod)
-        self.working_context.load_from_level(embeddings, positions, lod=target_lod)
+        target_tokens = min(self.cfg.soft_max_length, self.tree.num_tokens())
+        tail_tokens = min(self.cfg.recent_tokens, target_tokens)
+        self._initialize_working_context(target_tokens, tail_tokens)
         self._residency = torch.zeros(self.working_context.length, dtype=torch.long)
         self._reinforce_recent_tokens()
         if max_replacements_per_iteration <= 0 or num_iterations <= 0:
@@ -261,16 +261,59 @@ class GreedyFocusAllocator(FocusAllocatorBase):
     # ------------------------------------------------------------------ #
     # Utility methods
     # ------------------------------------------------------------------ #
-    def _choose_rebuild_lod(self) -> int:
-        total_tokens = max(1, self.tree.num_tokens())
-        soft_max = max(1, self.cfg.soft_max_length)
-        tail_tokens = min(self.cfg.recent_tokens, total_tokens, soft_max)
-        budget_entries = max(soft_max - tail_tokens, 1)
-        remaining_tokens = max(total_tokens - tail_tokens, 0)
+    def _initialize_working_context(self, target_tokens: int, tail_tokens: int) -> None:
+        if target_tokens <= 0:
+            self.working_context.load_from_level(
+                *self.tree.get_level_metadata(0),
+                lod=0,
+            )
+            return
+        device = self.working_context.to_tensor().device
+        pos_dtype = self.working_context.get_positions().dtype
+        start = max(self.tree.num_tokens() - target_tokens, 0)
+        medium_end = self.tree.num_tokens() - tail_tokens
+        segments: List[Tuple[int, int]] = []
+        pos = start
+        while pos < medium_end:
+            lod = self._largest_aligned_lod(pos, medium_end)
+            stride = self.tree.tokens_per_entry(lod)
+            segments.append((lod, pos))
+            pos += stride
+        embeddings_list = []
+        positions_list = []
+        lod_list = []
+        for lod, seg_pos in segments:
+            node = self.tree.get_node_embedding(lod, seg_pos).to(device)
+            embeddings_list.append(node)
+            positions_list.append(
+                torch.tensor([[seg_pos]], dtype=pos_dtype, device=device)
+            )
+            lod_piece = torch.full((1, 1), lod, dtype=torch.long, device=device)
+            lod_list.append(lod_piece)
+        if tail_tokens > 0:
+            tail_start = self.tree.num_tokens() - tail_tokens
+            tail_embeddings = self.tree.get_lod0_slice(tail_start, self.tree.num_tokens()).to(device)
+            tail_positions = self.tree.get_positions_for_lod(0)[:, tail_start:self.tree.num_tokens()].to(device=device, dtype=pos_dtype)
+            tail_lods = torch.zeros((1, tail_tokens), dtype=torch.long, device=device)
+            embeddings_list.append(tail_embeddings)
+            positions_list.append(tail_positions)
+            lod_list.append(tail_lods)
+        embeddings = torch.cat(embeddings_list, dim=1)
+        positions = torch.cat(positions_list, dim=1)
+        lod_tensor = torch.cat(lod_list, dim=1)
+        self.working_context.tensor = embeddings.clone()
+        self.working_context.positions = positions.clone()
+        self.working_context.lod_tensor = lod_tensor.clone()
+        self.working_context._positional_cache = None  # type: ignore[attr-defined]
+
+    def _largest_aligned_lod(self, position: int, end: int) -> int:
         for lod in range(self.cfg.max_lod, -1, -1):
-            span = self.tree.tokens_per_entry(lod)
-            entries = math.ceil(max(1, remaining_tokens) / max(1, span))
-            if entries <= budget_entries:
+            stride = self.tree.tokens_per_entry(lod)
+            if stride <= 0:
+                continue
+            if position % stride != 0:
+                continue
+            if position + stride <= end:
                 return lod
         return 0
 
