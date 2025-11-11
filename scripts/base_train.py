@@ -461,7 +461,8 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         alibi_override = cos_sin_override[2]
         cos_sin_override = cos_sin_override[:2]
         inputs_embeds_override = wc_tensor
-        tokens_slice = y[:, -wc_len:]
+        tokens_slice = y[:, -wc_len:].contiguous()
+        input_tokens = x[:, -wc_len:].contiguous()
         autocast_enabled = device.type == "cuda"
         autocast_dtype = torch.bfloat16 if autocast_enabled and torch.cuda.is_bf16_supported() else torch.float32
         autocast_ctx = nullcontext()
@@ -473,7 +474,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
             if embeds.dtype != target_dtype:
                 embeds = embeds.to(target_dtype)
             loss2d = model(
-                x[:, -wc_len:],
+                input_tokens,
                 tokens_slice,
                 loss_reduction="none",
                 cos_sin_override=cos_sin_override,
