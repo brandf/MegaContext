@@ -444,19 +444,19 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
                 inputs_embeds=embeds,
             )
         loss2d = loss2d.view(-1)
-        y = y.view(-1)
-        if (y.int() < 0).any():
-            valid = y >= 0
-            y_safe = torch.where(valid, y, torch.zeros_like(y))
+        targets_flat = tokens_slice.view(-1)
+        if (targets_flat.int() < 0).any():
+            valid = targets_flat >= 0
+            targets_safe = torch.where(valid, targets_flat, torch.zeros_like(targets_flat))
             num_bytes2d = torch.where(
                 valid,
-                token_bytes[y_safe],
+                token_bytes[targets_safe],
                 torch.zeros_like(y, dtype=token_bytes.dtype),
             )
             total_nats += (loss2d * (num_bytes2d > 0)).sum()
             total_bytes += num_bytes2d.sum()
         else:
-            num_bytes2d = token_bytes[y]
+            num_bytes2d = token_bytes[targets_flat]
             total_nats += (loss2d * (num_bytes2d > 0)).sum()
             total_bytes += num_bytes2d.sum()
     world_size = dist.get_world_size() if dist.is_initialized() else 1
