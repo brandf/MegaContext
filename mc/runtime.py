@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import time
 from contextlib import nullcontext
@@ -138,6 +139,7 @@ class MCController:
         self.telemetry = MCTelemetry(interval=config.telemetry_interval)
         self.telemetry_provider = telemetry_provider or NoOpTelemetryProvider()
         self.positional_encoder: Optional[GaussianRoPE] = None
+        self._mem_debug = os.getenv("MC_MEMORY_DEBUG", "0").lower() not in {"", "0", "false", "no"}
         if config.positional_type:
             if config.positional_type in {"gaussian_lod2d", "gaussian_lod2d_alibi"}:
                 raise ValueError(
@@ -616,6 +618,21 @@ class MCController:
         payload.update({k: int(v) for k, v in self._batch_counters.items()})
         self._log_event(f"train_step_{step}", "mc_batch_counters", payload)
 
+    def _log_memory(self, tag: str) -> None:
+        if not self._mem_debug:
+            return
+        if self.device.type != "cuda" or not torch.cuda.is_available():
+            print(f"[MegaContext][mem] {tag}: device={self.device} (non-CUDA)", flush=True)
+            return
+        allocated = torch.cuda.memory_allocated(self.device)
+        reserved = torch.cuda.memory_reserved(self.device)
+        max_alloc = torch.cuda.max_memory_allocated(self.device)
+        print(
+            f"[MegaContext][mem] {tag}: alloc={allocated / 1e9:.2f}GB "
+            f"reserved={reserved / 1e9:.2f}GB max_alloc={max_alloc / 1e9:.2f}GB",
+            flush=True,
+        )
+
     def _clone_working_context(self, wc: WorkingContext) -> WorkingContext:
         embeddings = wc.to_tensor().clone()
         positions = wc.get_positions().clone()
@@ -747,6 +764,14 @@ class MCController:
                 flush=True,
             )
             self._debug_flags["dtype_state_logged"] = True
+        if self._mem_debug:
+            print(
+                "[MegaContext][mem] horizon batch "
+                f"B={combined.shape[0]} wc_len={wc_embeddings.shape[1]} "
+                f"horizon_len={horizon_embeddings.shape[1]} combined_len={combined.shape[1]} dtype={combined.dtype}",
+                flush=True,
+            )
+            self._log_memory("horizon_pre_forward")
         cos_sin = self._compose_positional_overrides(wc, last_pos, horizon_tokens.shape[1])
         dummy_idx = torch.zeros(
             (1, combined.shape[1]), dtype=torch.long, device=self.device
@@ -771,7 +796,11 @@ class MCController:
                 f"autocast={torch.is_autocast_enabled()}. Error: {exc}",
                 flush=True,
             )
+            self._log_memory("horizon_forward_failed")
             raise
+        else:
+            if self._mem_debug:
+                self._log_memory("horizon_post_forward")
         t_forward1 = time.time()
         if timing_stats is not None:
             timing_stats["horizon_forward_ms"] += (t_forward1 - t_forward0) * 1000.0
