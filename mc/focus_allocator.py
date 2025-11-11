@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -272,6 +272,12 @@ class GreedyFocusAllocator(FocusAllocatorBase):
         pos_dtype = self.working_context.get_positions().dtype
         start = max(self.tree.num_tokens() - target_tokens, 0)
         medium_end = self.tree.num_tokens() - tail_tokens
+        span = medium_end - start
+        if self.cfg.block_size > 1 and span > 0:
+            remainder = span % self.cfg.block_size
+            if remainder > 0:
+                medium_end -= remainder
+                tail_tokens = min(target_tokens, tail_tokens + remainder)
         segments: List[Tuple[int, int]] = []
         pos = start
         while pos < medium_end:
@@ -283,24 +289,33 @@ class GreedyFocusAllocator(FocusAllocatorBase):
         positions_list = []
         lod_list = []
         for lod, seg_pos in segments:
-            node = self.tree.get_node_embedding(lod, seg_pos).to(device)
-            embeddings_list.append(node)
-            positions_list.append(
-                torch.tensor([[seg_pos]], dtype=pos_dtype, device=device)
+            emb_slice, pos_slice = self._fetch_node_metadata(lod, seg_pos, device, pos_dtype)
+            embeddings_list.append(emb_slice)
+            positions_list.append(pos_slice)
+            lod_piece = torch.full(
+                (emb_slice.shape[0], emb_slice.shape[1]),
+                lod,
+                dtype=torch.long,
+                device=device,
             )
-            lod_piece = torch.full((1, 1), lod, dtype=torch.long, device=device)
             lod_list.append(lod_piece)
         if tail_tokens > 0:
             tail_start = self.tree.num_tokens() - tail_tokens
             tail_embeddings = self.tree.get_lod0_slice(tail_start, self.tree.num_tokens()).to(device)
             tail_positions = self.tree.get_positions_for_lod(0)[:, tail_start:self.tree.num_tokens()].to(device=device, dtype=pos_dtype)
-            tail_lods = torch.zeros((1, tail_tokens), dtype=torch.long, device=device)
+            tail_lods = torch.zeros((tail_embeddings.shape[0], tail_embeddings.shape[1]), dtype=torch.long, device=device)
             embeddings_list.append(tail_embeddings)
             positions_list.append(tail_positions)
             lod_list.append(tail_lods)
-        embeddings = torch.cat(embeddings_list, dim=1)
-        positions = torch.cat(positions_list, dim=1)
-        lod_tensor = torch.cat(lod_list, dim=1)
+        embeddings = torch.cat(embeddings_list, dim=1) if embeddings_list else torch.zeros(
+            (1, 0, self.tree.config.embed_dim), device=device
+        )
+        positions = torch.cat(positions_list, dim=1) if positions_list else torch.zeros(
+            (1, 0), dtype=pos_dtype, device=device
+        )
+        lod_tensor = torch.cat(lod_list, dim=1) if lod_list else torch.zeros(
+            (1, 0), dtype=torch.long, device=device
+        )
         self.working_context.tensor = embeddings.clone()
         self.working_context.positions = positions.clone()
         self.working_context.lod_tensor = lod_tensor.clone()
@@ -316,6 +331,20 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             if position + stride <= end:
                 return lod
         return 0
+
+    def _fetch_node_metadata(
+        self,
+        lod: int,
+        position: int,
+        device: torch.device,
+        pos_dtype: torch.dtype,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        level, positions = self.tree.get_level_metadata(lod)
+        stride = max(1, self.tree.tokens_per_entry(lod))
+        idx = min(max(0, position // stride), level.shape[1] - 1)
+        emb_slice = level[:, idx : idx + 1].to(device)
+        pos_slice = positions[:, idx : idx + 1].to(device=device, dtype=pos_dtype)
+        return emb_slice, pos_slice
 
     def _reinforce_recent_tokens(self) -> None:
         tokens_requested = min(

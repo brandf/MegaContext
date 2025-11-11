@@ -72,3 +72,41 @@ def test_focus_allocator_rebuild_covers_exact_context(
     covered = _covered_tokens(allocator.working_context, block_size)
     expected = min(total_tokens, soft_max)
     assert covered == expected, f"expected {expected} tokens, got {covered}"
+
+
+def test_focus_allocator_handles_non_divisible_prefix():
+    embed_dim = 8
+    block_size = 4
+    total_tokens = 10
+    soft_max = 10
+    recent_tokens = 2
+    tree_config = MegaContextConfig(
+        embed_dim=embed_dim,
+        block_size=block_size,
+        max_lod=2,
+        device="cpu",
+    )
+    embedder = nn.Embedding(128, embed_dim)
+    tokens = torch.arange(total_tokens).view(1, total_tokens)
+    tree = MegaContextTree.from_tokens(tokens, embedder, tree_config)
+    wc_config = WorkingContextConfig(embed_dim=embed_dim, max_length=soft_max, device="cpu")
+    wc = WorkingContext(tree.get_level(0), tree.get_positions_for_lod(0), wc_config)
+    allocator_cfg = FocusAllocatorConfig(
+        block_size=block_size,
+        max_lod=2,
+        soft_max_length=soft_max,
+        recent_tokens=recent_tokens,
+    )
+    allocator = build_focus_allocator(
+        "greedy",
+        tree=tree,
+        working_context=wc,
+        lensnet=ZeroLensNet(),
+        config=allocator_cfg,
+    )
+    allocator.rebuild(max_replacements_per_iteration=0, num_iterations=0)
+    expected_tail = recent_tokens + ((soft_max - recent_tokens) % block_size)
+    lod_row = allocator.working_context.get_lod_tensor()[0]
+    assert all(lod == 0 for lod in lod_row[-expected_tail:].tolist())
+    covered = _covered_tokens(allocator.working_context, block_size)
+    assert covered == min(total_tokens, soft_max)
