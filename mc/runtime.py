@@ -56,6 +56,12 @@ class InferenceState:
     refocus_max_replacements: int
     refocus_iterations: int
     refocus_interval: int
+    original_seq_len: int = 0
+    prefill_iterations: int = 0
+    prefill_replacements: int = 0
+    refocus_updates: int = 0
+    refocus_iterations_accum: int = 0
+    refocus_replacements: int = 0
     steps_since_refocus: int = 0
 
 
@@ -158,6 +164,7 @@ class MCController:
             max_length=config.eval_soft_max_length or config.wc_config.max_length,
             device=config.device,
         )
+        self.last_inference_report: Optional[Dict[str, Any]] = None
         if config.positional_type:
             if config.positional_type in {"gaussian_lod2d", "gaussian_lod2d_alibi"}:
                 raise ValueError(
@@ -981,6 +988,23 @@ class MCController:
         payload.update(score_payload)
         self._log_event(session_id, "focus_allocator", payload)
 
+    def _refresh_inference_report(self) -> None:
+        if self.inference_state is None:
+            self.last_inference_report = None
+            return
+        wc = self.inference_state.working_context
+        report = {
+            "original_length": int(self.inference_state.original_seq_len),
+            "wc_length": int(wc.length),
+            "lod_counts": self._lod_histogram(wc),
+            "prefill_iterations": int(self.inference_state.prefill_iterations),
+            "prefill_replacements": int(self.inference_state.prefill_replacements),
+            "refocus_updates": int(self.inference_state.refocus_updates),
+            "refocus_iterations": int(self.inference_state.refocus_iterations_accum),
+            "refocus_replacements": int(self.inference_state.refocus_replacements),
+        }
+        self.last_inference_report = report
+
     def _select_best_variant(
         self, variants: List[WorkingContextVariant]
     ) -> Optional[WorkingContextVariant]:
@@ -999,6 +1023,11 @@ class MCController:
         positions = wc.get_positions()[0]
         lods = wc.get_lod_tensor()[0]
         return {int(pos.item()): int(lod.item()) for pos, lod in zip(positions, lods)}
+
+    def _lod_histogram(self, wc: WorkingContext) -> Dict[int, int]:
+        lods = wc.get_lod_tensor()[0]
+        values, counts = torch.unique(lods, return_counts=True)
+        return {int(v.item()): int(c.item()) for v, c in zip(values, counts)}
 
     def _build_lens_targets(
         self,
@@ -1121,6 +1150,7 @@ class MCController:
         if initial_tokens.dim() == 1:
             initial_tokens = initial_tokens.unsqueeze(0)
         tokens = initial_tokens.to(self.device)
+        original_len = int(tokens.shape[1])
         session = session_id or f"infer_{uuid.uuid4().hex}"
         with torch.no_grad():
             tree = build_mega_context(
@@ -1165,11 +1195,16 @@ class MCController:
             refocus_iters = self.config.allocator_iterations
         refocus_iters = int(max(0, refocus_iters or 0))
         refocus_interval = self.config.infer_refocus_interval
+        prefill_iterations = 0
+        prefill_replacements = 0
         if rebuild:
             allocator.rebuild(
                 max_replacements_per_iteration=rebuild_repl,
                 num_iterations=rebuild_iters,
             )
+            stats = getattr(allocator, "_last_edit_stats", {}) or {}
+            prefill_iterations = int(stats.get("iterations", 0))
+            prefill_replacements = int(stats.get("total", 0))
         self._log_tree_snapshot(session, tree, tag="inference_init")
         self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
         self.inference_state = InferenceState(
@@ -1180,7 +1215,11 @@ class MCController:
             refocus_max_replacements=refocus_repl,
             refocus_iterations=refocus_iters,
             refocus_interval=refocus_interval,
+            original_seq_len=original_len,
+            prefill_iterations=prefill_iterations,
+            prefill_replacements=prefill_replacements,
         )
+        self._refresh_inference_report()
         return session
 
     def inference_step(self, new_tokens: torch.Tensor) -> None:
@@ -1206,6 +1245,10 @@ class MCController:
                     max_replacements_per_iteration=state.refocus_max_replacements,
                     num_iterations=state.refocus_iterations,
                 )
+                stats = getattr(state.allocator, "_last_edit_stats", {}) or {}
+                state.refocus_updates += 1
+                state.refocus_iterations_accum += int(stats.get("iterations", 0))
+                state.refocus_replacements += int(stats.get("total", 0))
                 state.steps_since_refocus = 0
         self._log_wc_snapshot(state.session_id, state.working_context, tag="inference_update")
         self._log_focus_stats(
@@ -1220,8 +1263,12 @@ class MCController:
             ),
             tag="inference_focus",
         )
+        self._refresh_inference_report()
 
     def get_inference_working_context(self) -> Optional[WorkingContext]:
         if self.inference_state is None:
             return None
         return self.inference_state.working_context
+
+    def get_inference_report(self) -> Optional[Dict[str, Any]]:
+        return self.last_inference_report

@@ -110,8 +110,10 @@ class FocusAllocatorBase:
             "collapse": 0,
             "total": 0,
             "wc_length": int(self.working_context.length),
+            "iterations": 0,
         }
         for _ in range(num_iterations):
+            self._last_edit_stats["iterations"] += 1
             # One residency tick per allocator iteration
             if self._residency.numel() > 0:
                 self._residency += 1

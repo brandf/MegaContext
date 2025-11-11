@@ -426,11 +426,32 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
     total_nats = torch.tensor(0.0, dtype=torch.float32, device=device)
     total_bytes = torch.tensor(0, dtype=torch.int64, device=device)
     batch_iter = iter(batches)
+    report_printed = False
     for eval_idx in range(steps):
         x, y = next(batch_iter)
         x = x.to(device)
         y = y.to(device)
         session_id = controller.begin_inference_session(x, rebuild=True)
+        if not report_printed:
+            report = controller.get_inference_report() if hasattr(controller, "get_inference_report") else None
+            if report:
+                lod_counts = report.get("lod_counts", {})
+                lod_parts = [f"LOD{lod}:{count}" for lod, count in sorted(lod_counts.items())]
+                lod_line = ", ".join(lod_parts) if lod_parts else "none"
+                pref_iters = report.get("prefill_iterations", 0)
+                pref_swaps = report.get("prefill_replacements", 0)
+                ref_updates = report.get("refocus_updates", 0)
+                ref_iters = report.get("refocus_iterations", 0)
+                ref_swaps = report.get("refocus_replacements", 0)
+                print0(
+                    "✨ MegaContext Val Report\n"
+                    f"   📜 Original seq: {report.get('original_length', 'n/a')} tokens\n"
+                    f"   🗂️ Working context: {report.get('wc_length', 'n/a')} tokens\n"
+                    f"   🧩 LOD mix: {lod_line}\n"
+                    f"   ⚙️ Prefocus: {pref_iters} iterations / {pref_swaps} replacements\n"
+                    f"   🔁 Refocus: {ref_updates} updates / {ref_iters} iterations / {ref_swaps} replacements"
+                )
+                report_printed = True
         wc = controller.get_inference_working_context()
         if wc is None:
             raise RuntimeError("Inference working context is None during validation")
