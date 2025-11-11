@@ -729,6 +729,8 @@ get_report().log(section="Base model training", data=[
 # cleanup
 wandb_run.finish() # wandb run finish
 compute_cleanup()
+
+
 def _assemble_mc_variant_batch(mc_result, device):
     variants: list[WorkingContextVariant] = getattr(mc_result, "variants", [])
     if not variants:
