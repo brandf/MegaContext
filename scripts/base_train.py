@@ -214,7 +214,10 @@ if mc_enabled:
     mc_controller = MCController(model, mc_config, telemetry_provider=telemetry_provider)
     eval_every = 25
 orig_model = model # original, uncompiled model, for saving raw model state_dict
-model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
+if mc_enabled:
+    print0("Skipping torch.compile because MegaContext introduces dynamic positional overrides.")
+else:
+    model = torch.compile(model, dynamic=False) # TODO: dynamic True/False think through
 num_params = sum(p.numel() for p in model.parameters())
 print0(f"Number of parameters: {num_params:,}")
 num_flops_per_token = model.estimate_flops()
