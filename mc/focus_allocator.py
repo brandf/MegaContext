@@ -264,30 +264,27 @@ class GreedyFocusAllocator(FocusAllocatorBase):
     def _choose_rebuild_lod(self) -> int:
         total_tokens = max(1, self.tree.num_tokens())
         soft_max = max(1, self.cfg.soft_max_length)
-        recent = max(0, min(self.cfg.recent_tokens, soft_max))
-        target_slots = max(1, soft_max - recent)
-        best_lod = 0
-        best_diff = float("inf")
+        tail_tokens = min(self.cfg.recent_tokens, total_tokens, soft_max)
+        budget_entries = max(soft_max - tail_tokens, 1)
+        remaining_tokens = max(total_tokens - tail_tokens, 0)
         for lod in range(self.cfg.max_lod, -1, -1):
-            entries = math.ceil(total_tokens / self.tree.tokens_per_entry(lod))
-            diff = abs(entries - target_slots)
-            if diff < best_diff:
-                best_diff = diff
-                best_lod = lod
-        return best_lod
+            span = self.tree.tokens_per_entry(lod)
+            entries = math.ceil(max(1, remaining_tokens) / max(1, span))
+            if entries <= budget_entries:
+                return lod
+        return 0
 
     def _reinforce_recent_tokens(self) -> None:
-        if self.cfg.recent_tokens <= 0:
+        tokens_requested = min(
+            self.cfg.recent_tokens,
+            self.tree.num_tokens(),
+            self.cfg.soft_max_length,
+        )
+        if tokens_requested <= 0:
             return
-        available = self.tree.num_tokens()
-        if available == 0:
-            return
-        tail = min(self.cfg.recent_tokens, available, self.working_context.length)
-        if tail == 0:
-            return
-        start = self.working_context.length - tail
-        slice_start = max(0, available - tail)
-        slice_end = available
+        total_tokens = self.tree.num_tokens()
+        slice_start = max(0, total_tokens - tokens_requested)
+        slice_end = total_tokens
         replacements = self.tree.get_lod0_slice(slice_start, slice_end)
         wc_batch = self.working_context.to_tensor().shape[0]
         if replacements.shape[0] == 1 and wc_batch > 1:
@@ -296,6 +293,7 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             raise ValueError(
                 f"Mismatched batch sizes between tree ({replacements.shape[0]}) and working context ({wc_batch})"
             )
+        tail_start_idx = self._find_tail_index(slice_start)
         pos0 = self.tree.get_positions_for_lod(0)
         pos_slice = pos0[:, slice_start:slice_end]
         if pos_slice.shape[0] == 1 and wc_batch > 1:
@@ -306,13 +304,21 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             )
         mc_start = int(pos_slice[0, 0].item())
         edit = WorkingContextEdit(
-            wc_start=start,
+            wc_start=tail_start_idx,
             replacements=replacements,
             lod=0,
             mc_start_position=mc_start,
             stride=1,
+            old_count=self.working_context.length - tail_start_idx,
         )
         self.working_context.replace(edit)
+
+    def _find_tail_index(self, slice_start: int) -> int:
+        positions = self.working_context.get_positions()[0]
+        for idx in range(positions.shape[0]):
+            if int(positions[idx].item()) >= slice_start:
+                return idx
+        return positions.shape[0]
 
 
 def build_focus_allocator(
