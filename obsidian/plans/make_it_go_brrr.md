@@ -43,18 +43,14 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 
 ## Phase 2 — Eliminate Duplicate Base Forwards
 
-1. **LOD0 guarantee**  
-   - Ensure one variant per sample is “pure LOD0”. Tag it so logging knows it is the “vanilla baseline”.
-2. **Variant-forward replacement**  
-   - Replace the single `model(x, y, …)` call with a batched forward across all per-sample variants. Each variant gets its own `inputs_embeds`; we concatenate along batch dimension.  
-   - Compute losses per variant:  
-     - `loss_recency` → reported as “vanilla” for compatibility.  
-     - `loss_focus_i` → included in the overall gradient to keep Gist/Lens aligned with the base.
-3. **Grad weighting**  
-   - Introduce weights so the total gradient magnitude matches the previous baseline (e.g., divide by number of variants, or keep recency at full weight and down-weight siblings).  
-   - Log both “recency loss” and “overall loss” so comparisons stay honest.
+1. **LOD0 guarantee** *(DONE)*  
+   - Controller always tags the recency-baseline WC (`lod_hint == 0`) so `train/loss_lod0` can be logged even when the main forward consumes every variant.
+2. **Variant-forward replacement** *(DONE)*  
+   - `MCController.process_batch` now returns the sampled variants and their embeddings; the main training loop iterates over them and accumulates the per-variant next-token losses instead of running a duplicate “baseline” forward.
+3. **Grad weighting** *(Deferred until Phase 3)*  
+   - Current implementation averages per-variant losses (fixed count), so gradient magnitude stays stable. If we add dynamic variant counts later, revisit weighting to keep LR comparable.
 
-> Result: one large batched forward/backward replaces “baseline forward + many horizon forwards”. Compute now scales with number of variants but is GPU-friendly and carries the full next-token objective.
+> Result: every WC variant participates in the core loss, horizons are optional, and we no longer pay for duplicate forwards. Remaining work (weighting) can wait until variant counts become dynamic.
 
 ---
 
