@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import uuid
@@ -754,13 +755,17 @@ class MCController:
             (1, combined.shape[1]), dtype=torch.long, device=self.device
         )
         t_forward0 = time.time()
+        autocast_ctx = nullcontext()
+        if self.device.type == "cuda" and target_dtype == torch.bfloat16:
+            autocast_ctx = torch.cuda.amp.autocast(dtype=torch.bfloat16)
         try:
-            logits = self.model(
-                dummy_idx,
-                targets=None,
-                cos_sin_override=cos_sin,
-                inputs_embeds=combined,
-            )
+            with autocast_ctx:
+                logits = self.model(
+                    dummy_idx,
+                    targets=None,
+                    cos_sin_override=cos_sin,
+                    inputs_embeds=combined,
+                )
         except RuntimeError as exc:
             print(
                 "[MegaContext] model forward failed. "
