@@ -792,7 +792,7 @@ class MCController:
         t_forward0 = time.time()
         autocast_ctx = nullcontext()
         if self.device.type == "cuda" and target_dtype == torch.bfloat16:
-            autocast_ctx = torch.cuda.amp.autocast(dtype=torch.bfloat16)
+            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
         try:
             with autocast_ctx:
                 logits = self.model(

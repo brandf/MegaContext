@@ -338,7 +338,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         autocast_dtype = torch.bfloat16 if autocast_enabled and torch.cuda.is_bf16_supported() else torch.float32
         autocast_ctx = nullcontext()
         if autocast_enabled:
-            autocast_ctx = torch.cuda.amp.autocast(dtype=autocast_dtype)
+            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=autocast_dtype)
         with autocast_ctx:
             embeds = inputs_embeds_override
             target_dtype = autocast_dtype if autocast_enabled else next(model.parameters()).dtype
