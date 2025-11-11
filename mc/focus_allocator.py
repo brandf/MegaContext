@@ -262,12 +262,19 @@ class GreedyFocusAllocator(FocusAllocatorBase):
     # Utility methods
     # ------------------------------------------------------------------ #
     def _choose_rebuild_lod(self) -> int:
-        total_tokens = self.tree.num_tokens()
+        total_tokens = max(1, self.tree.num_tokens())
+        soft_max = max(1, self.cfg.soft_max_length)
+        recent = max(0, min(self.cfg.recent_tokens, soft_max))
+        target_slots = max(1, soft_max - recent)
+        best_lod = 0
+        best_diff = float("inf")
         for lod in range(self.cfg.max_lod, -1, -1):
             entries = math.ceil(total_tokens / self.tree.tokens_per_entry(lod))
-            if entries <= self.cfg.soft_max_length:
-                return lod
-        return 0
+            diff = abs(entries - target_slots)
+            if diff < best_diff:
+                best_diff = diff
+                best_lod = lod
+        return best_lod
 
     def _reinforce_recent_tokens(self) -> None:
         if self.cfg.recent_tokens <= 0:

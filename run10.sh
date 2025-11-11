@@ -41,6 +41,9 @@ MC_EVAL_SOFT_MAX_LENGTH=""
 MC_INFER_ALLOCATOR_MAX_REPLACEMENTS=""
 MC_INFER_ALLOCATOR_ITERATIONS=""
 MC_INFER_REFOCUS_INTERVAL=32
+ALLOCATOR_SOFT_MAX=""
+MC_TRAIN_REPORT=0
+MC_VAL_REPORT=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -131,6 +134,21 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_infer_refocus_interval" >&2; exit 1; }
             MC_INFER_REFOCUS_INTERVAL="$1"
             ;;
+        --allocator_soft_max)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --allocator_soft_max" >&2; exit 1; }
+            ALLOCATOR_SOFT_MAX="$1"
+            ;;
+        --mc_train_report)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_train_report" >&2; exit 1; }
+            MC_TRAIN_REPORT="$1"
+            ;;
+        --mc_val_report)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_val_report" >&2; exit 1; }
+            MC_VAL_REPORT="$1"
+            ;;
         --block_size)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --block_size" >&2; exit 1; }
@@ -166,6 +184,10 @@ case "$GPU_PROFILE" in
         exit 1
         ;;
 esac
+
+if [ -z "$ALLOCATOR_SOFT_MAX" ]; then
+    ALLOCATOR_SOFT_MAX="$MAX_SEQ_LEN"
+fi
 
 TOKENIZER_SHARDS=8
 TOKENIZER_MAX_CHARS=2000000000
@@ -246,11 +268,14 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_tree_type="$MC_TREE_TYPE" \
     --positional_type="$POSITIONAL_TYPE" \
     --mc_aux_dtype="$MC_AUX_DTYPE" \
+    --allocator_soft_max="$ALLOCATOR_SOFT_MAX" \
     --mc_auto_batch="$MC_AUTO_BATCH" \
     --mc_eval_soft_max_length="$MC_EVAL_SOFT_MAX_LENGTH" \
     --mc_infer_allocator_max_replacements="$MC_INFER_ALLOCATOR_MAX_REPLACEMENTS" \
     --mc_infer_allocator_iterations="$MC_INFER_ALLOCATOR_ITERATIONS" \
-    --mc_infer_refocus_interval="$MC_INFER_REFOCUS_INTERVAL"
+    --mc_infer_refocus_interval="$MC_INFER_REFOCUS_INTERVAL" \
+    --mc_train_report="$MC_TRAIN_REPORT" \
+    --mc_val_report="$MC_VAL_REPORT"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"
