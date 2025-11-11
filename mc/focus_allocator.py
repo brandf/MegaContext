@@ -280,8 +280,22 @@ class GreedyFocusAllocator(FocusAllocatorBase):
         slice_start = max(0, available - tail)
         slice_end = available
         replacements = self.tree.get_lod0_slice(slice_start, slice_end)
+        wc_batch = self.working_context.to_tensor().shape[0]
+        if replacements.shape[0] == 1 and wc_batch > 1:
+            replacements = replacements.expand(wc_batch, -1, -1).contiguous()
+        elif replacements.shape[0] != wc_batch:
+            raise ValueError(
+                f"Mismatched batch sizes between tree ({replacements.shape[0]}) and working context ({wc_batch})"
+            )
         pos0 = self.tree.get_positions_for_lod(0)
-        mc_start = int(pos0[0, slice_start].item())
+        pos_slice = pos0[:, slice_start:slice_end]
+        if pos_slice.shape[0] == 1 and wc_batch > 1:
+            pos_slice = pos_slice.expand(wc_batch, -1).contiguous()
+        elif pos_slice.shape[0] != wc_batch:
+            raise ValueError(
+                f"Mismatched position batch sizes between tree ({pos_slice.shape[0]}) and working context ({wc_batch})"
+            )
+        mc_start = int(pos_slice[0, 0].item())
         edit = WorkingContextEdit(
             wc_start=start,
             replacements=replacements,

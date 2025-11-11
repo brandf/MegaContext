@@ -135,6 +135,8 @@ class WorkingContext:
             dtype=self.positions.dtype,
             device=self.positions.device,
         ).unsqueeze(0)
+        if position_col.shape[0] != self.positions.shape[0]:
+            position_col = position_col.repeat(self.positions.shape[0], 1)
         if position_col.shape[1] != count:
             pad_len = count - position_col.shape[1]
             tail = position_col[:, -1:].repeat(1, pad_len)
