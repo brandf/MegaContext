@@ -404,7 +404,7 @@ for step in range(num_iterations + 1):
         val_loader = build_val_loader()
         eval_steps = eval_tokens // (device_batch_size * max_seq_len * ddp_world_size)
         if mc_controller is not None:
-        val_bpb = evaluate_bpb_with_mc(eval_model, mc_controller, val_loader, eval_steps, token_bytes, device)
+            val_bpb = evaluate_bpb_with_mc(eval_model, mc_controller, val_loader, eval_steps, token_bytes, device)
         else:
             with autocast_ctx:
                 val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
