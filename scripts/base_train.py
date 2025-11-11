@@ -32,7 +32,7 @@ from scripts.base_eval import evaluate_model
 
 try:
     from mc.config import MCConfig
-    from mc.runtime import MCController
+    from mc.runtime import MCController, WorkingContextVariant
     from mc.telemetry import OpenTelemetryProvider, NoOpTelemetryProvider
 except ImportError:  # pragma: no cover - optional dependency during early development
     MCController = None
@@ -563,17 +563,32 @@ for step in range(num_iterations + 1):
                     cos_sin_override = None
                     alibi_override = None
             inputs_embeds_override = None
-            if mc_result is not None and mc_result.cached_embeddings is not None:
-                inputs_embeds_override = mc_result.cached_embeddings.to(device)
+            variant_entries = None
+            if mc_result is not None:
+                if mc_result.variants:
+                    variant_entries = _assemble_mc_variant_batch(mc_result, device)
+                elif mc_result.cached_embeddings is not None:
+                    inputs_embeds_override = mc_result.cached_embeddings.to(device)
             t_fw0 = time.time()
-            base_loss = model(
-                x,
-                y,
-                cos_sin_override=cos_sin_override,
-                alibi_override=alibi_override,
-                inputs_embeds=inputs_embeds_override,
-            )
-            vanilla_loss_samples.append(float(base_loss.detach()))
+            if variant_entries is not None:
+                base_loss, vanilla_loss = _run_variant_batch_forward(
+                    model,
+                    x,
+                    y,
+                    variant_entries,
+                    cos_sin_override,
+                    alibi_override,
+                )
+                vanilla_loss_samples.append(vanilla_loss)
+            else:
+                base_loss = model(
+                    x,
+                    y,
+                    cos_sin_override=cos_sin_override,
+                    alibi_override=alibi_override,
+                    inputs_embeds=inputs_embeds_override,
+                )
+                vanilla_loss_samples.append(float(base_loss.detach()))
             mc_extra_loss = base_loss.new_zeros(())
             if mc_controller is not None and mc_result is not None:
                 if mc_result.token_loss is not None:
@@ -714,3 +729,50 @@ get_report().log(section="Base model training", data=[
 # cleanup
 wandb_run.finish() # wandb run finish
 compute_cleanup()
+def _assemble_mc_variant_batch(mc_result, device):
+    variants: list[WorkingContextVariant] = getattr(mc_result, "variants", [])
+    if not variants:
+        return None
+    entries = []
+    for variant in variants:
+        embeddings = variant.working_context.to_tensor().to(device)
+        entries.append(
+            {
+                "variant": variant,
+                "embeddings": embeddings,
+            }
+        )
+    return entries
+
+
+def _run_variant_batch_forward(
+    model,
+    original_inputs,
+    original_labels,
+    variant_entries,
+    cos_sin_override,
+    alibi_override,
+):
+    total_loss = 0.0
+    lod0_loss = None
+    for entry in variant_entries:
+        variant = entry["variant"]
+        embeddings = entry["embeddings"]
+        batch_idx = variant.batch_index
+        inputs_slice = original_inputs[batch_idx : batch_idx + 1]
+        labels_slice = original_labels[batch_idx : batch_idx + 1]
+        loss = model(
+            inputs_slice,
+            labels_slice,
+            cos_sin_override=cos_sin_override,
+            alibi_override=alibi_override,
+            inputs_embeds=embeddings,
+        )
+        variant.token_loss_value = loss.detach()
+        total_loss = total_loss + loss
+        if lod0_loss is None and variant.lod_hint == 0:
+            lod0_loss = float(loss.detach())
+    total_loss = total_loss / max(1, len(variant_entries))
+    if lod0_loss is None:
+        lod0_loss = float(total_loss.detach())
+    return total_loss, lod0_loss

@@ -30,10 +30,10 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 1. **Config gate**  
    - Add `--mc_enable_horizon` (default `1` for parity, but allow disabling).  
    - When disabled, still build all WC variants and run them through the base model for full next-token loss; simply skip the extra horizon-specific ΔNLL bookkeeping so “pure focus allocator” mode is just variants + regular NLL.
-2. **Packed batching** *(in-progress: controller now groups equal-length variants into shared forwards)*  
+2. **Packed batching** *(DONE: controller groups equal-length variants into shared forwards; further padding optimizations remain optional)*  
    - When horizons are enabled, batch all variants for the teacher-forced window into shared forwards instead of serialized loops.  
    - Use padding or length-based grouping so the GPU sees large batches rather than many tiny ones.
-3. **Teacher-forced superset**  
+3. **Teacher-forced superset** *(DONE: base forward now iterates over all variants and logs LOD0-only loss separately)*  
    - Compute the full next-token loss for **every** variant (LOD0 and LOD1+) so the training signal is a superset of the vanilla objective.  
    - Keep track of which variant is “pure LOD0 recency” so we can still report a vanilla-compatible loss metric even if we drop the separate baseline forward.
 
@@ -44,7 +44,7 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 ## Phase 2 — Eliminate Duplicate Base Forwards
 
 1. **LOD0 guarantee**  
-   - Ensure one variant per sample is “pure recency LOD0”. Tag it so logging knows it is the “vanilla baseline”.
+   - Ensure one variant per sample is “pure LOD0”. Tag it so logging knows it is the “vanilla baseline”.
 2. **Variant-forward replacement**  
    - Replace the single `model(x, y, …)` call with a batched forward across all per-sample variants. Each variant gets its own `inputs_embeds`; we concatenate along batch dimension.  
    - Compute losses per variant:  

@@ -37,6 +37,7 @@ class WorkingContextVariant:
     lens_scores: Optional[torch.Tensor] = None
     token_loss_value: Optional[torch.Tensor] = None
     lod1_loss_value: Optional[torch.Tensor] = None
+    batch_index: int = 0
 
 
 @dataclass
@@ -63,6 +64,7 @@ class MCBatchResult:
     lens_loss: Optional[torch.Tensor]
     cached_embeddings: Optional[torch.Tensor]
     positional_caches: Dict[str, Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = field(default_factory=dict)
+    variants: List["WorkingContextVariant"] = field(default_factory=list)
 
 
 class MCTelemetry:
@@ -185,7 +187,7 @@ class MCController:
         tokens: torch.Tensor,
         step: int,
         context: str = "train",
-    ) -> Optional[Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]]:
+    ) -> Optional["MCBatchResult"]:
         """
         Args:
             tokens: [B, T] token ids from nanochat loader.
@@ -198,6 +200,7 @@ class MCController:
         tokens_device = tokens.to(self.device)
         self._reset_batch_counters()
         cached_embeddings: List[torch.Tensor] = []
+        train_variants: List[WorkingContextVariant] = []
         variant_counts: List[int] = []
         timing_details = {
             "horizon_forward_ms": 0.0,
@@ -211,10 +214,14 @@ class MCController:
             seq = tokens_device[idx : idx + 1]
             session_id = f"train_step_{step}_sample_{idx}"
             tree, sample_state, seq_embeds, sample_edits = self._build_tree_sample(seq, session_id)
+            for variant in sample_state.variants:
+                variant.batch_index = idx
             batch_states.append(sample_state)
             total_edits += sample_edits
             cached_embeddings.append(seq_embeds)
             variant_counts.append(len(sample_state.variants))
+            if context == "train":
+                train_variants.extend(sample_state.variants)
             self._log_tree_snapshot(session_id, tree, tag="training_build")
             self.telemetry.log_tree(step, tree)
         t_build1 = time.time()
@@ -233,6 +240,7 @@ class MCController:
                 lens_loss=None,
                 cached_embeddings=torch.cat(cached_embeddings, dim=0) if cached_embeddings else None,
                 positional_caches=positional_cache_map,
+                variants=[],
             )
             self.current_batch_states = []
             self._emit_batch_counters(step)
@@ -258,6 +266,7 @@ class MCController:
             lens_loss=lens_loss,
             cached_embeddings=torch.cat(cached_embeddings, dim=0) if cached_embeddings else None,
             positional_caches=positional_cache_map,
+            variants=train_variants,
         )
         self.current_batch_states = []
         self._emit_batch_counters(step)
