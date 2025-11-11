@@ -700,13 +700,17 @@ class MCController:
         token_slice = original_tokens[batch_idx : batch_idx + 1]
         token_slice = self._align_tokens_to_embeddings(token_slice, seq_len)
         dummy_idx = torch.zeros((1, seq_len), dtype=torch.long, device=self.device)
-        return self.model(
-            dummy_idx,
-            token_slice,
-            cos_sin_override=(cos, sin),
-            alibi_override=alibi,
-            inputs_embeds=embeddings,
-        )
+        autocast_ctx = nullcontext()
+        if self.device.type == "cuda" and self._target_dtype in (torch.bfloat16, torch.float16):
+            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=self._target_dtype)
+        with autocast_ctx:
+            return self.model(
+                dummy_idx,
+                token_slice,
+                cos_sin_override=(cos, sin),
+                alibi_override=alibi,
+                inputs_embeds=embeddings,
+            )
 
     def _align_tokens_to_embeddings(self, tokens: torch.Tensor, target_len: int) -> torch.Tensor:
         if tokens.shape[1] >= target_len:
