@@ -445,7 +445,7 @@ class MCController:
         if metadata is None:
             return None
         embeddings, positions = metadata
-        window = self.config.wc_config.max_length
+        window = wc_config.max_length if wc_config is not None else self.config.wc_config.max_length
         if embeddings.shape[1] > window:
             embeddings = embeddings[:, -window:]
             positions = positions[:, -window:]
