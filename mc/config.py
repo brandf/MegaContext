@@ -8,7 +8,7 @@ from typing import Optional
 class MegaContextConfig:
     embed_dim: int
     block_size: int = 32
-    max_lod: int = 3
+    max_lod: int = 2
     device: str = "cuda"
 
 
@@ -28,7 +28,7 @@ class MCConfig:
     embed_dim: int
     max_seq_len: int
     block_size: int = 32
-    max_lod: int = 3
+    max_lod: int = 2
     device: str = "cuda"
     enable_gaussian_rope: bool = True
     telemetry_interval: int = 100
@@ -66,6 +66,8 @@ class MCConfig:
     infer_allocator_max_replacements: Optional[int] = None
     infer_allocator_iterations: Optional[int] = None
     infer_refocus_interval: int = 32
+    infer_rebuild_max_replacements: Optional[int] = None
+    infer_rebuild_iterations: Optional[int] = None
 
     def __post_init__(self) -> None:
         self.mc_tree_type = self.mc_tree_type.lower()
@@ -91,3 +93,4 @@ class MCConfig:
         self.max_counterfactuals = max(self.initial_working_contexts, self.max_counterfactuals)
         if self.eval_soft_max_length is None:
             self.eval_soft_max_length = self.wc_config.max_length
+        self.infer_refocus_interval = max(1, int(self.infer_refocus_interval))

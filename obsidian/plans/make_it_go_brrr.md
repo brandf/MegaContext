@@ -118,14 +118,14 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 
 ## Phase 8 — Inference Parity
 
-1. **Eval-specific WC budget**  
-   - Add `mc_eval_soft_max_length` so validation/inference can focus to a deterministic window without sharing the training soft-max knob.
-2. **Deterministic inference WC**  
-   - Skip variant sampling during `begin_inference_session`; build the recency WC, optionally fill with medium-LOD gists, then run a single allocator pass with inference-specific `allocator_max_replacements` / `allocator_iterations`.
-3. **Incremental refocus cadence**  
-   - Introduce `mc_infer_refocus_interval` (default 32) and separate “initial focus” knobs so autoregressive inference updates focus every N tokens without thrashing.
+1. **Eval-specific WC budget** *(DONE)*  
+   - `mc_eval_soft_max_length` now feeds both the inference WC config and the allocator, so validation tightens to a deterministic window that can differ from the training soft-max.
+2. **Deterministic inference WC** *(DONE)*  
+   - `begin_inference_session` builds a single recency WC, rebuilds it with the eval soft-max, and uses dedicated `mc_infer_rebuild_{max_replacements,iterations}` knobs before any refocus.
+3. **Incremental refocus cadence** *(DONE)*  
+   - The inference state tracks `mc_infer_refocus_interval` plus refocus-specific replacement/iteration budgets, so autoregressive validation updates focus on a predictable cadence without touching training-only settings.
 
-> Exit: validation and inference truly match the intended runtime behavior (single focused WC, predictable refocus cadence, no training-only knobs leaking into eval).
+> Exit: validation and inference now share the same Gaussian-RoPE focus code path with a single deterministic WC and independent tuning knobs.
 
 ---
 

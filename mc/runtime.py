@@ -5,7 +5,7 @@ import random
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 import torch
@@ -13,7 +13,7 @@ import torch.nn.functional as F
 
 from nanochat.report import get_report
 
-from .config import MCConfig
+from .config import MCConfig, WorkingContextConfig
 from .gistnet import build_gistnet
 from .lensnet import build_lensnet
 from .focus_allocator import (
@@ -53,6 +53,9 @@ class InferenceState:
     tree: MegaContextTree
     working_context: WorkingContext
     allocator: FocusAllocatorBase
+    refocus_max_replacements: int
+    refocus_iterations: int
+    refocus_interval: int
     steps_since_refocus: int = 0
 
 
@@ -68,6 +71,7 @@ class MCBatchResult:
     delta_mean: Optional[float] = None
     delta_p95: Optional[float] = None
     lod_metrics: Dict[int, float] = field(default_factory=dict)
+    lod_counts: Dict[int, int] = field(default_factory=dict)
 
 
 class MCTelemetry:
@@ -149,6 +153,11 @@ class MCController:
         self.telemetry_provider = telemetry_provider or NoOpTelemetryProvider()
         self.positional_encoder: Optional[GaussianRoPE] = None
         self._mem_debug = os.getenv("MC_MEMORY_DEBUG", "0").lower() not in {"", "0", "false", "no"}
+        self._eval_wc_config = WorkingContextConfig(
+            embed_dim=config.embed_dim,
+            max_length=config.eval_soft_max_length or config.wc_config.max_length,
+            device=config.device,
+        )
         if config.positional_type:
             if config.positional_type in {"gaussian_lod2d", "gaussian_lod2d_alibi"}:
                 raise ValueError(
@@ -244,7 +253,7 @@ class MCController:
             self.current_batch_states = []
             self._emit_batch_counters(step)
             return result
-        variant_loss, lod0_loss, delta_mean, delta_p95, lod_metrics = self._compute_variant_losses(batch_states, tokens_device)
+        variant_loss, lod0_loss, delta_mean, delta_p95, lod_metrics, lod_counts = self._compute_variant_losses(batch_states, tokens_device)
         lens_loss = self._compute_lens_losses(batch_states)
         result = MCBatchResult(
             positional_cache=positional_cache,
@@ -257,6 +266,7 @@ class MCController:
             delta_mean=delta_mean,
             delta_p95=delta_p95,
             lod_metrics=lod_metrics,
+            lod_counts=lod_counts,
         )
         self.current_batch_states = []
         self._emit_batch_counters(step)
@@ -276,6 +286,12 @@ class MCController:
                 f"train_step_{step}",
                 "lod_metrics",
                 {f"lod_{lod}_loss": float(val) for lod, val in lod_metrics.items()},
+            )
+        if lod_counts:
+            self._log_event(
+                f"train_step_{step}",
+                "lod_counts",
+                {f"lod_{lod}_count": int(val) for lod, val in lod_counts.items()},
             )
         self._log_event(
             f"train_step_{step}",
@@ -416,6 +432,7 @@ class MCController:
         self,
         tree: MegaContextTree,
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+        wc_config: Optional[WorkingContextConfig] = None,
     ) -> Optional[WorkingContextVariant]:
         metadata = self._get_level_metadata_cached(tree, 0, level_cache)
         if metadata is None:
@@ -425,7 +442,7 @@ class MCController:
         if embeddings.shape[1] > window:
             embeddings = embeddings[:, -window:]
             positions = positions[:, -window:]
-        return self._create_variant(embeddings, positions, lod=0, source="recency_baseline")
+        return self._create_variant(embeddings, positions, lod=0, source="recency_baseline", wc_config=wc_config)
 
     def _build_lod_variant(
         self,
@@ -522,8 +539,10 @@ class MCController:
         positions: torch.Tensor,
         lod: int,
         source: str,
+        wc_config: Optional[WorkingContextConfig] = None,
     ) -> WorkingContextVariant:
-        wc = WorkingContext(embeddings, positions, self.config.wc_config)
+        config = wc_config or self.config.wc_config
+        wc = WorkingContext(embeddings, positions, config)
         self._configure_wc_positional(wc)
         return WorkingContextVariant(working_context=wc, source=source, lod_hint=lod)
 
@@ -614,12 +633,17 @@ class MCController:
         self,
         tree: MegaContextTree,
         working_context: WorkingContext,
+        *,
+        soft_max_length: Optional[int] = None,
+        recent_tokens: Optional[int] = None,
     ) -> FocusAllocatorBase:
+        soft_length = soft_max_length or self.config.soft_max_length
+        recent = self.config.allocator_recent_tokens if recent_tokens is None else recent_tokens
         allocator_cfg = FocusAllocatorConfig(
             block_size=self.config.block_size,
             max_lod=self.config.max_lod,
-            soft_max_length=self.config.soft_max_length,
-            recent_tokens=self.config.allocator_recent_tokens,
+            soft_max_length=soft_length,
+            recent_tokens=recent,
             expand_threshold=self.config.allocator_expand_threshold,
             collapse_threshold=self.config.allocator_collapse_threshold,
             sample_top_k=self.config.allocator_sample_top_k,
@@ -689,15 +713,15 @@ class MCController:
         self,
         batch_states: List[SampleContext],
         original_tokens: torch.Tensor,
-    ) -> Tuple[Optional[torch.Tensor], Optional[float], Optional[float], Optional[float], Dict[int, float]]:
+    ) -> Tuple[Optional[torch.Tensor], Optional[float], Optional[float], Optional[float], Dict[int, float], Dict[int, int]]:
         entries = self._prepare_variant_entries(batch_states, original_tokens)
         if not entries:
-            return None, None, None, None, {}
+            return None, None, None, None, {}, {}
         losses = []
         for seq_len, group in entries.items():
             losses.extend(self._run_variant_batch(group, seq_len))
         if not losses:
-            return None, None, None, None, {}
+            return None, None, None, None, {}, {}
         loss_tensor = torch.stack(losses)
         lod0_loss = None
         delta_values: List[float] = []
@@ -727,7 +751,8 @@ class MCController:
             for lod, vals in lod_buckets.items()
             if vals
         }
-        return loss_tensor.mean(), lod0_loss, delta_mean, delta_p95, lod_metrics
+        lod_counts = {lod: len(vals) for lod, vals in lod_buckets.items()}
+        return loss_tensor.mean(), lod0_loss, delta_mean, delta_p95, lod_metrics, lod_counts
 
     def _prepare_variant_entries(
         self,
@@ -799,7 +824,19 @@ class MCController:
                 alibi_override=alibi,
                 inputs_embeds=embeddings,
             )
-        loss2d = loss2d.view(batch_size, -1)
+        if loss2d.dim() > 2:
+            logits = loss2d
+            logits = logits.view(batch_size, seq_len, -1)
+            tokens_flat = token_batch.view(batch_size, seq_len)
+            loss_flat = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                tokens_flat.view(-1),
+                ignore_index=-1,
+                reduction="none",
+            )
+            loss2d = loss_flat.view(batch_size, seq_len)
+        else:
+            loss2d = loss2d.view(batch_size, -1)
         valid = (token_batch.view(batch_size, -1) >= 0).to(loss2d.dtype)
         sample_losses = (loss2d * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)
         outputs = []
@@ -1098,16 +1135,40 @@ class MCController:
         # Build a recency-based working context with a local level cache,
         # mirroring the training path.
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
-        recency_variant = self._build_recency_variant(tree, level_cache)
+        recency_variant = self._build_recency_variant(tree, level_cache, wc_config=self._eval_wc_config)
         if recency_variant is None:
             raise ValueError("Unable to build initial working context for inference")
-        allocator = self._build_allocator(tree, recency_variant.working_context)
+        eval_soft_max = self.config.eval_soft_max_length or self.config.wc_config.max_length
+        allocator = self._build_allocator(
+            tree,
+            recency_variant.working_context,
+            soft_max_length=eval_soft_max,
+        )
+        rebuild_repl = self.config.infer_rebuild_max_replacements
+        if rebuild_repl is None:
+            rebuild_repl = self.config.infer_allocator_max_replacements
+        if rebuild_repl is None:
+            rebuild_repl = self.config.allocator_max_replacements
+        rebuild_repl = int(max(0, rebuild_repl or 0))
+        rebuild_iters = self.config.infer_rebuild_iterations
+        if rebuild_iters is None:
+            rebuild_iters = self.config.infer_allocator_iterations
+        if rebuild_iters is None:
+            rebuild_iters = self.config.allocator_iterations
+        rebuild_iters = int(max(0, rebuild_iters or 0))
+        refocus_repl = self.config.infer_allocator_max_replacements
+        if refocus_repl is None:
+            refocus_repl = self.config.allocator_max_replacements
+        refocus_repl = int(max(0, refocus_repl or 0))
+        refocus_iters = self.config.infer_allocator_iterations
+        if refocus_iters is None:
+            refocus_iters = self.config.allocator_iterations
+        refocus_iters = int(max(0, refocus_iters or 0))
+        refocus_interval = self.config.infer_refocus_interval
         if rebuild:
-            max_repl = self.config.infer_allocator_max_replacements or self.config.allocator_max_replacements
-            iters = self.config.infer_allocator_iterations or self.config.allocator_iterations
             allocator.rebuild(
-                max_replacements_per_iteration=max_repl,
-                num_iterations=iters,
+                max_replacements_per_iteration=rebuild_repl,
+                num_iterations=rebuild_iters,
             )
         self._log_tree_snapshot(session, tree, tag="inference_init")
         self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
@@ -1116,6 +1177,9 @@ class MCController:
             tree=tree,
             working_context=recency_variant.working_context,
             allocator=allocator,
+            refocus_max_replacements=refocus_repl,
+            refocus_iterations=refocus_iters,
+            refocus_interval=refocus_interval,
         )
         return session
 
@@ -1128,27 +1192,31 @@ class MCController:
         if new_tokens.dim() == 1:
             new_tokens = new_tokens.unsqueeze(0)
         tokens = new_tokens.to(self.device)
+        state = self.inference_state
         with torch.no_grad():
             embeddings = self.embed(tokens)
-            self.inference_state.allocator.append(tokens, embeddings)
-            max_repl = self.config.infer_allocator_max_replacements or self.config.allocator_max_replacements
-            iters = self.config.infer_allocator_iterations or self.config.allocator_iterations
-            if getattr(self.inference_state, "steps_since_refocus", 0) % max(1, self.config.infer_refocus_interval) == 0:
-                self.inference_state.allocator.update_focus(
-                    max_replacements_per_iteration=max_repl,
-                    num_iterations=iters,
+            state.allocator.append(tokens, embeddings)
+            state.steps_since_refocus += tokens.shape[1]
+            if (
+                state.refocus_max_replacements > 0
+                and state.refocus_iterations > 0
+                and state.steps_since_refocus >= state.refocus_interval
+            ):
+                state.allocator.update_focus(
+                    max_replacements_per_iteration=state.refocus_max_replacements,
+                    num_iterations=state.refocus_iterations,
                 )
-            self.inference_state.steps_since_refocus = getattr(self.inference_state, "steps_since_refocus", 0) + tokens.shape[1]
-        self._log_wc_snapshot(self.inference_state.session_id, self.inference_state.working_context, tag="inference_update")
+                state.steps_since_refocus = 0
+        self._log_wc_snapshot(state.session_id, state.working_context, tag="inference_update")
         self._log_focus_stats(
-            self.inference_state.session_id,
+            state.session_id,
             WorkingContextVariant(
-                working_context=self.inference_state.working_context,
+                working_context=state.working_context,
                 source="inference",
                 lod_hint=0,
                 edits_applied=0,
                 lens_scores=None,
-                allocator=self.inference_state.allocator,
+                allocator=state.allocator,
             ),
             tag="inference_focus",
         )

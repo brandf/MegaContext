@@ -108,9 +108,23 @@ mc_eval_soft_max_length = None
 mc_infer_allocator_max_replacements = None
 mc_infer_allocator_iterations = None
 mc_infer_refocus_interval = 32
+mc_infer_rebuild_max_replacements = None
+mc_infer_rebuild_iterations = None
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
+def _parse_optional_int(value):
+    if value in (None, "", "None"):
+        return None
+    return int(value)
+
+
+mc_eval_soft_max_length = _parse_optional_int(mc_eval_soft_max_length)
+mc_infer_allocator_max_replacements = _parse_optional_int(mc_infer_allocator_max_replacements)
+mc_infer_allocator_iterations = _parse_optional_int(mc_infer_allocator_iterations)
+mc_infer_rebuild_max_replacements = _parse_optional_int(mc_infer_rebuild_max_replacements)
+mc_infer_rebuild_iterations = _parse_optional_int(mc_infer_rebuild_iterations)
+mc_infer_refocus_interval = int(mc_infer_refocus_interval)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
 
@@ -209,16 +223,18 @@ if mc_enabled:
         infer_allocator_max_replacements=mc_infer_allocator_max_replacements,
         infer_allocator_iterations=mc_infer_allocator_iterations,
         infer_refocus_interval=mc_infer_refocus_interval,
+        infer_rebuild_max_replacements=mc_infer_rebuild_max_replacements,
+        infer_rebuild_iterations=mc_infer_rebuild_iterations,
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,
         allocator_max_replacements=allocator_max_replacements,
-            allocator_iterations=allocator_iterations,
-            allocator_sample_top_k=allocator_sample_top_k,
-            allocator_sample_temperature=allocator_sample_temperature,
-            num_heads=num_heads,
-            positional_type=positional_type,
-            auxiliary_dtype=mc_aux_dtype,
+        allocator_iterations=allocator_iterations,
+        allocator_sample_top_k=allocator_sample_top_k,
+        allocator_sample_temperature=allocator_sample_temperature,
+        num_heads=num_heads,
+        positional_type=positional_type,
+        auxiliary_dtype=mc_aux_dtype,
         )
     otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
     otel_insecure = os.getenv("MC_OTEL_INSECURE", "0") == "1"
@@ -739,6 +755,9 @@ for step in range(num_iterations + 1):
         if mc_result is not None and mc_result.lod_metrics:
             for lod, val in mc_result.lod_metrics.items():
                 log_data[f"mc/lod_loss/{lod}"] = val
+        if mc_result is not None and mc_result.lod_counts:
+            for lod, count in mc_result.lod_counts.items():
+                log_data[f"mc/lod_count/{lod}"] = count
         if vanilla_loss_val is not None:
             log_data["train/loss_lod0"] = vanilla_loss_val
         if mc_lens_loss_val is not None:
