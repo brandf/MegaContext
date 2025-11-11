@@ -218,6 +218,19 @@ class MCController:
         positional_cache = self._build_primary_positional(batch_states) if len(batch_states) == 1 else None
         positional_cache_map = self._build_session_positional(batch_states)
         t_pos1 = time.time()
+        if context != "train":
+            result = MCBatchResult(
+                positional_cache=positional_cache,
+                token_loss=None,
+                lod1_loss=None,
+                lod2_loss=None,
+                lens_loss=None,
+                cached_embeddings=torch.cat(cached_embeddings, dim=0) if cached_embeddings else None,
+                positional_caches=positional_cache_map,
+            )
+            self.current_batch_states = []
+            self._emit_batch_counters(step)
+            return result
         t_hor0 = time.time()
         token_loss, lod1_loss, lod2_loss = self._aggregate_horizon_losses(batch_states, timing_details)
         t_hor1 = time.time()
