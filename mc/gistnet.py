@@ -149,6 +149,10 @@ class PoolingOnlyGistNet(GistNetBase):
         self.head = head_module
 
     def forward(self, blocks: torch.Tensor) -> torch.Tensor:
+        target_dtype = next(self.head.parameters(), None)
+        if target_dtype is not None:
+            dtype = target_dtype.dtype
+            blocks = blocks.to(dtype)
         return self.head(blocks)
 
 
@@ -216,7 +220,8 @@ class TransformerGistNet(GistNetBase):
             blocks: [B, T, D] block sequences
             key_padding_mask: [B, T] boolean mask where True marks valid tokens
         """
-        x = blocks
+        target_dtype = self.blocks[0].attn.c_q.weight.dtype
+        x = blocks.to(target_dtype)
         mask_bool = None
         if key_padding_mask is not None:
             mask_bool = key_padding_mask.to(torch.bool)
@@ -237,6 +242,8 @@ class TransformerGistNet(GistNetBase):
             base=self.rope_base,
             device=x.device,
         )
+        cos = cos.to(target_dtype)
+        sin = sin.to(target_dtype)
         cos_sin = (cos, sin)
         # Build attention bias from key_padding_mask if provided: mask padded keys across all queries
         alibi_bias = None

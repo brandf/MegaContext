@@ -63,6 +63,7 @@ class MCConfig:
     loss_projection_top_k: int = 64
     build_workers: int = 1  # TODO(mc): wire up parallel tree builds or remove this knob
     cache_lod0: bool = True
+    auxiliary_dtype: str = "auto"  # auto | fp32 | bf16
 
     tree_config: MegaContextConfig = field(init=False)
     wc_config: WorkingContextConfig = field(init=False)
@@ -71,6 +72,9 @@ class MCConfig:
         self.mc_tree_type = self.mc_tree_type.lower()
         if self.mc_tree_type != "ram":
             raise ValueError("Only mc_tree_type='ram' is supported in the current release.")
+        self.auxiliary_dtype = (self.auxiliary_dtype or "auto").lower()
+        if self.auxiliary_dtype not in {"auto", "fp32", "bf16"}:
+            raise ValueError("auxiliary_dtype must be one of {'auto', 'fp32', 'bf16'}")
         self.tree_config = MegaContextConfig(
             embed_dim=self.embed_dim,
             block_size=self.block_size,

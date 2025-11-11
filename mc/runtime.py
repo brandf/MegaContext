@@ -130,6 +130,9 @@ class MCController:
             layers=config.lensnet_layers,
             head=config.lensnet_head,
         ).to(self.device)
+        self._aux_dtype = self._resolve_aux_dtype()
+        self.gistnet.to(dtype=self._aux_dtype)
+        self.lensnet.to(dtype=self._aux_dtype)
         self.focus_allocator: Optional[FocusAllocatorBase] = None
         self.telemetry = MCTelemetry(interval=config.telemetry_interval)
         self.telemetry_provider = telemetry_provider or NoOpTelemetryProvider()
@@ -157,6 +160,21 @@ class MCController:
         if hasattr(model, "transformer") and hasattr(model.transformer, "wte"):
             return model.transformer.wte
         raise ValueError("Unable to locate embedding layer on model")
+
+    def _resolve_aux_dtype(self) -> torch.dtype:
+        choice = self.config.auxiliary_dtype
+        if choice == "fp32":
+            return torch.float32
+        if choice == "bf16":
+            if self.device.type == "cuda" and torch.cuda.is_available():
+                if torch.cuda.is_bf16_supported():
+                    return torch.bfloat16
+                print("[MegaContext] auxiliary_dtype=bf16 requested but device lacks bf16 support; falling back to fp32", flush=True)
+            return torch.float32
+        # auto
+        if self.device.type == "cuda" and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+            return torch.bfloat16
+        return torch.float32
 
     def process_batch(
         self,

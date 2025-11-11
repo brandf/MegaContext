@@ -35,6 +35,7 @@ ALLOCATOR_TYPE="greedy"
 POSITIONAL_TYPE="gaussian"
 MC_TREE_TYPE="ram"
 SKIP_DATA_PREP=${SKIP_DATA_PREP:-0}
+MC_AUX_DTYPE="auto"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -94,6 +95,11 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --positional" >&2; exit 1; }
             POSITIONAL_TYPE="$1"
+            ;;
+        --mc_aux_dtype)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_aux_dtype" >&2; exit 1; }
+            MC_AUX_DTYPE="$1"
             ;;
         --block_size)
             shift
@@ -208,7 +214,8 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --lensnet_head="$LENSNET_HEAD" \
     --allocator_type="$ALLOCATOR_TYPE" \
     --mc_tree_type="$MC_TREE_TYPE" \
-    --positional_type="$POSITIONAL_TYPE"
+    --positional_type="$POSITIONAL_TYPE" \
+    --mc_aux_dtype="$MC_AUX_DTYPE"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

@@ -53,10 +53,13 @@ class TransformerLensNet(nn.Module):
 
     def forward(self, working_context: WorkingContext) -> torch.Tensor:
         x = working_context.to_tensor()  # [B, W, D]
+        target_dtype = self.blocks[0].attn.c_q.weight.dtype
+        if x.dtype != target_dtype:
+            x = x.to(target_dtype)
 
         cos, sin, _ = working_context.get_positional_encodings()
-        cos = cos.expand(-1, -1, self.num_heads, -1).to(x.dtype)
-        sin = sin.expand(-1, -1, self.num_heads, -1).to(x.dtype)
+        cos = cos.to(target_dtype).expand(-1, -1, self.num_heads, -1)
+        sin = sin.to(target_dtype).expand(-1, -1, self.num_heads, -1)
         cos_sin = (cos, sin)
         for block in self.blocks:
             x = block(x, cos_sin, kv_cache=None, alibi=None)

@@ -51,6 +51,7 @@ These scripts run tokenizer → base → mid → chat SFT end-to-end, drop check
 > - `--mc_initial_wcs`, `--mc_max_counterfactuals` tune how many Working Contexts (initial + LensNet siblings) are sampled per training sequence.
 > - `--mc_horizon`, `--mc_long_horizon_multiplier` control the opportunistic LOD1/LOD2 teacher-forced horizon (defaults give 32-token LOD1 horizons that upgrade to 1024-token LOD2 horizons whenever the sequence is long enough).
 > - `--mc_token_loss_weight`, `--mc_lod1_loss_weight`, `--mc_lod2_loss_weight`, `--mc_lens_loss_weight` weight the auxiliary losses added on top of the vanilla nanochat objective.
+> - `--mc_aux_dtype auto|fp32|bf16` controls the precision used for GistNet/LensNet. `auto` picks bf16 on GPUs that support it (H100/A100) and falls back to fp32 elsewhere.
 > LensNet scores are tanh-clamped floats (positive ⇒ expand, negative ⇒ collapse). When `--mc` is active we also build Gaussian RoPE positional caches using MegaContext global positions/LOD metadata. The flagless path continues to match upstream nanochat.
 
 When comparing MC-enabled vs. vanilla runs, normalize by tokens, FLOPs, or wall-clock time rather than raw `step` counts (MC batches perform more work per update). `scripts/base_train.py` already logs `total_training_flops`, `total_training_time`, and `mc/*` loss metrics so you can overlay both training curves fairly in W&B or Grafana.

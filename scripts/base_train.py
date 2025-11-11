@@ -89,6 +89,7 @@ allocator_max_replacements = 4
 allocator_iterations = 2
 allocator_sample_top_k = 4
 allocator_sample_temperature = 1.0
+mc_aux_dtype = "auto"
 mc_tree_type = "ram"
 mc_initial_wcs = 4
 mc_max_counterfactuals = 8
@@ -187,6 +188,7 @@ if mc_enabled:
         allocator_sample_temperature=allocator_sample_temperature,
         num_heads=num_heads,
         positional_type=positional_type,
+        auxiliary_dtype=mc_aux_dtype,
     )
     otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
     otel_insecure = os.getenv("MC_OTEL_INSECURE", "0") == "1"
