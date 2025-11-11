@@ -116,13 +116,23 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 
 ---
 
+## Phase 8 — Inference Parity
+
+1. **Eval-specific WC budget**  
+   - Add `mc_eval_soft_max_length` so validation/inference can focus to a deterministic window without sharing the training soft-max knob.
+2. **Deterministic inference WC**  
+   - Skip variant sampling during `begin_inference_session`; build the recency WC, optionally fill with medium-LOD gists, then run a single allocator pass with inference-specific `allocator_max_replacements` / `allocator_iterations`.
+3. **Incremental refocus cadence**  
+   - Introduce `mc_infer_refocus_interval` (default 32) and separate “initial focus” knobs so autoregressive inference updates focus every N tokens without thrashing.
+
+> Exit: validation and inference truly match the intended runtime behavior (single focused WC, predictable refocus cadence, no training-only knobs leaking into eval).
+
+---
+
 ## Open Questions
 
-- How small can we make `H` before ΔNLL supervision becomes noisy?  
-- Do we need separate LoRA adapters for horizon vs full-sequence loss once the base forward covers both?  
 - Can we cache WC embeddings across batches to avoid re-embedding LOD0 each time?
-- Can we make dtype handling automatic so controller/model always agree (helper + tests)?
-- Can we make dtype handling automatic so controller/model always agree (helper + tests)?
+- Are there better heuristics for variant scheduling (Phase 3) once inference parity lands?
 
 ---
 

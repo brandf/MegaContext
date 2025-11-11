@@ -37,6 +37,10 @@ MC_TREE_TYPE="ram"
 SKIP_DATA_PREP=${SKIP_DATA_PREP:-0}
 MC_AUX_DTYPE="auto"
 MC_AUTO_BATCH=1
+MC_EVAL_SOFT_MAX_LENGTH=""
+MC_INFER_ALLOCATOR_MAX_REPLACEMENTS=""
+MC_INFER_ALLOCATOR_ITERATIONS=""
+MC_INFER_REFOCUS_INTERVAL=32
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -106,6 +110,26 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_auto_batch" >&2; exit 1; }
             MC_AUTO_BATCH="$1"
+            ;;
+        --mc_eval_soft_max_length)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_eval_soft_max_length" >&2; exit 1; }
+            MC_EVAL_SOFT_MAX_LENGTH="$1"
+            ;;
+        --mc_infer_allocator_max_replacements)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_infer_allocator_max_replacements" >&2; exit 1; }
+            MC_INFER_ALLOCATOR_MAX_REPLACEMENTS="$1"
+            ;;
+        --mc_infer_allocator_iterations)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_infer_allocator_iterations" >&2; exit 1; }
+            MC_INFER_ALLOCATOR_ITERATIONS="$1"
+            ;;
+        --mc_infer_refocus_interval)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_infer_refocus_interval" >&2; exit 1; }
+            MC_INFER_REFOCUS_INTERVAL="$1"
             ;;
         --block_size)
             shift
@@ -222,7 +246,11 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_tree_type="$MC_TREE_TYPE" \
     --positional_type="$POSITIONAL_TYPE" \
     --mc_aux_dtype="$MC_AUX_DTYPE" \
-    --mc_auto_batch="$MC_AUTO_BATCH"
+    --mc_auto_batch="$MC_AUTO_BATCH" \
+    --mc_eval_soft_max_length="$MC_EVAL_SOFT_MAX_LENGTH" \
+    --mc_infer_allocator_max_replacements="$MC_INFER_ALLOCATOR_MAX_REPLACEMENTS" \
+    --mc_infer_allocator_iterations="$MC_INFER_ALLOCATOR_ITERATIONS" \
+    --mc_infer_refocus_interval="$MC_INFER_REFOCUS_INTERVAL"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

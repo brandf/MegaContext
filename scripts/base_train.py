@@ -104,6 +104,10 @@ mc_initial_wcs = 4
 mc_max_counterfactuals = 8
 mc_lens_loss_weight = 0.1
 mc_auto_batch = 1
+mc_eval_soft_max_length = None
+mc_infer_allocator_max_replacements = None
+mc_infer_allocator_iterations = None
+mc_infer_refocus_interval = 32
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -201,6 +205,10 @@ if mc_enabled:
         max_counterfactuals=mc_max_counterfactuals,
         lens_loss_weight=mc_lens_loss_weight,
         soft_max_length=allocator_soft_max,
+        eval_soft_max_length=mc_eval_soft_max_length,
+        infer_allocator_max_replacements=mc_infer_allocator_max_replacements,
+        infer_allocator_iterations=mc_infer_allocator_iterations,
+        infer_refocus_interval=mc_infer_refocus_interval,
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,
@@ -410,10 +418,13 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         wc = controller.get_inference_working_context()
         if wc is None:
             raise RuntimeError("Inference working context is None during validation")
+        wc_tensor = wc.to_tensor()
+        wc_len = wc_tensor.shape[1]
         cos_sin_override = controller._build_wc_positional(wc)
         alibi_override = cos_sin_override[2]
         cos_sin_override = cos_sin_override[:2]
-        inputs_embeds_override = wc.to_tensor()
+        inputs_embeds_override = wc_tensor
+        tokens_slice = y[:, -wc_len:]
         autocast_enabled = device.type == "cuda"
         autocast_dtype = torch.bfloat16 if autocast_enabled and torch.cuda.is_bf16_supported() else torch.float32
         autocast_ctx = nullcontext()
@@ -425,8 +436,8 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
             if embeds.dtype != target_dtype:
                 embeds = embeds.to(target_dtype)
             loss2d = model(
-                x,
-                y,
+                x[:, -wc_len:],
+                tokens_slice,
                 loss_reduction="none",
                 cos_sin_override=cos_sin_override,
                 alibi_override=alibi_override,

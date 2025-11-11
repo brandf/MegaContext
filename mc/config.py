@@ -62,6 +62,10 @@ class MCConfig:
 
     tree_config: MegaContextConfig = field(init=False)
     wc_config: WorkingContextConfig = field(init=False)
+    eval_soft_max_length: Optional[int] = None
+    infer_allocator_max_replacements: Optional[int] = None
+    infer_allocator_iterations: Optional[int] = None
+    infer_refocus_interval: int = 32
 
     def __post_init__(self) -> None:
         self.mc_tree_type = self.mc_tree_type.lower()
@@ -85,3 +89,5 @@ class MCConfig:
             self.soft_max_length = self.wc_config.max_length
         self.initial_working_contexts = max(1, self.initial_working_contexts)
         self.max_counterfactuals = max(self.initial_working_contexts, self.max_counterfactuals)
+        if self.eval_soft_max_length is None:
+            self.eval_soft_max_length = self.wc_config.max_length

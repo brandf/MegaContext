@@ -53,6 +53,7 @@ class InferenceState:
     tree: MegaContextTree
     working_context: WorkingContext
     allocator: FocusAllocatorBase
+    steps_since_refocus: int = 0
 
 
 @dataclass
@@ -1102,9 +1103,11 @@ class MCController:
             raise ValueError("Unable to build initial working context for inference")
         allocator = self._build_allocator(tree, recency_variant.working_context)
         if rebuild:
+            max_repl = self.config.infer_allocator_max_replacements or self.config.allocator_max_replacements
+            iters = self.config.infer_allocator_iterations or self.config.allocator_iterations
             allocator.rebuild(
-                max_replacements_per_iteration=self.config.allocator_max_replacements,
-                num_iterations=self.config.allocator_iterations,
+                max_replacements_per_iteration=max_repl,
+                num_iterations=iters,
             )
         self._log_tree_snapshot(session, tree, tag="inference_init")
         self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
@@ -1128,10 +1131,14 @@ class MCController:
         with torch.no_grad():
             embeddings = self.embed(tokens)
             self.inference_state.allocator.append(tokens, embeddings)
-            self.inference_state.allocator.update_focus(
-                max_replacements_per_iteration=self.config.allocator_max_replacements,
-                num_iterations=self.config.allocator_iterations,
-            )
+            max_repl = self.config.infer_allocator_max_replacements or self.config.allocator_max_replacements
+            iters = self.config.infer_allocator_iterations or self.config.allocator_iterations
+            if getattr(self.inference_state, "steps_since_refocus", 0) % max(1, self.config.infer_refocus_interval) == 0:
+                self.inference_state.allocator.update_focus(
+                    max_replacements_per_iteration=max_repl,
+                    num_iterations=iters,
+                )
+            self.inference_state.steps_since_refocus = getattr(self.inference_state, "steps_since_refocus", 0) + tokens.shape[1]
         self._log_wc_snapshot(self.inference_state.session_id, self.inference_state.working_context, tag="inference_update")
         self._log_focus_stats(
             self.inference_state.session_id,
