@@ -51,11 +51,20 @@ def ensure_venv() -> None:
     run(["uv", "pip", "install", "opentelemetry-sdk", "opentelemetry-exporter-otlp"])
 
 
-def prompt(text: str, default: str | None = None, secret: bool = False) -> str:
+def prompt(
+    text: str,
+    default: str | None = None,
+    secret: bool = False,
+    allow_clear: bool = False,
+) -> str:
     prompt_text = f"{text}"
     if default:
         if secret:
-            prompt_text += " [press Enter to keep existing]"
+            suffix = " [Enter=keep"
+            if allow_clear:
+                suffix += ", type 'clear' to remove"
+            suffix += "]"
+            prompt_text += suffix
         else:
             prompt_text += f" [{default}]"
     prompt_text += ": "
@@ -63,6 +72,8 @@ def prompt(text: str, default: str | None = None, secret: bool = False) -> str:
         value = getpass(prompt_text)
     else:
         value = input(prompt_text)
+    if allow_clear and value.strip().lower() == "clear":
+        return ""
     if not value and default is not None:
         return default
     return value.strip()
@@ -96,12 +107,18 @@ def collect_env(defaults: dict[str, str]) -> dict[str, str]:
         "WANDB_API_KEY (leave blank for dummy logging)",
         default=defaults.get("WANDB_API_KEY"),
         secret=True,
+        allow_clear=True,
     )
     if wandb_key:
         env["WANDB_API_KEY"] = wandb_key
     wandb_run = prompt("WANDB run name", defaults.get("WANDB_RUN", "mc-run10"))
     env["WANDB_RUN"] = wandb_run
-    hf_token = prompt("HF_TOKEN (optional)", default=defaults.get("HF_TOKEN"), secret=True)
+    hf_token = prompt(
+        "HF_TOKEN (optional)",
+        default=defaults.get("HF_TOKEN"),
+        secret=True,
+        allow_clear=True,
+    )
     if hf_token:
         env["HF_TOKEN"] = hf_token
     base_dir = prompt(
