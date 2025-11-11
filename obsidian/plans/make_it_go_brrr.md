@@ -77,11 +77,26 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 
 ---
 
+## Phase 5 — Dtype Safety Net
+
+1. **Central casting helper**  
+   - Add a `_to_model_dtype(...)` helper to `MCController` so every tensor that touches the GPT (embeddings, pos encodings, alibi) automatically matches the model’s dtype/device.
+2. **Autocast alignment**  
+   - Run `process_batch` under the same autocast context as the main training forward so controller forwards inherit the trainer’s dtype decisions.
+3. **Regression tests**  
+   - Add unit tests that build bf16/ fp16 working contexts against fp32 models (and vice versa) to ensure `process_batch` succeeds without dtype mismatches.
+
+> Exit: No more manual dtype patches—controller forwards inherit the right dtype automatically and tests catch regressions immediately.
+
+---
+
 ## Open Questions
 
 - How small can we make `H` before ΔNLL supervision becomes noisy?  
 - Do we need separate LoRA adapters for horizon vs full-sequence loss once the base forward covers both?  
 - Can we cache WC embeddings across batches to avoid re-embedding LOD0 each time?
+- Can we make dtype handling automatic so controller/model always agree (helper + tests)?
+- Can we make dtype handling automatic so controller/model always agree (helper + tests)?
 
 ---
 

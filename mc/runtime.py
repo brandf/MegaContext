@@ -103,6 +103,10 @@ class MCController:
         self.model = model
         self.config = config
         self.device = torch.device(config.device)
+        try:
+            self._target_dtype = next(model.parameters()).dtype
+        except StopIteration:
+            self._target_dtype = torch.float32
         self._rng = random.Random(config.random_seed)
         self._batch_counters = {
             "sibling_expands": 0,
@@ -686,15 +690,12 @@ class MCController:
         original_tokens: torch.Tensor,
     ) -> torch.Tensor:
         wc = variant.working_context
-        embeddings = wc.to_tensor().to(self.device)
-        target_dtype = next(self.model.parameters()).dtype
-        if embeddings.dtype != target_dtype:
-            embeddings = embeddings.to(target_dtype)
+        embeddings = self._to_model_dtype(wc.to_tensor())
         seq_len = embeddings.shape[1]
         cos, sin, alibi = wc.get_positional_encodings()
-        cos = cos.to(self.device).to(target_dtype)
-        sin = sin.to(self.device).to(target_dtype)
-        alibi = alibi.to(self.device).to(target_dtype) if alibi is not None else None
+        cos = self._to_model_dtype(cos)
+        sin = self._to_model_dtype(sin)
+        alibi = self._to_model_dtype(alibi) if alibi is not None else None
         batch_idx = getattr(variant, "batch_index", 0)
         token_slice = original_tokens[batch_idx : batch_idx + 1]
         token_slice = self._align_tokens_to_embeddings(token_slice, seq_len)
@@ -717,6 +718,9 @@ class MCController:
             device=tokens.device,
         )
         return torch.cat([pad, tokens], dim=1)
+
+    def _to_model_dtype(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor.to(device=self.device, dtype=self._target_dtype)
 
     def _compute_lens_losses(
         self, batch_states: List[SampleContext]
