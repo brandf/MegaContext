@@ -14,10 +14,12 @@ python -m scripts.base_train --depth=4 --max_seq_len=512 --device_batch_size=1 -
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import time
+import math
 from contextlib import nullcontext
 
 import wandb
 import torch
+import torch.distributed as dist
 
 from nanochat.gpt import GPT, GPTConfig
 from nanochat.dataloader import tokenizing_distributed_data_loader
@@ -275,6 +277,93 @@ def get_muon_momentum(it):
 def _mean_or_none(values):
     return float(sum(values) / len(values)) if values else None
 
+
+def _assemble_positional_override(x, mc_result, step, device, mc_controller):
+    if mc_result is None:
+        return None, None
+    batch = x.size(0)
+    if mc_result.positional_cache is not None and batch == 1:
+        cos, sin = mc_result.positional_cache[:2]
+        alibi = mc_result.positional_cache[2] if len(mc_result.positional_cache) > 2 else None
+        return (cos.to(device), sin.to(device)), (alibi.to(device) if alibi is not None else None)
+    cache_map = getattr(mc_result, "positional_caches", None)
+    if not cache_map:
+        return None, None
+    cos_list, sin_list, alibi_list = [], [], []
+    for b in range(batch):
+        key = f"train_step_{step}_sample_{b}"
+        if key not in cache_map:
+            return None, None
+        cos_b, sin_b, alibi_b = cache_map[key]
+        cos_list.append(cos_b.to(device))
+        sin_list.append(sin_b.to(device))
+        alibi_list.append(alibi_b.to(device) if alibi_b is not None else None)
+    cos = torch.cat(cos_list, dim=0)
+    sin = torch.cat(sin_list, dim=0)
+    alibi = None
+    if any(a is not None for a in alibi_list):
+        H = mc_controller.config.num_heads
+        T = cos_list[0].size(1)
+        dtype = cos_list[0].dtype
+        dev = cos_list[0].device
+        filled = []
+        for a in alibi_list:
+            if a is None:
+                filled.append(torch.zeros((1, H, T, T), dtype=dtype, device=dev))
+            else:
+                filled.append(a.to(device))
+        alibi = torch.cat(filled, dim=0)
+    return (cos, sin), alibi
+
+
+@torch.no_grad()
+def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device):
+    total_nats = torch.tensor(0.0, dtype=torch.float32, device=device)
+    total_bytes = torch.tensor(0, dtype=torch.int64, device=device)
+    batch_iter = iter(batches)
+    for eval_idx in range(steps):
+        x, y = next(batch_iter)
+        x = x.to(device)
+        y = y.to(device)
+        mc_result = controller.process_batch(x.detach(), step=-(eval_idx + 1), context="eval")
+        cos_sin_override, alibi_override = _assemble_positional_override(x, mc_result, -(eval_idx + 1), device, controller)
+        inputs_embeds_override = None
+        if mc_result is not None and mc_result.cached_embeddings is not None:
+            inputs_embeds_override = mc_result.cached_embeddings.to(device)
+        loss2d = model(
+            x,
+            y,
+            loss_reduction="none",
+            cos_sin_override=cos_sin_override,
+            alibi_override=alibi_override,
+            inputs_embeds=inputs_embeds_override,
+        )
+        loss2d = loss2d.view(-1)
+        y = y.view(-1)
+        if (y.int() < 0).any():
+            valid = y >= 0
+            y_safe = torch.where(valid, y, torch.zeros_like(y))
+            num_bytes2d = torch.where(
+                valid,
+                token_bytes[y_safe],
+                torch.zeros_like(y, dtype=token_bytes.dtype),
+            )
+            total_nats += (loss2d * (num_bytes2d > 0)).sum()
+            total_bytes += num_bytes2d.sum()
+        else:
+            num_bytes2d = token_bytes[y]
+            total_nats += (loss2d * (num_bytes2d > 0)).sum()
+            total_bytes += num_bytes2d.sum()
+    world_size = dist.get_world_size() if dist.is_initialized() else 1
+    if world_size > 1:
+        dist.all_reduce(total_nats, op=dist.ReduceOp.SUM)
+        dist.all_reduce(total_bytes, op=dist.ReduceOp.SUM)
+    total_nats = total_nats.item()
+    total_bytes = total_bytes.item()
+    if total_bytes == 0:
+        return float("inf")
+    return total_nats / (math.log(2) * total_bytes)
+
 # -----------------------------------------------------------------------------
 # Training loop
 min_val_bpb = float("inf")
@@ -300,8 +389,11 @@ for step in range(num_iterations + 1):
         model.eval()
         val_loader = build_val_loader()
         eval_steps = eval_tokens // (device_batch_size * max_seq_len * ddp_world_size)
-        with autocast_ctx:
-            val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
+        if mc_controller is not None:
+            val_bpb = evaluate_bpb_with_mc(model, mc_controller, val_loader, eval_steps, token_bytes, device)
+        else:
+            with autocast_ctx:
+                val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
         print0(f"Step {step:05d} | Validation bpb: {val_bpb:.4f}")
         if val_bpb < min_val_bpb:
             min_val_bpb = val_bpb
