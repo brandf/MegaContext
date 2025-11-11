@@ -41,8 +41,8 @@ class MCConfig:
     lensnet_head: str = "mlp"  # mlp | linear
     allocator_type: str = "greedy"
     mc_tree_type: str = "ram"
-    initial_working_contexts: int = 4
-    max_counterfactuals: int = 8
+    initial_working_contexts: int = 2
+    max_counterfactuals: int = 4
     horizon_tokens: int = 32
     long_horizon_multiplier: int = 32
     token_loss_weight: float = 1.0
@@ -54,7 +54,7 @@ class MCConfig:
     allocator_expand_threshold: float = 0.1
     allocator_collapse_threshold: float = 0.1
     allocator_max_replacements: int = 4
-    allocator_iterations: int = 2
+    allocator_iterations: int = 1
     allocator_sample_top_k: int = 4
     allocator_sample_temperature: float = 1.0
     num_heads: int = 1
