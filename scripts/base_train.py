@@ -330,14 +330,20 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         inputs_embeds_override = None
         if mc_result is not None and mc_result.cached_embeddings is not None:
             inputs_embeds_override = mc_result.cached_embeddings.to(device)
-        loss2d = model(
-            x,
-            y,
-            loss_reduction="none",
-            cos_sin_override=cos_sin_override,
-            alibi_override=alibi_override,
-            inputs_embeds=inputs_embeds_override,
-        )
+        autocast_enabled = device.type == "cuda"
+        autocast_dtype = torch.bfloat16 if autocast_enabled and torch.cuda.is_bf16_supported() else torch.float32
+        autocast_ctx = nullcontext()
+        if autocast_enabled:
+            autocast_ctx = torch.cuda.amp.autocast(dtype=autocast_dtype)
+        with autocast_ctx:
+            loss2d = model(
+                x,
+                y,
+                loss_reduction="none",
+                cos_sin_override=cos_sin_override,
+                alibi_override=alibi_override,
+                inputs_embeds=inputs_embeds_override,
+            )
         loss2d = loss2d.view(-1)
         y = y.view(-1)
         if (y.int() < 0).any():
