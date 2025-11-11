@@ -128,8 +128,8 @@ case "$GPU_PROFILE" in
         NUM_ITERATIONS=75500
         ;;
     h100)
-        DEVICE_BATCH_SIZE=40
-        NUM_ITERATIONS=37750
+        DEVICE_BATCH_SIZE=20
+        NUM_ITERATIONS=75500
         ;;
     *)
         echo "Unsupported GPU profile: $GPU_PROFILE (expected 5090 or h100)" >&2
