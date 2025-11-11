@@ -397,6 +397,12 @@ for step in range(num_iterations + 1):
     mc_lod2_loss_samples = []
     mc_lens_loss_samples = []
     mc_time_samples: list[float] = []
+    forward_time_samples: list[float] = []
+    optimizer_time_samples: list[float] = []
+    loader_time_samples: list[float] = []
+    mc_variant_counts: list[int] = []
+    mc_horizon_eval_total = 0
+    mc_horizon_token_total = 0
 
     # once in a while: evaluate the val bpb (all ranks participate)
     if last_step or step % eval_every == 0:
@@ -493,6 +499,11 @@ for step in range(num_iterations + 1):
                 t_mc1 = time.time()
                 # Collect MC controller timing (ms) for logging later
                 mc_time_samples.append((t_mc1 - t_mc0) * 1000.0)
+                profile = getattr(mc_controller, "last_batch_profile", None)
+                if profile:
+                    mc_variant_counts.extend(profile.get("variant_counts", []))
+                    mc_horizon_eval_total += int(profile.get("horizon_evals", 0))
+                    mc_horizon_token_total += int(profile.get("horizon_tokens", 0))
             except Exception as exc: # pragma: no cover - guard against optional path regressions
                 print0(f"[MegaContext] controller error at step {step}: {exc}")
                 import traceback
@@ -551,6 +562,7 @@ for step in range(num_iterations + 1):
             inputs_embeds_override = None
             if mc_result is not None and mc_result.cached_embeddings is not None:
                 inputs_embeds_override = mc_result.cached_embeddings.to(device)
+            t_fw0 = time.time()
             base_loss = model(
                 x,
                 y,
@@ -572,7 +584,11 @@ for step in range(num_iterations + 1):
         train_loss = loss.detach() # for logging
         loss = loss / grad_accum_steps # each .backward() is a grad sum => normalize loss here
         loss.backward()
+        forward_time_samples.append((time.time() - t_fw0) * 1000.0)
+        t_loader0 = time.time()
         x, y = next(train_loader) # prefetch the next batch while the GPU is busy with forward/backward
+        loader_time_samples.append((time.time() - t_loader0) * 1000.0)
+    t_opt0 = time.time()
     mc_token_loss_val = _mean_or_none(mc_token_loss_samples)
     mc_lod1_loss_val = _mean_or_none(mc_lod1_loss_samples)
     mc_lod2_loss_val = _mean_or_none(mc_lod2_loss_samples)
@@ -593,6 +609,7 @@ for step in range(num_iterations + 1):
     for opt in optimizers:
         opt.step()
     model.zero_grad(set_to_none=True)
+    optimizer_time_samples.append((time.time() - t_opt0) * 1000.0)
     synchronize()
     t1 = time.time()
     dt = t1 - t0
@@ -627,6 +644,25 @@ for step in range(num_iterations + 1):
         if mc_time_samples:
             log_data["mc/time_controller_ms"] = sum(mc_time_samples) / len(mc_time_samples)
             mc_time_samples.clear()
+        if forward_time_samples:
+            log_data["time/forward_ms"] = sum(forward_time_samples) / len(forward_time_samples)
+            forward_time_samples.clear()
+        if optimizer_time_samples:
+            log_data["time/optimizer_ms"] = sum(optimizer_time_samples) / len(optimizer_time_samples)
+            optimizer_time_samples.clear()
+        if loader_time_samples:
+            log_data["time/dataloader_ms"] = sum(loader_time_samples) / len(loader_time_samples)
+            loader_time_samples.clear()
+        if mc_variant_counts:
+            log_data["mc/variants_mean"] = sum(mc_variant_counts) / len(mc_variant_counts)
+            log_data["mc/variants_total"] = sum(mc_variant_counts)
+            mc_variant_counts.clear()
+        if mc_horizon_eval_total:
+            log_data["mc/horizon_evals"] = mc_horizon_eval_total
+            mc_horizon_eval_total = 0
+        if mc_horizon_token_total:
+            log_data["mc/horizon_tokens"] = mc_horizon_token_total
+            mc_horizon_token_total = 0
         if mc_token_loss_val is not None:
             log_data["mc/token_loss"] = mc_token_loss_val
         if mc_lod1_loss_val is not None:

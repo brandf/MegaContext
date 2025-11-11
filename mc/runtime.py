@@ -110,6 +110,7 @@ class MCController:
             "allocator_edits": 0,
         }
         self._debug_flags: Dict[str, bool] = {}
+        self.last_batch_profile: Optional[Dict[str, int]] = None
         if config.embed_dim % config.num_heads != 0:
             raise ValueError("embed_dim must be divisible by num_heads for positional encodings")
         self.embed = self._resolve_embedding_layer(model)
@@ -191,14 +192,18 @@ class MCController:
         Returns:
             Batch result containing positional cache and auxiliary losses.
         """
+        self.last_batch_profile = None
         batch_states: List[SampleContext] = []
         total_edits = 0
         tokens_device = tokens.to(self.device)
         self._reset_batch_counters()
         cached_embeddings: List[torch.Tensor] = []
+        variant_counts: List[int] = []
         timing_details = {
             "horizon_forward_ms": 0.0,
             "horizon_loss_ms": 0.0,
+            "horizon_evals": 0,
+            "horizon_tokens": 0,
         }
         # Build trees sequentially to avoid GPU stream contention and keep allocator edits deterministic across runs
         t_build0 = time.time()
@@ -209,6 +214,7 @@ class MCController:
             batch_states.append(sample_state)
             total_edits += sample_edits
             cached_embeddings.append(seq_embeds)
+            variant_counts.append(len(sample_state.variants))
             self._log_tree_snapshot(session_id, tree, tag="training_build")
             self.telemetry.log_tree(step, tree)
         t_build1 = time.time()
@@ -248,6 +254,13 @@ class MCController:
         )
         self.current_batch_states = []
         self._emit_batch_counters(step)
+        total_variants = sum(variant_counts) if variant_counts else 0
+        self.last_batch_profile = {
+            "variant_counts": variant_counts,
+            "total_variants": total_variants,
+            "horizon_evals": timing_details["horizon_evals"],
+            "horizon_tokens": timing_details["horizon_tokens"],
+        }
         # Emit timing telemetry (ms)
         self._log_event(
             f"train_step_{step}",
@@ -259,6 +272,18 @@ class MCController:
                 "lens_ms": (t_lens1 - t_lens0) * 1000.0,
                 "horizon_forward_ms": timing_details["horizon_forward_ms"],
                 "horizon_loss_ms": timing_details["horizon_loss_ms"],
+            },
+        )
+        self._log_event(
+            f"train_step_{step}",
+            "mc_batch_stats",
+            {
+                "variants_total": total_variants,
+                "variants_mean": (total_variants / max(1, len(variant_counts))),
+                "variants_max": max(variant_counts) if variant_counts else 0,
+                "variants_min": min(variant_counts) if variant_counts else 0,
+                "horizon_evals": timing_details["horizon_evals"],
+                "horizon_tokens": timing_details["horizon_tokens"],
             },
         )
         return result
@@ -746,6 +771,9 @@ class MCController:
         horizon_tokens = self._slice_tokens(sample.tree, last_pos + 1, horizon)
         if horizon_tokens is None:
             return None, None, None
+        if timing_stats is not None:
+            timing_stats["horizon_evals"] = timing_stats.get("horizon_evals", 0) + 1
+            timing_stats["horizon_tokens"] = timing_stats.get("horizon_tokens", 0) + int(horizon_tokens.shape[1])
         if use_lod2:
             self._increment_counter("horizon_triggers")
             self._log_event(
