@@ -325,11 +325,14 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device)
         x, y = next(batch_iter)
         x = x.to(device)
         y = y.to(device)
-        mc_result = controller.process_batch(x.detach(), step=-(eval_idx + 1), context="eval")
-        cos_sin_override, alibi_override = _assemble_positional_override(x, mc_result, -(eval_idx + 1), device, controller)
-        inputs_embeds_override = None
-        if mc_result is not None and mc_result.cached_embeddings is not None:
-            inputs_embeds_override = mc_result.cached_embeddings.to(device)
+        session_id = controller.begin_inference_session(x)
+        wc = controller.get_inference_working_context()
+        if wc is None:
+            raise RuntimeError("Inference working context is None during validation")
+        cos_sin_override = controller._build_wc_positional(wc)
+        alibi_override = cos_sin_override[2]
+        cos_sin_override = cos_sin_override[:2]
+        inputs_embeds_override = wc.to_tensor()
         autocast_enabled = device.type == "cuda"
         autocast_dtype = torch.bfloat16 if autocast_enabled and torch.cuda.is_bf16_supported() else torch.float32
         autocast_ctx = nullcontext()
