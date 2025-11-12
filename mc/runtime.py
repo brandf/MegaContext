@@ -1025,6 +1025,7 @@ class MCController:
             self.last_inference_report = None
             return
         wc = self.inference_state.working_context
+        coverage = self._wc_token_coverage(wc, self.inference_state.tree)
         report = {
             "original_length": int(self.inference_state.original_seq_len),
             "wc_length": int(wc.length),
@@ -1034,6 +1035,7 @@ class MCController:
             "refocus_updates": int(self.inference_state.refocus_updates),
             "refocus_iterations": int(self.inference_state.refocus_iterations_accum),
             "refocus_replacements": int(self.inference_state.refocus_replacements),
+            "coverage_tokens": int(coverage),
         }
         self.last_inference_report = report
 
@@ -1043,12 +1045,13 @@ class MCController:
             return
         primary_variant: Optional[WorkingContextVariant] = None
         primary_tree_tokens = 0
-        aggregate_expected = 0
+        primary_tree: Optional[MegaContextTree] = None
         for sample in batch_states:
             for variant in sample.variants:
                 if variant.lod_hint > 0:
                     primary_variant = variant
                     primary_tree_tokens = sample.tree.num_tokens()
+                    primary_tree = sample.tree
                     break
             if primary_variant is not None:
                 break
@@ -1056,9 +1059,11 @@ class MCController:
             sample = batch_states[0]
             primary_variant = sample.variants[0] if sample.variants else None
             primary_tree_tokens = sample.tree.num_tokens()
+            primary_tree = sample.tree
         aggregate_counts: Dict[int, int] = {}
         aggregate_lengths = 0
         aggregate_variants = 0
+        aggregate_coverage = 0
         aggregate_expected = 0
         for sample in batch_states:
             expected = min(sample.tree.num_tokens(), self.config.wc_config.max_length)
@@ -1068,12 +1073,14 @@ class MCController:
                     aggregate_counts[lod] = aggregate_counts.get(lod, 0) + count
                 aggregate_lengths += variant.working_context.length
                 aggregate_variants += 1
+                aggregate_coverage += self._wc_token_coverage(variant.working_context, sample.tree)
                 aggregate_expected += expected
         primary_report = None
-        if primary_variant is not None:
+        if primary_variant is not None and primary_tree is not None:
             wc = primary_variant.working_context
             stats = getattr(primary_variant.allocator, "_last_edit_stats", {}) or {}
             lod_hist = self._lod_histogram(wc)
+            primary_cov = self._wc_token_coverage(wc, primary_tree)
             primary_report = {
                 "original_length": int(primary_tree_tokens),
                 "wc_length": int(wc.length),
@@ -1081,12 +1088,14 @@ class MCController:
                 "focus_iterations": int(stats.get("iterations", 0)),
                 "focus_replacements": int(stats.get("total", 0)),
                 "expected_tokens": min(primary_tree_tokens, self.config.wc_config.max_length),
+                "coverage_tokens": primary_cov,
             }
         aggregate_report = {
             "variants": int(aggregate_variants),
             "avg_wc_length": float(aggregate_lengths / aggregate_variants) if aggregate_variants else 0.0,
             "lod_counts": aggregate_counts,
             "expected_tokens": int(aggregate_expected),
+            "coverage_tokens": int(aggregate_coverage),
         }
         self.last_train_report = {
             "primary": primary_report,
@@ -1116,6 +1125,19 @@ class MCController:
         lods = wc.get_lod_tensor()[0]
         values, counts = torch.unique(lods, return_counts=True)
         return {int(v.item()): int(c.item()) for v, c in zip(values, counts)}
+
+    def _wc_token_coverage(self, wc: WorkingContext, tree: MegaContextTree) -> int:
+        positions = wc.get_positions()[0]
+        lods = wc.get_lod_tensor()[0]
+        total = 0
+        total_tokens = tree.num_tokens()
+        for pos_tensor, lod_tensor in zip(positions, lods):
+            start = int(pos_tensor.item())
+            lod = int(lod_tensor.item())
+            span = tree.tokens_per_entry(lod)
+            remain = max(0, total_tokens - start)
+            total += min(span, remain)
+        return total
 
     def _lod_equivalent_tokens_from_hist(self, hist: Dict[int, int]) -> int:
         total = 0
