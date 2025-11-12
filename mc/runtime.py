@@ -183,6 +183,8 @@ class MCController:
             module.train()
         self.current_batch_states: List[SampleContext] = []
         self.inference_state: Optional[InferenceState] = None
+        self.last_timings: Dict[str, float] = {}
+        self._focus_time_accum: float = 0.0
 
     @staticmethod
     def _resolve_embedding_layer(model: torch.nn.Module):
@@ -218,6 +220,8 @@ class MCController:
             Batch result containing positional cache and auxiliary losses.
         """
         self.last_batch_profile = None
+        self.last_timings = {}
+        self._focus_time_accum = 0.0
         batch_states: List[SampleContext] = []
         total_edits = 0
         tokens_device = tokens.to(self.device)
@@ -226,6 +230,7 @@ class MCController:
         train_variants: List[WorkingContextVariant] = []
         variant_counts: List[int] = []
         # Build trees sequentially to avoid GPU stream contention and keep allocator edits deterministic across runs
+        t_total0 = time.time()
         t_build0 = time.time()
         for idx in range(tokens_device.size(0)):
             seq = tokens_device[idx : idx + 1]
@@ -261,9 +266,22 @@ class MCController:
             self.current_batch_states = []
             self._emit_batch_counters(step)
             self.last_train_report = None
+            total_ms = (time.time() - t_total0) * 1000.0
+            self.last_timings = {
+                "build_ms": (t_build1 - t_build0) * 1000.0,
+                "positional_ms": (t_pos1 - t_pos0) * 1000.0,
+                "variant_ms": 0.0,
+                "lens_ms": 0.0,
+                "focus_ms": self._focus_time_accum * 1000.0,
+                "total_ms": total_ms,
+            }
             return result
+        t_var0 = time.time()
         variant_loss, lod0_loss, delta_mean, delta_p95, lod_metrics, lod_counts = self._compute_variant_losses(batch_states, tokens_device)
+        t_var1 = time.time()
+        t_lens0 = time.time()
         lens_loss = self._compute_lens_losses(batch_states)
+        t_lens1 = time.time()
         result = MCBatchResult(
             positional_cache=positional_cache,
             variant_loss=variant_loss,
@@ -313,6 +331,15 @@ class MCController:
                 "variants_min": min(variant_counts) if variant_counts else 0,
             },
         )
+        total_ms = (time.time() - t_total0) * 1000.0
+        self.last_timings = {
+            "build_ms": (t_build1 - t_build0) * 1000.0,
+            "positional_ms": (t_pos1 - t_pos0) * 1000.0,
+            "variant_ms": (t_var1 - t_var0) * 1000.0,
+            "lens_ms": (t_lens1 - t_lens0) * 1000.0,
+            "focus_ms": self._focus_time_accum * 1000.0,
+            "total_ms": total_ms,
+        }
         return result
 
     def _build_tree_sample(
@@ -345,7 +372,9 @@ class MCController:
     # ------------------------------------------------------------------ #
     def _build_sample_context(self, tree: MegaContextTree, session_id: str) -> SampleContext:
         variants = self._sample_initial_wcs(tree, session_id=session_id)
+        focus_start = time.time()
         refined = self._refine_variants(tree, variants, session_id=session_id)
+        self._focus_time_accum += time.time() - focus_start
         limited = refined[: self.config.max_counterfactuals]
         return SampleContext(session_id=session_id, tree=tree, variants=limited)
 

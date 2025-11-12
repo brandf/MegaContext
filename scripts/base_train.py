@@ -666,6 +666,18 @@ for step in range(num_iterations + 1):
                 profile = getattr(mc_controller, "last_batch_profile", None)
                 if profile:
                     mc_variant_counts.extend(profile.get("variant_counts", []))
+                if mc_log_timers:
+                    timings = getattr(mc_controller, "last_timings", {}) or {}
+                    if timings:
+                        order = ["build_ms", "focus_ms", "variant_ms", "lens_ms", "positional_ms", "total_ms"]
+                        formatted = []
+                        for key in order:
+                            if key in timings:
+                                label = key.replace("_ms", "")
+                                formatted.append(f"{label}={timings[key]:.2f}ms")
+                        extra = [f"{k}={v:.2f}ms" for k, v in timings.items() if k not in order]
+                        formatted.extend(extra)
+                        print0("[MC Timers] " + ", ".join(formatted))
             except Exception as exc: # pragma: no cover - guard against optional path regressions
                 print0(f"[MegaContext] controller error at step {step}: {exc}")
                 import traceback
