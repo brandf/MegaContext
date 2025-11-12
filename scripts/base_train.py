@@ -62,6 +62,7 @@ target_flops = -1.0 # calculate num_iterations to reach target_flops. Useful for
 target_param_data_ratio = 20 # calculate num_iterations to maintain fixed data:param ratio (Chinchilla=20) (-1 = disable)
 # Optimization
 device_batch_size = 32 # per-device batch size (set to not OOM)
+eval_device_batch_size = device_batch_size
 total_batch_size = 524288 # total desired batch size, in #tokens
 embedding_lr = 0.2 # learning rate for the embedding parameters (Adam)
 unembedding_lr = 0.004 # learning rate for the unembedding parameters (Adam)
@@ -153,6 +154,7 @@ if mc_enabled and mc_auto_batch:
         target_tokens = original_total_batch_size * max(1, original_num_iterations)
         if total_batch_size > 0:
             num_iterations = max(1, math.ceil(target_tokens / total_batch_size))
+        eval_device_batch_size = original_device_batch_size
         print0(
             "[MegaContext] auto batch adjust: "
             f"device_batch_size {original_device_batch_size} -> {device_batch_size}, "
@@ -300,7 +302,8 @@ adamw_optimizer, muon_optimizer = optimizers
 base_dir = get_base_dir()
 tokens_dir = os.path.join(base_dir, "tokenized_data")
 train_loader = tokenizing_distributed_data_loader(device_batch_size, max_seq_len, split="train", device=device)
-build_val_loader = lambda: tokenizing_distributed_data_loader(device_batch_size, max_seq_len, split="val", device=device)
+val_device_batch_size = eval_device_batch_size
+build_val_loader = lambda: tokenizing_distributed_data_loader(val_device_batch_size, max_seq_len, split="val", device=device)
 x, y = next(train_loader) # kick off load of the very first batch of data
 
 # -----------------------------------------------------------------------------
@@ -441,9 +444,14 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
     batch_iter = iter(batches)
     report_printed = False
     for eval_idx in range(steps):
-        x, y = next(batch_iter)
+        try:
+            x, y = next(batch_iter)
+        except StopIteration:
+            print0("[MC Eval] validation loader exhausted early")
+            break
         x = x.to(device)
         y = y.to(device)
+        print0(f"[MC Eval] batch {eval_idx+1}/{steps}: tokens={y.numel()}")
         session_id = controller.begin_inference_session(x, rebuild=True)
         if report_enabled and not report_printed:
             report = controller.get_inference_report() if hasattr(controller, "get_inference_report") else None
@@ -545,8 +553,9 @@ for step in range(num_iterations + 1):
     if last_step or step % eval_every == 0:
         model.eval()
         val_loader = build_val_loader()
-        eval_steps = eval_tokens // (device_batch_size * max_seq_len * ddp_world_size)
+        eval_steps = eval_tokens // (eval_device_batch_size * max_seq_len * ddp_world_size)
         if mc_controller is not None:
+            print0("[MC Eval] starting validation batch assembly")
             val_bpb = evaluate_bpb_with_mc(
                 eval_model,
                 mc_controller,
@@ -556,6 +565,7 @@ for step in range(num_iterations + 1):
                 device,
                 report_enabled=mc_val_report,
             )
+            print0("[MC Eval] finished validation")
         else:
             with _training_autocast():
                 val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
@@ -679,11 +689,13 @@ for step in range(num_iterations + 1):
             cos_sin_override = None
             alibi_override = None
             if positional_cache is not None:
+                print0(f"[MC Train] using positional_cache fast path at micro_step {micro_step}")
                 # Single-sample fast path: controller provided a batch-level cache
                 cos_sin_override = positional_cache[:2]
                 if len(positional_cache) > 2:
                     alibi_override = positional_cache[2]
             elif mc_result is not None and hasattr(mc_result, "positional_caches") and mc_result.positional_caches:
+                print0(f"[MC Train] assembling per-sample positional caches for micro_step {micro_step}")
                 # Batched path: assemble per-sample caches returned by the controller
                 try:
                     B = x.size(0)
