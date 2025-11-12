@@ -334,6 +334,13 @@ def _mean_or_none(values):
     return float(sum(values) / len(values)) if values else None
 
 
+def _lod_equivalent_tokens(lod_counts: dict[int, int], block_size: int) -> int:
+    total = 0
+    for lod, count in lod_counts.items():
+        total += int(count) * (block_size ** int(lod))
+    return total
+
+
 def _assemble_positional_override(x, mc_result, step, device, mc_controller):
     if mc_result is None:
         return None, None
@@ -469,11 +476,18 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
                 ref_swaps = report.get("refocus_replacements", 0)
                 max_seq = controller.config.wc_config.max_length
                 soft_max = controller.config.eval_soft_max_length or controller.config.wc_config.max_length
+                block_size = controller.config.block_size
+                lod_equiv = _lod_equivalent_tokens(lod_counts, block_size) if lod_counts else 0
+                expected_tokens = min(int(report.get("original_length", lod_equiv)), soft_max)
+                if lod_counts and lod_equiv != expected_tokens:
+                    raise RuntimeError(
+                        f"[MegaContext] LOD coverage mismatch (validation): expected {expected_tokens}, got {lod_equiv}"
+                    )
                 print0(
                     "✨ MegaContext Val Report\n"
                     f"   📜 Original seq: {report.get('original_length', 'n/a')} tokens (max_seq={max_seq})\n"
                     f"   🗂️ Working context: {report.get('wc_length', 'n/a')} tokens (soft_max={soft_max})\n"
-                    f"   🧩 LOD mix: {lod_line}\n"
+                    f"   🧩 LOD mix: {lod_line} | LOD0-equiv={lod_equiv}\n"
                     f"   ⚙️ Prefocus: {pref_iters} iterations / {pref_swaps} replacements\n"
                     f"   🔁 Refocus: {ref_updates} updates / {ref_iters} iterations / {ref_swaps} replacements"
                 )
@@ -701,6 +715,21 @@ for step in range(num_iterations + 1):
                             agg_line = ", ".join(agg_parts) if agg_parts else "none"
                             max_seq = mc_controller.config.wc_config.max_length
                             soft_max = mc_controller.config.wc_config.max_length
+                            block_size = mc_controller.config.block_size
+                            primary_equiv = _lod_equivalent_tokens(lod_counts, block_size) if lod_counts else 0
+                            primary_expected = min(int(primary.get("original_length", primary_equiv)), soft_max)
+                            if lod_counts and primary_equiv > primary_expected:
+                                raise RuntimeError(
+                                    f"[MegaContext] LOD coverage mismatch (train primary): "
+                                    f"expected {primary_expected}, got {primary_equiv}"
+                                )
+                            aggregate_equiv = _lod_equivalent_tokens(agg_counts, block_size) if agg_counts else 0
+                            aggregate_expected = int(aggregate.get("expected_tokens", aggregate_equiv))
+                            if agg_counts and aggregate_equiv > aggregate_expected:
+                                raise RuntimeError(
+                                    f"[MegaContext] LOD coverage mismatch (train aggregate): "
+                                    f"expected {aggregate_expected}, got {aggregate_equiv}"
+                                )
                             print0("🛠️ MegaContext Train Report")
                             print0(
                                 f"   📜 Primary seq: {primary.get('original_length', 'n/a')} tokens (max_seq={max_seq})"
@@ -708,14 +737,14 @@ for step in range(num_iterations + 1):
                             print0(
                                 f"   🗂️ Primary WC: {primary.get('wc_length', 'n/a')} tokens (soft_max={soft_max})"
                             )
-                            print0(f"   🧩 Primary LOD mix: {lod_line}")
+                            print0(f"   🧩 Primary LOD mix: {lod_line} | LOD0-equiv={primary_equiv}")
                             print0(
                                 f"   🔧 Primary focus: {primary.get('focus_iterations', 0)} iterations / {primary.get('focus_replacements', 0)} replacements"
                             )
                             print0(
                                 f"   📊 Aggregate variants: {aggregate.get('variants', 0)} | avg_wc_len={aggregate.get('avg_wc_length', 0):.1f}"
                             )
-                            print0(f"   🧮 Aggregate LOD mix: {agg_line}")
+                            print0(f"   🧮 Aggregate LOD mix: {agg_line} | LOD0-equiv={aggregate_equiv}")
                             train_report_printed = True
         with _training_autocast():
             cos_sin_override = None

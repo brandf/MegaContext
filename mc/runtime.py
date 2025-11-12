@@ -1043,6 +1043,7 @@ class MCController:
             return
         primary_variant: Optional[WorkingContextVariant] = None
         primary_tree_tokens = 0
+        aggregate_expected = 0
         for sample in batch_states:
             for variant in sample.variants:
                 if variant.lod_hint > 0:
@@ -1056,30 +1057,36 @@ class MCController:
             primary_variant = sample.variants[0] if sample.variants else None
             primary_tree_tokens = sample.tree.num_tokens()
         aggregate_counts: Dict[int, int] = {}
-        aggregate_tokens = 0
+        aggregate_lengths = 0
         aggregate_variants = 0
+        aggregate_expected = 0
         for sample in batch_states:
+            expected = min(sample.tree.num_tokens(), self.config.wc_config.max_length)
             for variant in sample.variants:
                 lod_hist = self._lod_histogram(variant.working_context)
                 for lod, count in lod_hist.items():
                     aggregate_counts[lod] = aggregate_counts.get(lod, 0) + count
-                aggregate_tokens += variant.working_context.length
+                aggregate_lengths += variant.working_context.length
                 aggregate_variants += 1
+                aggregate_expected += expected
         primary_report = None
         if primary_variant is not None:
             wc = primary_variant.working_context
             stats = getattr(primary_variant.allocator, "_last_edit_stats", {}) or {}
+            lod_hist = self._lod_histogram(wc)
             primary_report = {
                 "original_length": int(primary_tree_tokens),
                 "wc_length": int(wc.length),
-                "lod_counts": self._lod_histogram(wc),
+                "lod_counts": lod_hist,
                 "focus_iterations": int(stats.get("iterations", 0)),
                 "focus_replacements": int(stats.get("total", 0)),
+                "expected_tokens": min(primary_tree_tokens, self.config.wc_config.max_length),
             }
         aggregate_report = {
             "variants": int(aggregate_variants),
-            "avg_wc_length": float(aggregate_tokens / aggregate_variants) if aggregate_variants else 0.0,
+            "avg_wc_length": float(aggregate_lengths / aggregate_variants) if aggregate_variants else 0.0,
             "lod_counts": aggregate_counts,
+            "expected_tokens": int(aggregate_expected),
         }
         self.last_train_report = {
             "primary": primary_report,
@@ -1109,6 +1116,12 @@ class MCController:
         lods = wc.get_lod_tensor()[0]
         values, counts = torch.unique(lods, return_counts=True)
         return {int(v.item()): int(c.item()) for v, c in zip(values, counts)}
+
+    def _lod_equivalent_tokens_from_hist(self, hist: Dict[int, int]) -> int:
+        total = 0
+        for lod, count in hist.items():
+            total += int(count) * (self.config.block_size ** int(lod))
+        return total
 
     def _build_lens_targets(
         self,
