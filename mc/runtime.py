@@ -409,6 +409,8 @@ class MCController:
                     wc_choice = v
                     break
             wc = wc_choice.working_context
+            if wc_choice.lod_hint == 0:
+                self._assert_recent_lod0(wc, f"train_session:{sample.session_id}")
             positional_map[sample.session_id] = self._build_wc_positional(wc)
         return positional_map
 
@@ -588,7 +590,13 @@ class MCController:
         wc_config: Optional[WorkingContextConfig] = None,
     ) -> WorkingContextVariant:
         config = wc_config or self.config.wc_config
-        wc = WorkingContext(embeddings, positions, config)
+        lod_tensor = torch.full(
+            (embeddings.shape[0], embeddings.shape[1]),
+            lod,
+            dtype=torch.long,
+            device=embeddings.device,
+        )
+        wc = WorkingContext(embeddings, positions, config, lod_tensor=lod_tensor)
         self._configure_wc_positional(wc)
         return WorkingContextVariant(working_context=wc, source=source, lod_hint=lod)
 
@@ -747,6 +755,21 @@ class MCController:
     def _timing_sync(self) -> None:
         if self._timing_device.type == "cuda" and torch.cuda.is_available():
             torch.cuda.synchronize(self._timing_device)
+
+    def _assert_recent_lod0(self, wc: WorkingContext, tag: str) -> None:
+        recent = int(self.config.allocator_recent_tokens)
+        if recent <= 0 or wc.length == 0:
+            return
+        window = min(recent, wc.length)
+        lods = wc.get_lod_tensor()
+        if lods.shape[0] == 0:
+            return
+        tail = lods[0, -window:]
+        if torch.any(tail != 0):
+            raise RuntimeError(
+                "[MegaContext] Recent tokens must remain LOD0 "
+                f"(context={tag}, tail={window}). Observed LODs: {tail.tolist()}"
+            )
 
     def _clone_working_context(self, wc: WorkingContext) -> WorkingContext:
         embeddings = wc.to_tensor().clone()
@@ -1528,7 +1551,9 @@ class MCController:
     def get_inference_working_context(self) -> Optional[WorkingContext]:
         if self.inference_state is None:
             return None
-        return self.inference_state.working_context
+        wc = self.inference_state.working_context
+        self._assert_recent_lod0(wc, "inference")
+        return wc
 
     def get_inference_report(self) -> Optional[Dict[str, Any]]:
         return self.last_inference_report
