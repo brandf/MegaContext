@@ -81,46 +81,29 @@ class MegaContextTree:
         batch, seq_len, _ = base_embeddings.shape
         level_embeddings = base_embeddings.to(self.device)
         for lod in range(1, self.config.max_lod + 1):
-            prev_len = level_embeddings.shape[1]
-            if prev_len == 0:
-                break
-            grouped, new_len, mask = self._reshape_for_pool(level_embeddings, self.config.block_size)
+            grouped, new_len = self._reshape_for_pool(level_embeddings, self.config.block_size)
             if new_len == 0:
                 break
             grouped = grouped.contiguous()
-            mask = mask.contiguous()
             if self.gistnet is not None:
-                masked = grouped * mask
-                flat = masked.view(-1, self.config.block_size, self.config.embed_dim)
-                mask2d = mask.view(batch, new_len, self.config.block_size, 1).squeeze(-1)
-                mask2d = mask2d.reshape(-1, self.config.block_size)
-                pooled = self._apply_gistnet(flat, mask2d).view(batch, new_len, self.config.embed_dim)
+                flat = grouped.view(-1, self.config.block_size, self.config.embed_dim)
+                pooled = self._apply_gistnet(flat).view(batch, new_len, self.config.embed_dim)
             else:
-                weighted = grouped * mask
-                counts = mask.sum(dim=2).clamp_min(1.0)
-                pooled = weighted.sum(dim=2) / counts
+                pooled = grouped.mean(dim=2)
             self.levels[lod] = pooled
             level_embeddings = pooled
 
-    def _reshape_for_pool(self, x: torch.Tensor, block_size: int) -> Tuple[torch.Tensor, int, torch.Tensor]:
+    def _reshape_for_pool(self, x: torch.Tensor, block_size: int) -> Tuple[torch.Tensor, int]:
         if x.dim() == 2:
             x = x.unsqueeze(-1)
         batch, length, dim = x.shape
-        new_len = math.ceil(length / block_size)
+        new_len = length // block_size
         if new_len == 0:
             empty = x.new_zeros(batch, 0, block_size, dim)
-            mask = x.new_zeros(batch, 0, block_size, 1)
-            return empty, 0, mask
-        pad = new_len * block_size - length
-        valid_mask = torch.ones(batch, length, 1, device=x.device, dtype=x.dtype)
-        if pad > 0:
-            pad_tensor = torch.zeros(batch, pad, dim, device=x.device, dtype=x.dtype)
-            x = torch.cat([x, pad_tensor], dim=1)
-            pad_mask = torch.zeros(batch, pad, 1, device=x.device, dtype=x.dtype)
-            valid_mask = torch.cat([valid_mask, pad_mask], dim=1)
-        reshaped = x.view(batch, new_len, block_size, dim)
-        mask = valid_mask.view(batch, new_len, block_size, 1)
-        return reshaped, new_len, mask
+            return empty, 0
+        trimmed = new_len * block_size
+        reshaped = x[:, :trimmed, :].view(batch, new_len, block_size, dim)
+        return reshaped, new_len
 
     def release_lod0_cache(self, disable_future_cache: bool = False) -> None:
         self._lod0_cache = None
@@ -154,10 +137,11 @@ class MegaContextTree:
             tokens_per_node = self.tokens_per_entry(lod)
             if tokens_per_node == 0:
                 continue
-            target_index = (total_tokens - 1) // tokens_per_node
-            required_nodes = target_index + 1
-            self._ensure_level_capacity(lod, required_nodes)
-            self._recompute_node(lod, target_index)
+            available_nodes = total_tokens // tokens_per_node
+            if available_nodes == 0:
+                continue
+            self._ensure_level_capacity(lod, available_nodes)
+            self._recompute_node(lod, available_nodes - 1)
 
     def _ensure_level_capacity(self, lod: int, required_nodes: int) -> None:
         if lod not in self.levels:
@@ -176,34 +160,17 @@ class MegaContextTree:
         if lod == 0:
             return
         child_block = self._gather_child_block(lod, node_index)
+        if child_block is None:
+            return
         if self.gistnet is not None:
-            # Build a per-block mask for padded children
-            block_size = self.config.block_size
-            child_lod = lod - 1
-            start = node_index * block_size
-            valid = block_size
-            if child_lod == 0:
-                total = self.num_tokens()
-                valid = max(0, min(block_size, total - start))
-            else:
-                children = self.levels[child_lod]
-                valid = max(0, min(block_size, children.shape[1] - start))
-            mask2d = torch.zeros(child_block.shape[0], child_block.shape[1], dtype=torch.bool, device=child_block.device)
-            if valid > 0:
-                mask2d[:, :valid] = True
-            gist = self._apply_gistnet(child_block, mask2d).unsqueeze(1)
+            gist = self._apply_gistnet(child_block).unsqueeze(1)
         else:
             gist = child_block.mean(dim=1, keepdim=True)
         self.levels[lod][:, node_index : node_index + 1] = gist
 
-    def _apply_gistnet(self, blocks: torch.Tensor, mask: Optional[torch.Tensor]) -> torch.Tensor:
+    def _apply_gistnet(self, blocks: torch.Tensor) -> torch.Tensor:
         if self.gistnet is None:
             raise ValueError("GistNet not attached")
-        if mask is not None:
-            try:
-                return self.gistnet(blocks, key_padding_mask=mask)
-            except TypeError:
-                return self.gistnet(blocks)
         return self.gistnet(blocks)
 
     def _gather_child_block(self, lod: int, node_index: int) -> torch.Tensor:
@@ -214,18 +181,11 @@ class MegaContextTree:
             block = self._embed_tokens_range(start, end)
         else:
             children = self.levels[child_lod]
-            end = min(end, children.shape[1])
+            if end > children.shape[1]:
+                return None
             block = children[:, start:end]
         if block.shape[1] < self.config.block_size:
-            batch, _, dim = block.shape
-            pad = torch.zeros(
-                batch,
-                self.config.block_size - block.shape[1],
-                self.config.embed_dim,
-                device=block.device,
-                dtype=block.dtype,
-            )
-            block = torch.cat([block, pad], dim=1)
+            return None
         return block
 
     # ------------------------------------------------------------------ #

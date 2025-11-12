@@ -739,15 +739,15 @@ for step in range(num_iterations + 1):
                             max_seq = mc_controller.config.wc_config.max_length
                             soft_max = mc_controller.config.wc_config.max_length
                             block_size = mc_controller.config.block_size
-                            primary_equiv = _lod_equivalent_tokens(lod_counts, block_size) if lod_counts else 0
+                            primary_equiv = primary.get("coverage_tokens", _lod_equivalent_tokens(lod_counts, block_size))
+                            primary_coverage = primary_equiv
                             primary_expected = min(int(primary.get("original_length", primary_equiv)), soft_max)
-                            primary_coverage = primary.get("coverage_tokens", primary_equiv)
                             if lod_counts and primary_coverage > primary_expected:
                                 raise RuntimeError(
                                     f"[MegaContext] LOD coverage mismatch (train primary): "
                                     f"expected <= {primary_expected}, got {primary_coverage}"
                                 )
-                            aggregate_equiv = _lod_equivalent_tokens(agg_counts, block_size) if agg_counts else 0
+                            aggregate_equiv = aggregate.get("coverage_tokens", _lod_equivalent_tokens(agg_counts, block_size))
                             aggregate_expected = int(aggregate.get("expected_tokens", aggregate_equiv))
                             aggregate_coverage = aggregate.get("coverage_tokens", aggregate_equiv)
                             if agg_counts and aggregate_coverage > aggregate_expected:

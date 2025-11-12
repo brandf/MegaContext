@@ -49,6 +49,7 @@ Each node in the MegaContext Tree represents a contiguous span of the original t
 
 - **Fixed branching factor:** Every internal node has exactly 32 children (block size K=32 in POC)
 - **Perfect alignment:** Node boundaries align with 32-token blocks; no partial spans
+- **Tail safety:** If the newest block is incomplete, those tokens remain at LOD0 and behave like “recent tokens” until enough context arrives to form a full block. GistNet never runs on padded inputs.
 - **Contiguous coverage:** Nodes at each level tile the timeline without gaps or overlaps
 - **Append-only:** New tokens extend the rightmost branch; historical nodes are immutable (except for refreshing gists when GistNet is retrained) [3]
 - **Balanced growth:** Tree depth grows logarithmically (log₃₂(N) levels for N tokens)

@@ -1004,19 +1004,20 @@ class MCController:
             "edits": variant.edits_applied,
         }
         # Attach swap-rate and token-budget utilization if allocator exposed stats
+        stats: Dict[str, float] = {}
         if variant.allocator is not None and hasattr(variant.allocator, "_last_edit_stats"):
             stats = getattr(variant.allocator, "_last_edit_stats") or {}
-            wc_len = max(1, stats.get("wc_length", variant.working_context.length))
-            swap_rate = float(stats.get("total", 0)) / float(wc_len)
-            payload.update({
-                "swap_rate": swap_rate,
-                "num_expand": int(stats.get("expand", 0)),
-                "num_collapse": int(stats.get("collapse", 0)),
-                "wc_length": int(wc_len),
-                "utilization": float(variant.working_context.length) / float(self.config.wc_config.max_length),
-                "residency_mean": float(stats.get("residency_mean", 0.0)),
-                "residency_p95": float(stats.get("residency_p95", 0.0)),
-            })
+        wc_len = max(1, int(stats.get("wc_length", variant.working_context.length)))
+        swap_rate = float(stats.get("total", 0)) / float(wc_len)
+        payload.update({
+            "swap_rate": swap_rate,
+            "num_expand": int(stats.get("expand", 0)),
+            "num_collapse": int(stats.get("collapse", 0)),
+            "wc_length": int(wc_len),
+            "utilization": float(variant.working_context.length) / float(self.config.wc_config.max_length),
+            "residency_mean": float(stats.get("residency_mean", 0.0)),
+            "residency_p95": float(stats.get("residency_p95", 0.0)),
+        })
         payload.update(score_payload)
         self._log_event(session_id, "focus_allocator", payload)
 
@@ -1025,11 +1026,18 @@ class MCController:
             self.last_inference_report = None
             return
         wc = self.inference_state.working_context
+        lod_hist = self._lod_histogram(wc)
         coverage = self._wc_token_coverage(wc, self.inference_state.tree)
+        hist_equiv = self._lod_equivalent_tokens_from_hist(lod_hist)
+        if coverage != hist_equiv:
+            raise RuntimeError(
+                "[MegaContext] Inference LOD coverage mismatch: "
+                f"hist_equiv={hist_equiv}, coverage={coverage}"
+            )
         report = {
             "original_length": int(self.inference_state.original_seq_len),
             "wc_length": int(wc.length),
-            "lod_counts": self._lod_histogram(wc),
+            "lod_counts": lod_hist,
             "prefill_iterations": int(self.inference_state.prefill_iterations),
             "prefill_replacements": int(self.inference_state.prefill_replacements),
             "refocus_updates": int(self.inference_state.refocus_updates),
@@ -1063,6 +1071,7 @@ class MCController:
         aggregate_counts: Dict[int, int] = {}
         aggregate_lengths = 0
         aggregate_variants = 0
+        aggregate_hist_equiv = 0
         aggregate_coverage = 0
         aggregate_expected = 0
         for sample in batch_states:
@@ -1073,7 +1082,15 @@ class MCController:
                     aggregate_counts[lod] = aggregate_counts.get(lod, 0) + count
                 aggregate_lengths += variant.working_context.length
                 aggregate_variants += 1
-                aggregate_coverage += self._wc_token_coverage(variant.working_context, sample.tree)
+                hist_equiv = self._lod_equivalent_tokens_from_hist(lod_hist)
+                coverage = self._wc_token_coverage(variant.working_context, sample.tree)
+                if hist_equiv != coverage:
+                    raise RuntimeError(
+                        "[MegaContext] Aggregate LOD coverage mismatch: "
+                        f"hist_equiv={hist_equiv}, coverage={coverage}"
+                    )
+                aggregate_hist_equiv += hist_equiv
+                aggregate_coverage += coverage
                 aggregate_expected += expected
         primary_report = None
         if primary_variant is not None and primary_tree is not None:
@@ -1081,6 +1098,12 @@ class MCController:
             stats = getattr(primary_variant.allocator, "_last_edit_stats", {}) or {}
             lod_hist = self._lod_histogram(wc)
             primary_cov = self._wc_token_coverage(wc, primary_tree)
+            primary_hist = self._lod_equivalent_tokens_from_hist(lod_hist)
+            if primary_hist != primary_cov:
+                raise RuntimeError(
+                    "[MegaContext] Primary LOD coverage mismatch: "
+                    f"hist_equiv={primary_hist}, coverage={primary_cov}"
+                )
             primary_report = {
                 "original_length": int(primary_tree_tokens),
                 "wc_length": int(wc.length),
@@ -1088,14 +1111,14 @@ class MCController:
                 "focus_iterations": int(stats.get("iterations", 0)),
                 "focus_replacements": int(stats.get("total", 0)),
                 "expected_tokens": min(primary_tree_tokens, self.config.wc_config.max_length),
-                "coverage_tokens": primary_cov,
+                "coverage_tokens": primary_hist,
             }
         aggregate_report = {
             "variants": int(aggregate_variants),
             "avg_wc_length": float(aggregate_lengths / aggregate_variants) if aggregate_variants else 0.0,
             "lod_counts": aggregate_counts,
             "expected_tokens": int(aggregate_expected),
-            "coverage_tokens": int(aggregate_coverage),
+            "coverage_tokens": int(aggregate_hist_equiv),
         }
         self.last_train_report = {
             "primary": primary_report,

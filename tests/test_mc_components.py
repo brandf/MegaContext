@@ -293,13 +293,20 @@ def test_working_context_replace_preserves_positions():
     assert new_positions[1:3] == [10, 12]
 
 
-def test_mean_pooling_skips_padding():
+def test_mean_pooling_matches_full_block():
+    config = MegaContextConfig(embed_dim=2, block_size=4, max_lod=1, device="cpu")
+    base = torch.tensor([[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [5.0, 5.0]]])
+    tree = MegaContextTree.from_embeddings(base, config)
+    lod1 = tree.get_level(1)
+    expected = torch.tensor([[[(1.0 + 2.0 + 3.0 + 5.0) / 4] * 2]])
+    assert torch.allclose(lod1, expected)
+
+
+def test_partial_blocks_remain_lod0():
     config = MegaContextConfig(embed_dim=2, block_size=4, max_lod=1, device="cpu")
     base = torch.tensor([[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]])
     tree = MegaContextTree.from_embeddings(base, config)
-    lod1 = tree.get_level(1)
-    expected = torch.tensor([[[2.0, 2.0]]])
-    assert torch.allclose(lod1, expected)
+    assert 1 not in tree.levels
 
 
 def test_random_span_sampling_uses_seed(monkeypatch):
