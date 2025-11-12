@@ -567,13 +567,13 @@ class MCController:
         tree: MegaContextTree,
         embeddings: torch.Tensor,
         positions: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, int]:
         recent = int(self.config.allocator_recent_tokens)
         if recent <= 0:
-            return embeddings, positions
+            return embeddings, positions, 0
         total_tokens = tree.num_tokens()
         if total_tokens <= 0:
-            return embeddings, positions
+            return embeddings, positions, 0
         recent = min(recent, total_tokens)
         start = max(0, total_tokens - recent)
         tail_embeddings = tree.get_lod0_slice(start, total_tokens)
@@ -583,7 +583,7 @@ class MCController:
             tail_positions = tail_positions.expand(positions.shape[0], -1).contiguous()
         combined_embeddings = torch.cat([embeddings, tail_embeddings], dim=1)
         combined_positions = torch.cat([positions, tail_positions], dim=1)
-        return combined_embeddings, combined_positions
+        return combined_embeddings, combined_positions, recent
 
     def _sample_random_span_starts(
         self,
@@ -619,13 +619,16 @@ class MCController:
         wc_config: Optional[WorkingContextConfig] = None,
     ) -> WorkingContextVariant:
         config = wc_config or self.config.wc_config
-        embeddings, positions = self._append_recent_tail(tree, embeddings, positions)
+        embeddings, positions, tail_tokens = self._append_recent_tail(tree, embeddings, positions)
         lod_tensor = torch.full(
             (embeddings.shape[0], embeddings.shape[1]),
             lod,
             dtype=torch.long,
             device=embeddings.device,
         )
+        if tail_tokens > 0:
+            tail_tokens = min(tail_tokens, lod_tensor.shape[1])
+            lod_tensor[:, -tail_tokens:] = 0
         wc = WorkingContext(
             embeddings,
             positions,
