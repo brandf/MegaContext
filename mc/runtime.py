@@ -1331,7 +1331,9 @@ class MCController:
         # Build a recency-based working context with a local level cache,
         # mirroring the training path.
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+        t_variant0 = time.time()
         recency_variant = self._build_recency_variant(tree, level_cache, wc_config=self._eval_wc_config)
+        timings["recency_variant_ms"] = (time.time() - t_variant0) * 1000.0
         if recency_variant is None:
             raise ValueError("Unable to build initial working context for inference")
         fits_soft_max = fits_soft_max and (recency_variant.working_context.length <= eval_soft_max)
@@ -1387,6 +1389,7 @@ class MCController:
             self._log_tree_snapshot(session, tree, tag="inference_init")
             self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
             telemetry_time += time.time() - t_tel
+        t_state0 = time.time()
         self.inference_state = InferenceState(
             session_id=session,
             tree=tree,
@@ -1402,6 +1405,7 @@ class MCController:
             prefill_iterations=prefill_iterations,
             prefill_replacements=prefill_replacements,
         )
+        timings["state_init_ms"] = (time.time() - t_state0) * 1000.0
         self._refresh_inference_report()
         total_ms = (time.time() - t_total0) * 1000.0
         timings["telemetry_ms"] = telemetry_time * 1000.0
