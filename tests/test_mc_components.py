@@ -422,6 +422,50 @@ def test_train_report_uses_non_baseline_variant(monkeypatch):
     assert lod_counts.get(controller.config.max_lod, 0) > 0, "primary report should highlight highest LOD variant"
 
 
+def test_variants_respect_recent_tokens_tail(monkeypatch):
+    recent = 16
+    controller = _build_mc_controller(
+        monkeypatch,
+        initial_working_contexts=4,
+        max_counterfactuals=8,
+        max_lod=2,
+        allocator_recent_tokens=recent,
+        allocator_iterations=1,
+        allocator_max_replacements=2,
+    )
+    tokens = (torch.arange(0, 512) % 32).view(1, 512)
+    tree, sample_state, _, _ = controller._build_tree_sample(tokens, "recent_tail")
+    for variant in sample_state.variants:
+        wc = variant.working_context
+        lods = wc.get_lod_tensor()[0]
+        tail = lods[-min(recent, wc.length):]
+        assert torch.all(tail == 0), "recent tail must remain LOD0"
+        hist = controller._lod_histogram(wc)
+        coverage = controller._wc_token_coverage(wc, tree)
+        hist_equiv = controller._lod_equivalent_tokens_from_hist(hist)
+        assert hist_equiv == coverage
+
+
+def test_inference_session_preserves_tail_and_coverage(monkeypatch):
+    recent = 32
+    controller = _build_mc_controller(
+        monkeypatch,
+        allocator_recent_tokens=recent,
+        max_seq_len=256,
+        max_lod=2,
+    )
+    tokens = (torch.arange(0, 512) % 64).view(1, 512)
+    controller.begin_inference_session(tokens)
+    report = controller.get_inference_report()
+    assert report is not None
+    assert report["coverage_tokens"] == min(tokens.shape[1], controller.config.eval_soft_max_length)
+    wc = controller.get_inference_working_context()
+    assert wc is not None
+    lods = wc.get_lod_tensor()[0]
+    tail = lods[-min(recent, wc.length):]
+    assert torch.all(tail == 0)
+
+
 def test_mc_controller_returns_cached_embeddings(monkeypatch):
     controller = _build_mc_controller(monkeypatch)
     tokens = torch.randint(0, 16, (1, 4))
