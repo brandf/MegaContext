@@ -1013,7 +1013,7 @@ class MCController:
                     continue
                 joined = " | ".join(ascii_rows)
                 lines.append(
-                    f"  sample{sample_idx:02d}/var{variant_idx:02d} [{variant.source}] {joined}"
+                    f"  sample{sample_idx:02d}/var{variant_idx:02d} {joined} [{variant.source}]"
                 )
         if lines:
             print(f"[MegaContext][LOD ASCII][train step {step}]", flush=True)
