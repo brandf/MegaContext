@@ -113,6 +113,14 @@ class MCController:
     guard process_batch() with the `mc_enabled` flag.
     """
 
+    _LOD_CHAR_MAP = {
+        0: ".",
+        1: "-",
+        2: "=",
+        3: "#",
+    }
+    _LOD_PARTIAL_CHAR = ","
+
     def __init__(
         self,
         model: torch.nn.Module,
@@ -127,6 +135,13 @@ class MCController:
         except StopIteration:
             self._target_dtype = torch.float32
         self._rng = random.Random(config.random_seed)
+        rank = os.getenv("RANK")
+        local_rank = os.getenv("LOCAL_RANK")
+        self._is_rank0 = True
+        if rank not in (None, "", "0"):
+            self._is_rank0 = False
+        if local_rank not in (None, "", "0"):
+            self._is_rank0 = False
         self._batch_counters = {
             "sibling_expands": 0,
             "sibling_collapses": 0,
@@ -307,6 +322,7 @@ class MCController:
         self.current_batch_states = []
         self._emit_batch_counters(step)
         self._refresh_train_report(batch_states)
+        self._log_train_lod_ascii(step, batch_states)
         total_variants = sum(variant_counts) if variant_counts else 0
         self.last_batch_profile = {
             "variant_counts": variant_counts,
@@ -942,6 +958,86 @@ class MCController:
                 "[MegaContext] Recent tokens must remain LOD0 "
                 f"(context={tag}). Observed LODs: {offending.tolist()}"
             )
+
+    def _lod_char_for_block(self, lod: int, is_last: bool, remainder: int) -> str:
+        if lod < 0:
+            return "?"
+        capped = min(lod, 3)
+        if capped == 0 and is_last and remainder > 0:
+            return self._LOD_PARTIAL_CHAR
+        return self._LOD_CHAR_MAP.get(capped, self._LOD_CHAR_MAP[3])
+
+    def _render_lod_ascii_lines(self, wc: WorkingContext, total_tokens: int) -> List[str]:
+        if total_tokens <= 0 or wc.length == 0:
+            return []
+        block_size = max(1, self.config.block_size)
+        num_blocks = max(1, math.ceil(total_tokens / block_size))
+        remainder = total_tokens % block_size
+        positions = wc.get_positions()
+        lods = wc.get_lod_tensor()
+        rows: List[str] = []
+        for b in range(positions.shape[0]):
+            block_levels = [-1] * num_blocks
+            for idx in range(wc.length):
+                pos = int(positions[b, idx].item())
+                lod = int(lods[b, idx].item())
+                span = max(1, block_size ** max(lod, 0))
+                start = pos
+                end = min(total_tokens, pos + span)
+                if end <= start:
+                    continue
+                block_idx = max(0, start // block_size)
+                while block_idx < num_blocks:
+                    block_start = block_idx * block_size
+                    block_end = min(total_tokens, block_start + block_size)
+                    if block_start >= end:
+                        break
+                    block_levels[block_idx] = lod
+                    block_idx += 1
+            chars = [
+                self._lod_char_for_block(level, idx == num_blocks - 1, remainder)
+                for idx, level in enumerate(block_levels)
+            ]
+            rows.append("".join(chars))
+        return rows
+
+    def _select_ascii_variant(self, variants: List[WorkingContextVariant]) -> Optional[WorkingContextVariant]:
+        for variant in variants:
+            if variant.is_baseline:
+                return variant
+        return variants[0] if variants else None
+
+    def _log_train_lod_ascii(self, step: int, batch_states: List[SampleContext]) -> None:
+        if not (self.config.log_lod_ascii_train and self._is_rank0):
+            return
+        lines: List[str] = []
+        for sample_idx, sample in enumerate(batch_states):
+            variant = self._select_ascii_variant(sample.variants)
+            if variant is None:
+                continue
+            tree_tokens = sample.tree.num_tokens()
+            ascii_rows = self._render_lod_ascii_lines(variant.working_context, tree_tokens)
+            if not ascii_rows:
+                continue
+            joined = " | ".join(ascii_rows)
+            lines.append(f"  sample{sample_idx:02d}: {joined}")
+        if lines:
+            print(f"[MegaContext][LOD ASCII][train step {step}]", flush=True)
+            for line in lines:
+                print(line, flush=True)
+
+    def log_inference_lod_ascii(self, label: str) -> None:
+        if not (self.config.log_lod_ascii_val and self._is_rank0):
+            return
+        state = self.inference_state
+        if state is None:
+            return
+        ascii_rows = self._render_lod_ascii_lines(state.working_context, state.tree.num_tokens())
+        if not ascii_rows:
+            return
+        print(f"[MegaContext][LOD ASCII][{label}]", flush=True)
+        for idx, row in enumerate(ascii_rows):
+            print(f"  seq{idx:02d}: {row}", flush=True)
 
     def _ensure_wc_full_coverage(self, wc: WorkingContext, tree: MegaContextTree, tag: str) -> WorkingContext:
         expected = tree.num_tokens()

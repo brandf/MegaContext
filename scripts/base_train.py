@@ -114,6 +114,8 @@ mc_infer_rebuild_iterations = None
 mc_train_report = 0
 mc_val_report = 1
 mc_log_timers = 0
+mc_log_lod_ascii_train = 0
+mc_log_lod_ascii_val = 0
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -141,6 +143,8 @@ mc_infer_refocus_interval = int(mc_infer_refocus_interval)
 mc_train_report = _parse_bool_flag(mc_train_report)
 mc_val_report = _parse_bool_flag(mc_val_report)
 mc_log_timers = _parse_bool_flag(mc_log_timers)
+mc_log_lod_ascii_train = _parse_bool_flag(mc_log_lod_ascii_train)
+mc_log_lod_ascii_val = _parse_bool_flag(mc_log_lod_ascii_val)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
 
@@ -243,6 +247,8 @@ if mc_enabled:
         infer_rebuild_max_replacements=mc_infer_rebuild_max_replacements,
         infer_rebuild_iterations=mc_infer_rebuild_iterations,
         collect_debug_metrics=bool(mc_log_timers),
+        log_lod_ascii_train=bool(mc_log_lod_ascii_train),
+        log_lod_ascii_val=bool(mc_log_lod_ascii_val),
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,
@@ -453,6 +459,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
     total_bytes = torch.tensor(0, dtype=torch.int64, device=device)
     batch_iter = iter(batches)
     report_printed = False
+    ascii_printed = False
     for eval_idx in range(steps):
         batch_start = time.time()
         try:
@@ -464,6 +471,9 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
         y = y.to(device)
         print0(f"[MC Eval] batch {eval_idx+1}/{steps}: tokens={y.numel()}")
         session_id = controller.begin_inference_session(x, rebuild=True)
+        if controller.config.log_lod_ascii_val and not ascii_printed:
+            controller.log_inference_lod_ascii(f"val batch {eval_idx+1}")
+            ascii_printed = True
         build_time = time.time() - batch_start
         if log_timers:
             timings = getattr(controller, "last_timings", {}) or {}

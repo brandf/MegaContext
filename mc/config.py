@@ -69,6 +69,8 @@ class MCConfig:
     infer_rebuild_max_replacements: Optional[int] = None
     infer_rebuild_iterations: Optional[int] = None
     collect_debug_metrics: bool = False
+    log_lod_ascii_train: bool = False
+    log_lod_ascii_val: bool = False
 
     def __post_init__(self) -> None:
         self.mc_tree_type = self.mc_tree_type.lower()

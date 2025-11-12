@@ -331,6 +331,21 @@ def test_random_span_sampling_uses_seed(monkeypatch):
     assert starts_c != starts_a
 
 
+def test_lod_ascii_renderer_handles_partial_tail(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        block_size=4,
+        max_seq_len=64,
+        allocator_recent_tokens=0,
+    )
+    tokens = torch.arange(0, 10).view(1, 10)
+    tree, sample_state, _, _ = controller._build_tree_sample(tokens, "lod_ascii")
+    variant = sample_state.variants[0]
+    lines = controller._render_lod_ascii_lines(variant.working_context, tree.num_tokens())
+    assert lines
+    assert lines[0][-1] == controller._LOD_PARTIAL_CHAR
+
+
 def test_mc_controller_logs_batch_counters(monkeypatch):
     telemetry = RecordingTelemetryProvider()
     controller = _build_mc_controller(monkeypatch, telemetry_provider=telemetry)
