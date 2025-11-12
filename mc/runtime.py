@@ -423,7 +423,7 @@ class MCController:
             # Prefer recency-baseline variant when available; fallback to first
             wc_choice = sample.variants[0]
             for v in sample.variants:
-                if v.source.startswith("recency_baseline") or v.lod_hint == 0:
+                if v.source.startswith("lod_0_baseline") or v.lod_hint == 0:
                     wc_choice = v
                     break
             wc = wc_choice.working_context
@@ -447,7 +447,7 @@ class MCController:
     def _sample_initial_wcs(self, tree: MegaContextTree, session_id: str) -> List[WorkingContextVariant]:
         variants: List[WorkingContextVariant] = []
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
-        baseline = self._build_recency_variant(tree, level_cache)
+        baseline = self._build_lod0_baseline_variant(tree, level_cache)
         if baseline is not None:
             variants.append(baseline)
         target = self.config.initial_working_contexts
@@ -494,7 +494,7 @@ class MCController:
             variants.pop()
         variants.append(variant)
 
-    def _build_recency_variant(
+    def _build_lod0_baseline_variant(
         self,
         tree: MegaContextTree,
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
@@ -513,7 +513,7 @@ class MCController:
             embeddings,
             positions,
             lod=0,
-            source="recency_baseline",
+            source="lod_0_baseline",
             wc_config=wc_config,
         )
         variant.is_baseline = True
@@ -1778,7 +1778,7 @@ class MCController:
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
         self._timing_sync()
         t_variant0 = time.time()
-        recency_variant = self._build_recency_variant(tree, level_cache, wc_config=self._eval_wc_config)
+        recency_variant = self._build_lod0_baseline_variant(tree, level_cache, wc_config=self._eval_wc_config)
         self._timing_sync()
         timings["recency_variant_ms"] = (time.time() - t_variant0) * 1000.0
         if recency_variant is None:

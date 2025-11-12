@@ -25,7 +25,7 @@ class DummyModel(nn.Module):
         return self.lm_head(x)
 
 
-def test_session_positional_prefers_recency_baseline():
+def test_session_positional_prefers_lod0_baseline():
     embed_dim = 8
     model = DummyModel(vocab_size=64, embed_dim=embed_dim)
     cfg = MCConfig(
@@ -48,7 +48,7 @@ def test_session_positional_prefers_recency_baseline():
         return WorkingContextVariant(working_context=wc, source=source, lod_hint=lod)
 
     v1 = make_wc(5, 1, "lod_1")
-    v0 = make_wc(3, 0, "recency_baseline")
+    v0 = make_wc(3, 0, "lod_0_baseline")
     sample = SampleContext(session_id="s1", tree=None, variants=[v1, v0])  # type: ignore[arg-type]
     pos = controller._build_session_positional([sample])
     (cos, sin, _alibi) = pos["s1"]

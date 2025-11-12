@@ -368,7 +368,7 @@ def test_training_variant_set_includes_pure_lod0_and_highest_lod(monkeypatch):
     lod0_variants = [v for v in sample_state.variants if v.is_baseline]
     assert lod0_variants, "expected at least one pure LOD0 variant"
     lod_tensor = lod0_variants[0].working_context.get_lod_tensor()
-    assert torch.all(lod_tensor == 0), "recency baseline must remain all LOD0"
+    assert torch.all(lod_tensor == 0), "lod_0 baseline must remain all LOD0"
     highest = controller.config.max_lod
     highest_variants = [v for v in sample_state.variants if v.lod_hint == highest]
     assert highest_variants, "expected variant sourced from highest LOD"
@@ -395,7 +395,7 @@ def test_training_variants_include_mixed_lod_entries(monkeypatch):
     assert mixed, "expected at least one focused variant containing higher LOD entries"
 
 
-def test_recency_baseline_skips_focus_and_stays_lod0(monkeypatch):
+def test_lod0_baseline_skips_focus_and_stays_lod0(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
         initial_working_contexts=3,
