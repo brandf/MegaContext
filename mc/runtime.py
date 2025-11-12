@@ -491,7 +491,7 @@ class MCController:
         if embeddings.shape[1] > window:
             embeddings = embeddings[:, -window:]
             positions = positions[:, -window:]
-        variant = self._create_variant(embeddings, positions, lod=0, source="recency_baseline", wc_config=wc_config)
+        variant = self._create_variant(tree, embeddings, positions, lod=0, source="recency_baseline", wc_config=wc_config)
         variant.is_baseline = True
         return variant
 
@@ -507,7 +507,7 @@ class MCController:
         embeddings, positions = metadata
         if embeddings.shape[1] == 0:
             return None
-        return self._create_variant(embeddings, positions, lod=lod, source=f"lod_{lod}")
+        return self._create_variant(tree, embeddings, positions, lod=lod, source=f"lod_{lod}")
 
     def _build_random_span_variant(
         self,
@@ -523,7 +523,7 @@ class MCController:
         if total <= window:
             return None
         start = self._rng.randint(0, max(0, total - window))
-        return self._build_span_variant_from_metadata(embeddings, positions, start, window)
+        return self._build_span_variant_from_metadata(tree, embeddings, positions, start, window)
 
     def _build_span_variant(
         self,
@@ -536,10 +536,11 @@ class MCController:
             return None
         embeddings, positions = metadata
         window = self.config.wc_config.max_length
-        return self._build_span_variant_from_metadata(embeddings, positions, start, window)
+        return self._build_span_variant_from_metadata(tree, embeddings, positions, start, window)
 
     def _build_span_variant_from_metadata(
         self,
+        tree: MegaContextTree,
         embeddings: torch.Tensor,
         positions: torch.Tensor,
         start: int,
@@ -554,11 +555,35 @@ class MCController:
         span_embeddings = embeddings[:, clamped_start:end]
         span_positions = positions[:, clamped_start:end]
         return self._create_variant(
+            tree,
             span_embeddings,
             span_positions,
             lod=0,
             source=f"random_span_{clamped_start}",
         )
+
+    def _append_recent_tail(
+        self,
+        tree: MegaContextTree,
+        embeddings: torch.Tensor,
+        positions: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        recent = int(self.config.allocator_recent_tokens)
+        if recent <= 0:
+            return embeddings, positions
+        total_tokens = tree.num_tokens()
+        if total_tokens <= 0:
+            return embeddings, positions
+        recent = min(recent, total_tokens)
+        start = max(0, total_tokens - recent)
+        tail_embeddings = tree.get_lod0_slice(start, total_tokens)
+        tail_positions = tree.get_positions_for_lod(0)[:, start:total_tokens]
+        if tail_embeddings.shape[0] != embeddings.shape[0]:
+            tail_embeddings = tail_embeddings.expand(embeddings.shape[0], -1, -1).contiguous()
+            tail_positions = tail_positions.expand(positions.shape[0], -1).contiguous()
+        combined_embeddings = torch.cat([embeddings, tail_embeddings], dim=1)
+        combined_positions = torch.cat([positions, tail_positions], dim=1)
+        return combined_embeddings, combined_positions
 
     def _sample_random_span_starts(
         self,
@@ -586,6 +611,7 @@ class MCController:
 
     def _create_variant(
         self,
+        tree: MegaContextTree,
         embeddings: torch.Tensor,
         positions: torch.Tensor,
         lod: int,
@@ -593,6 +619,7 @@ class MCController:
         wc_config: Optional[WorkingContextConfig] = None,
     ) -> WorkingContextVariant:
         config = wc_config or self.config.wc_config
+        embeddings, positions = self._append_recent_tail(tree, embeddings, positions)
         lod_tensor = torch.full(
             (embeddings.shape[0], embeddings.shape[1]),
             lod,
