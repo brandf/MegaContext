@@ -599,7 +599,13 @@ class MCController:
             dtype=torch.long,
             device=embeddings.device,
         )
-        wc = WorkingContext(embeddings, positions, config, lod_tensor=lod_tensor)
+        wc = WorkingContext(
+            embeddings,
+            positions,
+            config,
+            lod_tensor=lod_tensor,
+            recent_tokens=self.config.allocator_recent_tokens,
+        )
         self._configure_wc_positional(wc)
         return WorkingContextVariant(working_context=wc, source=source, lod_hint=lod)
 
@@ -787,6 +793,7 @@ class MCController:
             positions,
             wc.config,
             lod_tensor=lods,
+            recent_tokens=self.config.allocator_recent_tokens,
         )
         self._configure_wc_positional(clone)
         return clone
@@ -1107,14 +1114,19 @@ class MCController:
         primary_tree: Optional[MegaContextTree] = None
         # Prefer the variant with the highest available LOD across all samples.
         best_lod = -1
+        best_edits = -1
         for sample in batch_states:
             for variant in sample.variants:
                 if variant.is_baseline:
                     continue
                 lod_hist = self._lod_histogram(variant.working_context)
                 highest_variant_lod = max(lod_hist.keys()) if lod_hist else variant.lod_hint
-                if highest_variant_lod > best_lod:
+                # Prefer higher LOD coverage; tie-break on edits applied
+                if highest_variant_lod > best_lod or (
+                    highest_variant_lod == best_lod and variant.edits_applied > best_edits
+                ):
                     best_lod = highest_variant_lod
+                    best_edits = variant.edits_applied
                     primary_variant = variant
                     primary_tree_tokens = sample.tree.num_tokens()
                     primary_tree = sample.tree
