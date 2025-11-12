@@ -91,19 +91,22 @@ def _build_mc_controller(
     block_size: int = 2,
     random_seed: Optional[int] = None,
     telemetry_provider: Optional[TelemetryProvider] = None,
+    **overrides,
 ) -> MCController:
     vocab_size = 32
     monkeypatch.setattr(mc_runtime, "get_report", lambda: DummyReport())
     model = DummyModel(vocab_size=vocab_size, embed_dim=embed_dim)
+    max_seq_len = overrides.pop("max_seq_len", 16)
     config = MCConfig(
         embed_dim=embed_dim,
-        max_seq_len=16,
+        max_seq_len=max_seq_len,
         block_size=block_size,
         device="cpu",
-        initial_working_contexts=1,
-        max_counterfactuals=1,
-        allocator_recent_tokens=0,
+        initial_working_contexts=overrides.pop("initial_working_contexts", 1),
+        max_counterfactuals=overrides.pop("max_counterfactuals", 1),
+        allocator_recent_tokens=overrides.pop("allocator_recent_tokens", 0),
         random_seed=random_seed,
+        **overrides,
     )
     provider = telemetry_provider or NoOpTelemetryProvider()
     return MCController(model, config, telemetry_provider=provider)
@@ -337,6 +340,86 @@ def test_mc_controller_logs_batch_counters(monkeypatch):
     tokens = torch.randint(0, 16, (1, 4))
     controller.process_batch(tokens, step=0)
     assert any(event.event_type == "mc_batch_counters" for event in telemetry.events)
+
+
+def test_training_variant_set_includes_pure_lod0_and_highest_lod(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        initial_working_contexts=3,
+        max_counterfactuals=6,
+        max_lod=2,
+        allocator_iterations=1,
+        allocator_max_replacements=2,
+    )
+    tokens = (torch.arange(0, 128) % 32).view(1, 128)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "train_variants")
+    lod0_variants = [v for v in sample_state.variants if v.is_baseline]
+    assert lod0_variants, "expected at least one pure LOD0 variant"
+    lod_tensor = lod0_variants[0].working_context.get_lod_tensor()
+    assert torch.all(lod_tensor == 0), "recency baseline must remain all LOD0"
+    highest = controller.config.max_lod
+    highest_variants = [v for v in sample_state.variants if v.lod_hint == highest]
+    assert highest_variants, "expected variant sourced from highest LOD"
+    hv = highest_variants[0].working_context.get_lod_tensor()
+    assert torch.any(hv == highest)
+
+
+def test_training_variants_include_mixed_lod_entries(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        initial_working_contexts=4,
+        max_counterfactuals=8,
+        max_lod=2,
+        allocator_iterations=1,
+        allocator_max_replacements=2,
+    )
+    tokens = (torch.arange(0, 128) % 32).view(1, 128)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "train_variants_mixed")
+    mixed = [
+        v
+        for v in sample_state.variants
+        if not v.is_baseline and torch.any(v.working_context.get_lod_tensor()[0] > 0)
+    ]
+    assert mixed, "expected at least one focused variant containing higher LOD entries"
+
+
+def test_recency_baseline_skips_focus_and_stays_lod0(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        initial_working_contexts=3,
+        max_counterfactuals=5,
+        allocator_iterations=1,
+        allocator_max_replacements=2,
+    )
+    tokens = (torch.arange(0, 64) % 32).view(1, 64)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "baseline_focus")
+    baselines = [v for v in sample_state.variants if v.is_baseline]
+    assert len(baselines) == 1
+    baseline = baselines[0]
+    assert baseline.allocator is None
+    assert baseline.edits_applied == 0
+    assert torch.all(baseline.working_context.get_lod_tensor() == 0)
+
+
+def test_train_report_uses_non_baseline_variant(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        initial_working_contexts=3,
+        max_counterfactuals=6,
+        max_lod=2,
+        allocator_iterations=1,
+        allocator_max_replacements=1,
+        max_seq_len=64,
+    )
+    tokens = (torch.arange(0, 512) % 32).view(1, 512)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "train_report")
+    controller._refresh_train_report([sample_state])
+    report = controller.get_training_report()
+    assert report is not None
+    primary = report["primary"]
+    assert primary is not None
+    lod_counts = primary["lod_counts"]
+    assert lod_counts.get(controller.config.max_lod, 0) > 0, "primary report should highlight highest LOD variant"
 
 
 def test_mc_controller_returns_cached_embeddings(monkeypatch):

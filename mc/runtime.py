@@ -38,6 +38,7 @@ class WorkingContextVariant:
     token_loss_value: Optional[torch.Tensor] = None
     lod1_loss_value: Optional[torch.Tensor] = None
     batch_index: int = 0
+    is_baseline: bool = False
 
 
 @dataclass
@@ -490,7 +491,9 @@ class MCController:
         if embeddings.shape[1] > window:
             embeddings = embeddings[:, -window:]
             positions = positions[:, -window:]
-        return self._create_variant(embeddings, positions, lod=0, source="recency_baseline", wc_config=wc_config)
+        variant = self._create_variant(embeddings, positions, lod=0, source="recency_baseline", wc_config=wc_config)
+        variant.is_baseline = True
+        return variant
 
     def _build_lod_variant(
         self,
@@ -631,6 +634,10 @@ class MCController:
     ) -> List[WorkingContextVariant]:
         refined: List[WorkingContextVariant] = []
         for variant in variants:
+            if variant.is_baseline:
+                refined.append(variant)
+                self._log_wc_snapshot(session_id, variant.working_context, variant.source)
+                continue
             allocator = self._build_allocator(tree, variant.working_context)
             variant.allocator = allocator
             scores = self.lensnet(variant.working_context)
@@ -1098,20 +1105,33 @@ class MCController:
         primary_variant: Optional[WorkingContextVariant] = None
         primary_tree_tokens = 0
         primary_tree: Optional[MegaContextTree] = None
+        # Prefer the variant with the highest available LOD across all samples.
+        best_lod = -1
         for sample in batch_states:
             for variant in sample.variants:
-                if variant.lod_hint > 0:
+                if variant.is_baseline:
+                    continue
+                lod_hist = self._lod_histogram(variant.working_context)
+                highest_variant_lod = max(lod_hist.keys()) if lod_hist else variant.lod_hint
+                if highest_variant_lod > best_lod:
+                    best_lod = highest_variant_lod
+                    primary_variant = variant
+                    primary_tree_tokens = sample.tree.num_tokens()
+                    primary_tree = sample.tree
+            if best_lod == self.config.max_lod:
+                break
+        if primary_variant is None:
+            sample = batch_states[0]
+            for variant in sample.variants:
+                if not variant.is_baseline:
                     primary_variant = variant
                     primary_tree_tokens = sample.tree.num_tokens()
                     primary_tree = sample.tree
                     break
-            if primary_variant is not None:
-                break
-        if primary_variant is None:
-            sample = batch_states[0]
-            primary_variant = sample.variants[0] if sample.variants else None
-            primary_tree_tokens = sample.tree.num_tokens()
-            primary_tree = sample.tree
+            if primary_variant is None and sample.variants:
+                primary_variant = sample.variants[0]
+                primary_tree_tokens = sample.tree.num_tokens()
+                primary_tree = sample.tree
         aggregate_counts: Dict[int, int] = {}
         aggregate_lengths = 0
         aggregate_variants = 0
