@@ -109,12 +109,14 @@ class WorkingContext:
         self._event_log.append({"event": "append", "lod": lod, "position": global_position})
 
     def replace(self, edit: WorkingContextEdit) -> None:
-        start = edit.wc_start
+        total_len = self.tensor.shape[1]
+        start = max(0, min(edit.wc_start, total_len))
         replacements = edit.replacements.to(self.tensor.device)
         count = replacements.shape[1]
         if count == 0:
             return
-        end = start + count
+        remove_count = int(edit.old_count) if getattr(edit, "old_count", 0) > 0 else count
+        end = max(start, min(total_len, start + remove_count))
         self.tensor = torch.cat(
             [self.tensor[:, :start], replacements, self.tensor[:, end:]], dim=1
         )

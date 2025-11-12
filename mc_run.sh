@@ -8,4 +8,4 @@ if [ ! -f ".mc_env" ]; then
     bash mc_setup
 fi
 
-bash run10.sh --mc --mc_train_report 1
+bash run10.sh --mc --mc_train_report 1 --mc_log_timers 1

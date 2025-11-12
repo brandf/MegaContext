@@ -189,6 +189,7 @@ class MCController:
         self.last_timings: Dict[str, float] = {}
         self._focus_time_accum: float = 0.0
         self.debug_metrics = config.collect_debug_metrics
+        self._timing_device = torch.device(config.device)
 
     @staticmethod
     def _resolve_embedding_layer(model: torch.nn.Module):
@@ -743,6 +744,10 @@ class MCController:
             flush=True,
         )
 
+    def _timing_sync(self) -> None:
+        if self._timing_device.type == "cuda" and torch.cuda.is_available():
+            torch.cuda.synchronize(self._timing_device)
+
     def _clone_working_context(self, wc: WorkingContext) -> WorkingContext:
         embeddings = wc.to_tensor().clone()
         positions = wc.get_positions().clone()
@@ -1235,6 +1240,7 @@ class MCController:
             lod=lod - 1,
             mc_start_position=global_pos,
             stride=tree.tokens_per_entry(lod - 1),
+            old_count=1,
         )
         sibling_wc = self._clone_working_context(wc)
         sibling_wc.replace(edit)
@@ -1285,6 +1291,7 @@ class MCController:
             lod=lod + 1,
             mc_start_position=global_pos,
             stride=tree.tokens_per_entry(lod + 1),
+            old_count=block,
         )
         sibling_wc = self._clone_working_context(wc)
         sibling_wc.replace(edit)
@@ -1315,6 +1322,7 @@ class MCController:
         eval_soft_max = self.config.eval_soft_max_length or self.config.wc_config.max_length
         fits_soft_max = original_len <= eval_soft_max
         session = session_id or f"infer_{uuid.uuid4().hex}"
+        self._timing_sync()
         t_tree0 = time.time()
         with torch.no_grad():
             tree = build_mega_context(
@@ -1325,14 +1333,17 @@ class MCController:
                 gistnet=self.gistnet,
                 lazy_levels=fits_soft_max,
             )
+        self._timing_sync()
         timings["tree_build_ms"] = (time.time() - t_tree0) * 1000.0
         if not self.config.cache_lod0:
             tree.release_lod0_cache(disable_future_cache=True)
         # Build a recency-based working context with a local level cache,
         # mirroring the training path.
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+        self._timing_sync()
         t_variant0 = time.time()
         recency_variant = self._build_recency_variant(tree, level_cache, wc_config=self._eval_wc_config)
+        self._timing_sync()
         timings["recency_variant_ms"] = (time.time() - t_variant0) * 1000.0
         if recency_variant is None:
             raise ValueError("Unable to build initial working context for inference")
@@ -1340,12 +1351,14 @@ class MCController:
         allocator: Optional[FocusAllocatorBase] = None
         alloc_init_ms = 0.0
         if not fits_soft_max:
+            self._timing_sync()
             t_alloc0 = time.time()
             allocator = self._build_allocator(
                 tree,
                 recency_variant.working_context,
                 soft_max_length=eval_soft_max,
             )
+            self._timing_sync()
             alloc_init_ms = (time.time() - t_alloc0) * 1000.0
         timings["allocator_init_ms"] = alloc_init_ms
         rebuild_repl = self.config.infer_rebuild_max_replacements
@@ -1373,6 +1386,7 @@ class MCController:
         prefill_replacements = 0
         telemetry_time = 0.0
         if allocator is not None and rebuild:
+            self._timing_sync()
             t_rebuild0 = time.time()
             allocator.rebuild(
                 max_replacements_per_iteration=rebuild_repl,
@@ -1381,6 +1395,7 @@ class MCController:
             stats = getattr(allocator, "_last_edit_stats", {}) or {}
             prefill_iterations = int(stats.get("iterations", 0))
             prefill_replacements = int(stats.get("total", 0))
+            self._timing_sync()
             timings["allocator_rebuild_ms"] = (time.time() - t_rebuild0) * 1000.0
         else:
             timings["allocator_rebuild_ms"] = 0.0
@@ -1388,7 +1403,9 @@ class MCController:
             t_tel = time.time()
             self._log_tree_snapshot(session, tree, tag="inference_init")
             self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
+            self._timing_sync()
             telemetry_time += time.time() - t_tel
+        self._timing_sync()
         t_state0 = time.time()
         self.inference_state = InferenceState(
             session_id=session,
@@ -1405,8 +1422,10 @@ class MCController:
             prefill_iterations=prefill_iterations,
             prefill_replacements=prefill_replacements,
         )
+        self._timing_sync()
         timings["state_init_ms"] = (time.time() - t_state0) * 1000.0
         self._refresh_inference_report()
+        self._timing_sync()
         total_ms = (time.time() - t_total0) * 1000.0
         timings["telemetry_ms"] = telemetry_time * 1000.0
         timings["total_ms"] = total_ms

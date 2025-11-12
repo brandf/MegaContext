@@ -231,6 +231,7 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             mc_start_position=global_position,
             stride=stride,
             action="expand",
+            old_count=1,
         )
 
     def _build_collapse_edit(self, wc_index: int, lod: int, global_position: int) -> Optional[WorkingContextEdit]:
@@ -262,6 +263,7 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             mc_start_position=global_position,
             stride=parent_stride,
             action="collapse",
+            old_count=required,
         )
 
     # ------------------------------------------------------------------ #
