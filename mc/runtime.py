@@ -411,7 +411,7 @@ class MCController:
                     break
             wc = wc_choice.working_context
             if wc_choice.lod_hint == 0:
-                self._assert_recent_lod0(wc, f"train_session:{sample.session_id}")
+                self._assert_recent_lod0(wc, sample.tree, f"train_session:{sample.session_id}")
             positional_map[sample.session_id] = self._build_wc_positional(wc)
         return positional_map
 
@@ -562,30 +562,57 @@ class MCController:
             source=f"random_span_{clamped_start}",
         )
 
-    def _ensure_recent_tail(
+    def _partition_recent_tail(
         self,
         tree: MegaContextTree,
         embeddings: torch.Tensor,
         positions: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, int]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         recent = int(self.config.allocator_recent_tokens)
         if recent <= 0:
-            return embeddings, positions, 0
+            return embeddings, positions, None, None
         total_tokens = tree.num_tokens()
         if total_tokens <= 0:
-            return embeddings, positions, 0
-        recent = min(recent, total_tokens, embeddings.shape[1])
-        start = max(0, total_tokens - recent)
-        tail_embeddings = tree.get_lod0_slice(start, total_tokens)
-        tail_positions = tree.get_positions_for_lod(0)[:, start:total_tokens]
-        if tail_embeddings.shape[0] != embeddings.shape[0]:
-            tail_embeddings = tail_embeddings.expand(embeddings.shape[0], -1, -1).contiguous()
-            tail_positions = tail_positions.expand(positions.shape[0], -1).contiguous()
-        embeddings = embeddings.clone()
-        positions = positions.clone()
-        embeddings[:, -recent:] = tail_embeddings[:, -recent:]
-        positions[:, -recent:] = tail_positions[:, -recent:]
-        return embeddings, positions, recent
+            return embeddings, positions, None, None
+        tail_len = min(recent, embeddings.shape[1])
+        head_len = max(0, embeddings.shape[1] - tail_len)
+        head_embeddings = embeddings[:, :head_len]
+        head_positions = positions[:, :head_len]
+        tail_start = max(0, total_tokens - recent)
+        tail_embeddings = tree.get_lod0_slice(tail_start, total_tokens)
+        tail_positions = tree.get_positions_for_lod(0)[:, tail_start:total_tokens]
+        if tail_embeddings.shape[1] > tail_len:
+            tail_embeddings = tail_embeddings[:, -tail_len:]
+            tail_positions = tail_positions[:, -tail_len:]
+        if head_embeddings.shape[0] != tail_embeddings.shape[0]:
+            tail_embeddings = tail_embeddings.expand(head_embeddings.shape[0], -1, -1).contiguous()
+            tail_positions = tail_positions.expand(head_positions.shape[0], -1).contiguous()
+        return head_embeddings, head_positions, tail_embeddings, tail_positions
+
+    def _reinforce_recent_tail(self, wc: WorkingContext, tree: MegaContextTree) -> None:
+        recent = int(self.config.allocator_recent_tokens)
+        if recent <= 0 or wc.length == 0:
+            return
+        total_tokens = tree.num_tokens()
+        if total_tokens <= 0:
+            return
+        tail_start = max(0, total_tokens - recent)
+        positions = wc.get_positions()
+        lods = wc.get_lod_tensor()
+        tensor = wc.to_tensor()
+        mask = positions >= tail_start
+        if not torch.any(mask):
+            return
+        tail_embeddings = tree.get_lod0_slice(tail_start, total_tokens)
+        tail_len = tail_embeddings.shape[1]
+        for b in range(tensor.shape[0]):
+            mask_b = mask[b]
+            if not torch.any(mask_b):
+                continue
+            idx = (positions[b, mask_b] - tail_start).long()
+            idx = torch.clamp(idx, 0, tail_len - 1)
+            tensor[b, mask_b, :] = tail_embeddings[b, idx, :]
+            lods[b, mask_b] = 0
 
     def _sample_random_span_starts(
         self,
@@ -621,23 +648,63 @@ class MCController:
         wc_config: Optional[WorkingContextConfig] = None,
     ) -> WorkingContextVariant:
         config = wc_config or self.config.wc_config
-        embeddings, positions, tail_tokens = self._ensure_recent_tail(tree, embeddings, positions)
-        lod_tensor = torch.full(
-            (embeddings.shape[0], embeddings.shape[1]),
-            lod,
-            dtype=torch.long,
-            device=embeddings.device,
+        head_embeddings, head_positions, tail_embeddings, tail_positions = self._partition_recent_tail(
+            tree, embeddings, positions
         )
-        if tail_tokens > 0:
-            tail_tokens = min(tail_tokens, lod_tensor.shape[1])
-            lod_tensor[:, -tail_tokens:] = 0
+        max_length = config.max_length
+        tail_len = tail_embeddings.shape[1] if tail_embeddings is not None else 0
+        head_capacity = max(0, max_length - tail_len)
+        if head_capacity > 0 and head_embeddings.shape[1] > head_capacity:
+            head_embeddings = head_embeddings[:, -head_capacity:]
+            head_positions = head_positions[:, -head_capacity:]
+        segments = []
+        pos_segments = []
+        lod_segments = []
+        if head_embeddings.shape[1] > 0:
+            segments.append(head_embeddings)
+            pos_segments.append(head_positions)
+            lod_segments.append(
+                torch.full(
+                    (head_embeddings.shape[0], head_embeddings.shape[1]),
+                    lod,
+                    dtype=torch.long,
+                    device=head_embeddings.device,
+                )
+            )
+        if tail_embeddings is not None and tail_len > 0:
+            tail_embeddings = tail_embeddings[:, -tail_len:]
+            tail_positions = tail_positions[:, -tail_len:]
+            segments.append(tail_embeddings)
+            pos_segments.append(tail_positions)
+            lod_segments.append(
+                torch.zeros(
+                    (tail_embeddings.shape[0], tail_len),
+                    dtype=torch.long,
+                    device=tail_embeddings.device,
+                )
+            )
+        if segments:
+            embeddings = torch.cat(segments, dim=1)
+            positions = torch.cat(pos_segments, dim=1)
+            lod_tensor = torch.cat(lod_segments, dim=1)
+        else:
+            embeddings = head_embeddings
+            positions = head_positions
+            lod_tensor = torch.full(
+                (embeddings.shape[0], embeddings.shape[1]),
+                lod,
+                dtype=torch.long,
+                device=embeddings.device,
+            )
         wc = WorkingContext(
             embeddings,
             positions,
             config,
             lod_tensor=lod_tensor,
-            recent_tokens=self.config.allocator_recent_tokens,
         )
+        if tail_embeddings is not None and tail_embeddings.shape[1] > 0:
+            self._reinforce_recent_tail(wc, tree)
+            self._assert_recent_lod0(wc, tree, source)
         self._configure_wc_positional(wc)
         return WorkingContextVariant(working_context=wc, source=source, lod_hint=lod)
 
@@ -686,11 +753,13 @@ class MCController:
                 num_iterations=self.config.allocator_iterations,
                 scores=scores_detached,
             )
+            self._reinforce_recent_tail(variant.working_context, tree)
             refined.append(variant)
             self._log_wc_snapshot(session_id, variant.working_context, variant.source)
             self._log_focus_stats(session_id, variant, f"{variant.source}_focus")
             siblings = self._generate_sibling_variants(tree, variant, session_id)
             for sibling in siblings:
+                self._reinforce_recent_tail(sibling.working_context, tree)
                 refined.append(sibling)
                 self._log_wc_snapshot(session_id, sibling.working_context, sibling.source)
                 self._log_focus_stats(session_id, sibling, f"{sibling.source}_focus")
@@ -801,19 +870,24 @@ class MCController:
         if self._timing_device.type == "cuda" and torch.cuda.is_available():
             torch.cuda.synchronize(self._timing_device)
 
-    def _assert_recent_lod0(self, wc: WorkingContext, tag: str) -> None:
+    def _assert_recent_lod0(self, wc: WorkingContext, tree: MegaContextTree, tag: str) -> None:
         recent = int(self.config.allocator_recent_tokens)
         if recent <= 0 or wc.length == 0:
             return
-        window = min(recent, wc.length)
-        lods = wc.get_lod_tensor()
-        if lods.shape[0] == 0:
+        total_tokens = tree.num_tokens()
+        if total_tokens <= 0:
             return
-        tail = lods[0, -window:]
-        if torch.any(tail != 0):
+        tail_start = max(0, total_tokens - recent)
+        positions = wc.get_positions()
+        lods = wc.get_lod_tensor()
+        mask = positions >= tail_start
+        if not torch.any(mask):
+            return
+        offending = lods[mask]
+        if offending.numel() > 0 and torch.any(offending != 0):
             raise RuntimeError(
                 "[MegaContext] Recent tokens must remain LOD0 "
-                f"(context={tag}, tail={window}). Observed LODs: {tail.tolist()}"
+                f"(context={tag}). Observed LODs: {offending.tolist()}"
             )
 
     def _clone_working_context(self, wc: WorkingContext) -> WorkingContext:
@@ -1500,6 +1574,7 @@ class MCController:
             stats = getattr(allocator, "_last_edit_stats", {}) or {}
             prefill_iterations = int(stats.get("iterations", 0))
             prefill_replacements = int(stats.get("total", 0))
+            self._reinforce_recent_tail(recency_variant.working_context, tree)
             self._timing_sync()
             timings["allocator_rebuild_ms"] = (time.time() - t_rebuild0) * 1000.0
         else:
@@ -1569,6 +1644,7 @@ class MCController:
                     state.refocus_iterations_accum += int(stats.get("iterations", 0))
                     state.refocus_replacements += int(stats.get("total", 0))
                     state.steps_since_refocus = 0
+                self._reinforce_recent_tail(state.working_context, state.tree)
         self._log_wc_snapshot(state.session_id, state.working_context, tag="inference_update")
         self._log_focus_stats(
             state.session_id,
@@ -1604,6 +1680,7 @@ class MCController:
                 global_position=start_pos + offset,
             )
         state.steps_since_refocus += append_len
+        self._reinforce_recent_tail(state.working_context, state.tree)
         if state.working_context.length > state.soft_max_length:
             self._bootstrap_inference_allocator(state)
 
@@ -1634,7 +1711,7 @@ class MCController:
         if self.inference_state is None:
             return None
         wc = self.inference_state.working_context
-        self._assert_recent_lod0(wc, "inference")
+        self._assert_recent_lod0(wc, self.inference_state.tree, "inference")
         return wc
 
     def get_inference_report(self) -> Optional[Dict[str, Any]]:

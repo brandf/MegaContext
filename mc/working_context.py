@@ -38,7 +38,6 @@ class WorkingContext:
         recent_tokens: int = 0,
     ) -> None:
         self.config = config
-        self.recent_tokens = int(max(0, recent_tokens))
         batch, seq_len, dim = embeddings.shape  # embeddings: [B, T, D]
         window = min(seq_len, config.max_length)
         self.tensor = embeddings[:, -window:].clone()  # [B, W, D]
@@ -53,7 +52,6 @@ class WorkingContext:
         self._positional_spec: Optional[Tuple[str, int, int, int]] = None
         self._positional_cache: Optional[Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = None
         self._event_log: List[Dict[str, int]] = []
-        self._enforce_recent_lod0()
 
     def to_tensor(self) -> torch.Tensor:
         """Return current working context embeddings [B, W, D] on device."""
@@ -83,7 +81,6 @@ class WorkingContext:
         )
         self._positional_cache = None
         self._event_log.append({"event": "load", "lod": lod, "length": window})
-        self._enforce_recent_lod0()
 
 
     def append(self, embedding: torch.Tensor, lod: int, global_position: int) -> None:
@@ -111,7 +108,6 @@ class WorkingContext:
         self._positional_cache = None
         self._trim()
         self._event_log.append({"event": "append", "lod": lod, "position": global_position})
-        self._enforce_recent_lod0()
 
     def replace(self, edit: WorkingContextEdit) -> None:
         total_len = self.tensor.shape[1]
@@ -162,7 +158,6 @@ class WorkingContext:
                 "mc_start": edit.mc_start_position,
             }
         )
-        self._enforce_recent_lod0()
 
     def _trim(self) -> None:
         window = self.config.max_length
@@ -173,19 +168,6 @@ class WorkingContext:
         self.lod_tensor = self.lod_tensor[:, excess:]
         self.positions = self.positions[:, excess:]
         self._positional_cache = None
-        self._enforce_recent_lod0()
-
-    def _enforce_recent_lod0(self) -> None:
-        if self.recent_tokens <= 0:
-            return
-        if self.lod_tensor.shape[1] == 0:
-            return
-        tail = min(self.recent_tokens, self.lod_tensor.shape[1])
-        if torch.any(self.lod_tensor[:, -tail:] != 0):
-            raise RuntimeError(
-                "[WorkingContext] Recent tokens invariant violated: "
-                f"expected last {tail} entries to be LOD0"
-            )
 
     def set_positional_spec(
         self,

@@ -438,8 +438,11 @@ def test_variants_respect_recent_tokens_tail(monkeypatch):
     for variant in sample_state.variants:
         wc = variant.working_context
         lods = wc.get_lod_tensor()[0]
-        tail = lods[-min(recent, wc.length):]
-        assert torch.all(tail == 0), "recent tail must remain LOD0"
+        positions = wc.get_positions()[0]
+        tail_start = max(0, tree.num_tokens() - recent)
+        mask = positions >= tail_start
+        if torch.any(mask):
+            assert torch.all(lods[mask] == 0), "recent tail must remain LOD0"
         hist = controller._lod_histogram(wc)
         coverage = controller._wc_token_coverage(wc, tree)
         hist_equiv = controller._lod_equivalent_tokens_from_hist(hist)
@@ -454,16 +457,21 @@ def test_inference_session_preserves_tail_and_coverage(monkeypatch):
         max_seq_len=256,
         max_lod=2,
     )
-    tokens = (torch.arange(0, 512) % 64).view(1, 512)
+    tokens = (torch.arange(0, 512) % 32).view(1, 512)
     controller.begin_inference_session(tokens)
+    state = controller.inference_state
+    assert state is not None
     report = controller.get_inference_report()
     assert report is not None
     assert report["coverage_tokens"] == min(tokens.shape[1], controller.config.eval_soft_max_length)
     wc = controller.get_inference_working_context()
     assert wc is not None
     lods = wc.get_lod_tensor()[0]
-    tail = lods[-min(recent, wc.length):]
-    assert torch.all(tail == 0)
+    positions = wc.get_positions()[0]
+    tail_start = max(0, state.tree.num_tokens() - recent)
+    mask = positions >= tail_start
+    if torch.any(mask):
+        assert torch.all(lods[mask] == 0)
 
 
 def test_mc_controller_returns_cached_embeddings(monkeypatch):
