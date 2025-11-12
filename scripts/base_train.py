@@ -463,6 +463,17 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
         y = y.to(device)
         print0(f"[MC Eval] batch {eval_idx+1}/{steps}: tokens={y.numel()}")
         session_id = controller.begin_inference_session(x, rebuild=True)
+        if log_timers:
+            timings = getattr(controller, "last_timings", {}) or {}
+            if timings:
+                order = ["tree_build_ms", "allocator_rebuild_ms", "total_ms"]
+                formatted = []
+                for key in order:
+                    if key in timings:
+                        formatted.append(f"{key.replace('_ms','')}={timings[key]:.2f}ms")
+                extra = [f"{k}={v:.2f}ms" for k, v in timings.items() if k not in order]
+                formatted.extend(extra)
+                print0("[MC Eval Timers] " + ", ".join(formatted))
         if report_enabled and not report_printed:
             report = controller.get_inference_report() if hasattr(controller, "get_inference_report") else None
             if report:

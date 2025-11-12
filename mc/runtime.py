@@ -1241,11 +1241,13 @@ class MCController:
         """
         Initialize a persistent MegaContext for inference/autoregressive decoding.
         """
+        t_total0 = time.time()
         if initial_tokens.dim() == 1:
             initial_tokens = initial_tokens.unsqueeze(0)
         tokens = initial_tokens.to(self.device)
         original_len = int(tokens.shape[1])
         session = session_id or f"infer_{uuid.uuid4().hex}"
+        t_tree0 = time.time()
         with torch.no_grad():
             tree = build_mega_context(
                 self.config.mc_tree_type,
@@ -1254,6 +1256,7 @@ class MCController:
                 self.config.tree_config,
                 gistnet=self.gistnet,
             )
+        t_tree1 = time.time()
         if not self.config.cache_lod0:
             tree.release_lod0_cache(disable_future_cache=True)
         # Build a recency-based working context with a local level cache,
@@ -1291,6 +1294,7 @@ class MCController:
         refocus_interval = self.config.infer_refocus_interval
         prefill_iterations = 0
         prefill_replacements = 0
+        t_rebuild0 = time.time()
         if rebuild:
             allocator.rebuild(
                 max_replacements_per_iteration=rebuild_repl,
@@ -1299,6 +1303,7 @@ class MCController:
             stats = getattr(allocator, "_last_edit_stats", {}) or {}
             prefill_iterations = int(stats.get("iterations", 0))
             prefill_replacements = int(stats.get("total", 0))
+        t_rebuild1 = time.time()
         self._log_tree_snapshot(session, tree, tag="inference_init")
         self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
         self.inference_state = InferenceState(
@@ -1314,6 +1319,12 @@ class MCController:
             prefill_replacements=prefill_replacements,
         )
         self._refresh_inference_report()
+        total_ms = (time.time() - t_total0) * 1000.0
+        self.last_timings = {
+            "tree_build_ms": (t_tree1 - t_tree0) * 1000.0,
+            "allocator_rebuild_ms": (t_rebuild1 - t_rebuild0) * 1000.0,
+            "total_ms": total_ms,
+        }
         return session
 
     def inference_step(self, new_tokens: torch.Tensor) -> None:
