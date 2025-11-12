@@ -679,18 +679,31 @@ for step in range(num_iterations + 1):
                     if mc_train_report and not train_report_printed:
                         report = mc_controller.get_training_report() if hasattr(mc_controller, "get_training_report") else None
                         if report:
-                            lod_counts = report.get("lod_counts", {})
+                            primary = report.get("primary") or {}
+                            aggregate = report.get("aggregate") or {}
+                            lod_counts = primary.get("lod_counts", {})
                             lod_parts = [f"LOD{lod}:{count}" for lod, count in sorted(lod_counts.items())]
                             lod_line = ", ".join(lod_parts) if lod_parts else "none"
+                            agg_counts = aggregate.get("lod_counts", {})
+                            agg_parts = [f"LOD{lod}:{count}" for lod, count in sorted(agg_counts.items())]
+                            agg_line = ", ".join(agg_parts) if agg_parts else "none"
                             max_seq = mc_controller.config.wc_config.max_length
                             soft_max = mc_controller.config.wc_config.max_length
+                            print0("🛠️ MegaContext Train Report")
                             print0(
-                                "🛠️ MegaContext Train Report\n"
-                                f"   📜 Original seq: {report.get('original_length', 'n/a')} tokens (max_seq={max_seq})\n"
-                                f"   🗂️ Working context: {report.get('wc_length', 'n/a')} tokens (soft_max={soft_max})\n"
-                                f"   🧩 LOD mix: {lod_line}\n"
-                                f"   🔧 Focus: {report.get('focus_iterations', 0)} iterations / {report.get('focus_replacements', 0)} replacements"
+                                f"   📜 Primary seq: {primary.get('original_length', 'n/a')} tokens (max_seq={max_seq})"
                             )
+                            print0(
+                                f"   🗂️ Primary WC: {primary.get('wc_length', 'n/a')} tokens (soft_max={soft_max})"
+                            )
+                            print0(f"   🧩 Primary LOD mix: {lod_line}")
+                            print0(
+                                f"   🔧 Primary focus: {primary.get('focus_iterations', 0)} iterations / {primary.get('focus_replacements', 0)} replacements"
+                            )
+                            print0(
+                                f"   📊 Aggregate variants: {aggregate.get('variants', 0)} | avg_wc_len={aggregate.get('avg_wc_length', 0):.1f}"
+                            )
+                            print0(f"   🧮 Aggregate LOD mix: {agg_line}")
                             train_report_printed = True
         with _training_autocast():
             cos_sin_override = None

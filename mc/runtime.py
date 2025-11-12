@@ -1012,25 +1012,49 @@ class MCController:
         if not batch_states:
             self.last_train_report = None
             return
-        sample = batch_states[0]
-        report_variant: Optional[WorkingContextVariant] = None
-        for variant in sample.variants:
-            if variant.lod_hint == 0:
-                report_variant = variant
+        primary_variant: Optional[WorkingContextVariant] = None
+        primary_tree_tokens = 0
+        for sample in batch_states:
+            for variant in sample.variants:
+                if variant.lod_hint > 0:
+                    primary_variant = variant
+                    primary_tree_tokens = sample.tree.num_tokens()
+                    break
+            if primary_variant is not None:
                 break
-        if report_variant is None and sample.variants:
-            report_variant = sample.variants[0]
-        if report_variant is None:
-            self.last_train_report = None
-            return
-        wc = report_variant.working_context
-        stats = getattr(report_variant.allocator, "_last_edit_stats", {}) or {}
+        if primary_variant is None:
+            sample = batch_states[0]
+            primary_variant = sample.variants[0] if sample.variants else None
+            primary_tree_tokens = sample.tree.num_tokens()
+        aggregate_counts: Dict[int, int] = {}
+        aggregate_tokens = 0
+        aggregate_variants = 0
+        for sample in batch_states:
+            for variant in sample.variants:
+                lod_hist = self._lod_histogram(variant.working_context)
+                for lod, count in lod_hist.items():
+                    aggregate_counts[lod] = aggregate_counts.get(lod, 0) + count
+                aggregate_tokens += variant.working_context.length
+                aggregate_variants += 1
+        primary_report = None
+        if primary_variant is not None:
+            wc = primary_variant.working_context
+            stats = getattr(primary_variant.allocator, "_last_edit_stats", {}) or {}
+            primary_report = {
+                "original_length": int(primary_tree_tokens),
+                "wc_length": int(wc.length),
+                "lod_counts": self._lod_histogram(wc),
+                "focus_iterations": int(stats.get("iterations", 0)),
+                "focus_replacements": int(stats.get("total", 0)),
+            }
+        aggregate_report = {
+            "variants": int(aggregate_variants),
+            "avg_wc_length": float(aggregate_tokens / aggregate_variants) if aggregate_variants else 0.0,
+            "lod_counts": aggregate_counts,
+        }
         self.last_train_report = {
-            "original_length": int(sample.tree.num_tokens()),
-            "wc_length": int(wc.length),
-            "lod_counts": self._lod_histogram(wc),
-            "focus_iterations": int(stats.get("iterations", 0)),
-            "focus_replacements": int(stats.get("total", 0)),
+            "primary": primary_report,
+            "aggregate": aggregate_report,
         }
 
     def _select_best_variant(
