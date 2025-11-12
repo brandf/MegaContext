@@ -110,3 +110,98 @@ def test_focus_allocator_handles_non_divisible_prefix():
     assert all(lod == 0 for lod in lod_row[-expected_tail:].tolist())
     covered = _covered_tokens(allocator.working_context, block_size)
     assert covered == min(total_tokens, soft_max)
+
+
+def test_focus_allocator_prefers_lod0_when_within_budget():
+    embed_dim = 4
+    total_tokens = 16
+    soft_max = 32
+    tree_config = MegaContextConfig(embed_dim=embed_dim, block_size=2, max_lod=3, device="cpu")
+    embedder = nn.Embedding(64, embed_dim)
+    tokens = torch.arange(total_tokens).view(1, total_tokens)
+    tree = MegaContextTree.from_tokens(tokens, embedder, tree_config)
+    wc_config = WorkingContextConfig(embed_dim=embed_dim, max_length=soft_max, device="cpu")
+    wc = WorkingContext(tree.get_level(0), tree.get_positions_for_lod(0), wc_config)
+    allocator_cfg = FocusAllocatorConfig(
+        block_size=2,
+        max_lod=3,
+        soft_max_length=soft_max,
+        recent_tokens=0,
+    )
+    allocator = build_focus_allocator(
+        "greedy",
+        tree=tree,
+        working_context=wc,
+        lensnet=ZeroLensNet(),
+        config=allocator_cfg,
+    )
+    allocator.rebuild(max_replacements_per_iteration=0, num_iterations=0)
+    lods = allocator.working_context.get_lod_tensor()[0]
+    assert torch.all(lods == 0), "All entries should stay LOD0 when within soft max budget"
+
+
+class ConstantLensNet(nn.Module):
+    def __init__(self, value: float) -> None:
+        super().__init__()
+        self.value = value
+
+    def forward(self, working_context: WorkingContext):  # type: ignore[override]
+        length = working_context.length
+        return working_context.to_tensor().new_full((1, length, 1), self.value)
+
+
+def test_focus_allocator_does_not_collapse_under_softmax():
+    block_size = 2
+    tree_config = MegaContextConfig(embed_dim=4, block_size=block_size, max_lod=2, device="cpu")
+    embedder = nn.Embedding(32, tree_config.embed_dim)
+    tokens = torch.arange(4).view(1, 4)
+    tree = MegaContextTree.from_tokens(tokens, embedder, tree_config)
+    wc_config = WorkingContextConfig(embed_dim=tree_config.embed_dim, max_length=8, device="cpu")
+    wc = WorkingContext(tree.get_level(0), tree.get_positions_for_lod(0), wc_config)
+    allocator_cfg = FocusAllocatorConfig(
+        block_size=block_size,
+        max_lod=2,
+        soft_max_length=8,
+        recent_tokens=0,
+        collapse_threshold=0.1,
+    )
+    lensnet = ConstantLensNet(-1.0)
+    allocator = build_focus_allocator(
+        "greedy",
+        tree=tree,
+        working_context=wc,
+        lensnet=lensnet,
+        config=allocator_cfg,
+    )
+    edits = allocator.update_focus(max_replacements_per_iteration=2, num_iterations=1)
+    assert edits == 0
+    assert allocator.working_context.length == 4
+
+
+def test_focus_allocator_does_not_expand_over_softmax():
+    block_size = 2
+    tree_config = MegaContextConfig(embed_dim=4, block_size=block_size, max_lod=2, device="cpu")
+    embedder = nn.Embedding(32, tree_config.embed_dim)
+    tokens = torch.arange(8).view(1, 8)
+    tree = MegaContextTree.from_tokens(tokens, embedder, tree_config)
+    wc_config = WorkingContextConfig(embed_dim=tree_config.embed_dim, max_length=8, device="cpu")
+    wc = WorkingContext(tree.get_level(0), tree.get_positions_for_lod(0), wc_config)
+    lod_embeddings, lod_positions = tree.get_level_metadata(1)
+    wc.load_from_level(lod_embeddings, lod_positions, lod=1)
+    allocator_cfg = FocusAllocatorConfig(
+        block_size=block_size,
+        max_lod=2,
+        soft_max_length=2,
+        recent_tokens=0,
+        expand_threshold=0.1,
+    )
+    lensnet = ConstantLensNet(1.0)
+    allocator = build_focus_allocator(
+        "greedy",
+        tree=tree,
+        working_context=wc,
+        lensnet=lensnet,
+        config=allocator_cfg,
+    )
+    edits = allocator.update_focus(max_replacements_per_iteration=2, num_iterations=1)
+    assert edits == 0

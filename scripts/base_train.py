@@ -456,10 +456,12 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
                 ref_updates = report.get("refocus_updates", 0)
                 ref_iters = report.get("refocus_iterations", 0)
                 ref_swaps = report.get("refocus_replacements", 0)
+                max_seq = controller.config.wc_config.max_length
+                soft_max = controller.config.eval_soft_max_length or controller.config.wc_config.max_length
                 print0(
                     "✨ MegaContext Val Report\n"
-                    f"   📜 Original seq: {report.get('original_length', 'n/a')} tokens\n"
-                    f"   🗂️ Working context: {report.get('wc_length', 'n/a')} tokens\n"
+                    f"   📜 Original seq: {report.get('original_length', 'n/a')} tokens (max_seq={max_seq})\n"
+                    f"   🗂️ Working context: {report.get('wc_length', 'n/a')} tokens (soft_max={soft_max})\n"
                     f"   🧩 LOD mix: {lod_line}\n"
                     f"   ⚙️ Prefocus: {pref_iters} iterations / {pref_swaps} replacements\n"
                     f"   🔁 Refocus: {ref_updates} updates / {ref_iters} iterations / {ref_swaps} replacements"
@@ -663,10 +665,12 @@ for step in range(num_iterations + 1):
                             lod_counts = report.get("lod_counts", {})
                             lod_parts = [f"LOD{lod}:{count}" for lod, count in sorted(lod_counts.items())]
                             lod_line = ", ".join(lod_parts) if lod_parts else "none"
+                            max_seq = mc_controller.config.wc_config.max_length
+                            soft_max = mc_controller.config.wc_config.max_length
                             print0(
                                 "🛠️ MegaContext Train Report\n"
-                                f"   📜 Original seq: {report.get('original_length', 'n/a')} tokens\n"
-                                f"   🗂️ Working context: {report.get('wc_length', 'n/a')} tokens\n"
+                                f"   📜 Original seq: {report.get('original_length', 'n/a')} tokens (max_seq={max_seq})\n"
+                                f"   🗂️ Working context: {report.get('wc_length', 'n/a')} tokens (soft_max={soft_max})\n"
                                 f"   🧩 LOD mix: {lod_line}\n"
                                 f"   🔧 Focus: {report.get('focus_iterations', 0)} iterations / {report.get('focus_replacements', 0)} replacements"
                             )

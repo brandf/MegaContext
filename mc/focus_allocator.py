@@ -193,6 +193,8 @@ class GreedyFocusAllocator(FocusAllocatorBase):
         lods = self.working_context.get_lod_tensor()[0]
         positions = self.working_context.get_positions()[0]
         length = scores.numel()
+        allow_expand = self.working_context.length < self.cfg.soft_max_length
+        allow_collapse = True
         protected_start = max(0, length - self.cfg.recent_tokens)
         order = torch.argsort(torch.abs(scores), descending=True)
         for idx_tensor in order:
@@ -205,9 +207,11 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             lod = int(lods[idx].item())
             global_pos = int(positions[idx].item())
             edit: Optional[WorkingContextEdit] = None
-            if score >= self.cfg.expand_threshold and lod > 0 and not prefer_collapse:
+            if score >= self.cfg.expand_threshold and lod > 0 and allow_expand and not prefer_collapse:
                 edit = self._build_expand_edit(idx, lod, global_pos)
-            elif score <= -self.cfg.collapse_threshold and lod < self.cfg.max_lod:
+            elif score <= -self.cfg.collapse_threshold and lod < self.cfg.max_lod and allow_collapse:
+                if self.working_context.length <= self.cfg.soft_max_length and lod == 0:
+                    continue
                 edit = self._build_collapse_edit(idx, lod, global_pos)
             if edit is not None:
                 edits.append(edit)
@@ -262,7 +266,8 @@ class GreedyFocusAllocator(FocusAllocatorBase):
     # Utility methods
     # ------------------------------------------------------------------ #
     def _initialize_working_context(self, target_tokens: int, tail_tokens: int) -> None:
-        if target_tokens <= 0:
+        total_tokens = max(target_tokens, 0)
+        if total_tokens <= 0:
             self.working_context.load_from_level(
                 *self.tree.get_level_metadata(0),
                 lod=0,
@@ -270,24 +275,33 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             return
         device = self.working_context.to_tensor().device
         pos_dtype = self.working_context.get_positions().dtype
-        start = max(self.tree.num_tokens() - target_tokens, 0)
-        medium_end = self.tree.num_tokens() - tail_tokens
-        span = medium_end - start
-        if self.cfg.block_size > 1 and span > 0:
-            remainder = span % self.cfg.block_size
+        if total_tokens <= self.cfg.soft_max_length:
+            start = max(0, self.tree.num_tokens() - total_tokens)
+            end = self.tree.num_tokens()
+            embeddings = self.tree.get_lod0_slice(start, end)
+            positions = self.tree.get_positions_for_lod(0)[:, start:end]
+            lod_tensor = torch.zeros_like(positions, dtype=torch.long)
+            self.working_context.tensor = embeddings.clone()
+            self.working_context.positions = positions.clone()
+            self.working_context.lod_tensor = lod_tensor.clone()
+            self.working_context._positional_cache = None  # type: ignore[attr-defined]
+            return
+        start = 0
+        tail_tokens = min(tail_tokens, total_tokens)
+        prefix_tokens = total_tokens - tail_tokens
+        if self.cfg.block_size > 1 and prefix_tokens > 0:
+            remainder = prefix_tokens % self.cfg.block_size
             if remainder > 0:
-                medium_end -= remainder
-                tail_tokens = min(target_tokens, tail_tokens + remainder)
-        segments: List[Tuple[int, int]] = []
-        pos = start
-        while pos < medium_end:
-            lod = self._largest_aligned_lod(pos, medium_end)
-            stride = self.tree.tokens_per_entry(lod)
-            segments.append((lod, pos))
-            pos += stride
-        embeddings_list = []
-        positions_list = []
-        lod_list = []
+                prefix_tokens -= remainder
+                tail_tokens = min(total_tokens, tail_tokens + remainder)
+        tail_tokens = min(tail_tokens, total_tokens)
+        tail_tokens = min(tail_tokens, self.cfg.soft_max_length)
+        medium_budget = max(self.cfg.soft_max_length - tail_tokens, 0)
+        segments = self._build_medium_segments(prefix_tokens, medium_budget)
+        embeddings_list: List[torch.Tensor] = []
+        positions_list: List[torch.Tensor] = []
+        lod_list: List[torch.Tensor] = []
+        current_pos = start
         for lod, seg_pos in segments:
             emb_slice, pos_slice = self._fetch_node_metadata(lod, seg_pos, device, pos_dtype)
             embeddings_list.append(emb_slice)
@@ -300,9 +314,9 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             )
             lod_list.append(lod_piece)
         if tail_tokens > 0:
-            tail_start = self.tree.num_tokens() - tail_tokens
-            tail_embeddings = self.tree.get_lod0_slice(tail_start, self.tree.num_tokens()).to(device)
-            tail_positions = self.tree.get_positions_for_lod(0)[:, tail_start:self.tree.num_tokens()].to(device=device, dtype=pos_dtype)
+            tail_start = total_tokens - tail_tokens
+            tail_embeddings = self.tree.get_lod0_slice(tail_start, total_tokens).to(device)
+            tail_positions = self.tree.get_positions_for_lod(0)[:, tail_start:total_tokens].to(device=device, dtype=pos_dtype)
             tail_lods = torch.zeros((tail_embeddings.shape[0], tail_embeddings.shape[1]), dtype=torch.long, device=device)
             embeddings_list.append(tail_embeddings)
             positions_list.append(tail_positions)
@@ -346,11 +360,34 @@ class GreedyFocusAllocator(FocusAllocatorBase):
         pos_slice = positions[:, idx : idx + 1].to(device=device, dtype=pos_dtype)
         return emb_slice, pos_slice
 
+    def _build_medium_segments(self, tokens: int, entry_budget: int) -> List[Tuple[int, int]]:
+        segments: List[Tuple[int, int]] = []
+        if tokens <= 0 or entry_budget <= 0:
+            return segments
+        tokens_remaining = tokens
+        entries_remaining = entry_budget
+        pos = 0
+        while tokens_remaining > 0 and entries_remaining > 0:
+            lod = self._select_lod_for_budget(tokens_remaining, entries_remaining)
+            stride = min(self.tree.tokens_per_entry(lod), tokens_remaining)
+            segments.append((lod, pos))
+            pos += stride
+            tokens_remaining -= stride
+            entries_remaining -= 1
+        return segments
+
+    def _select_lod_for_budget(self, remaining_tokens: int, remaining_entries: int) -> int:
+        needed = max(1, math.ceil(remaining_tokens / remaining_entries))
+        for lod in range(0, self.cfg.max_lod + 1):
+            stride = self.tree.tokens_per_entry(lod)
+            if stride >= needed:
+                return lod
+        return self.cfg.max_lod
+
     def _reinforce_recent_tokens(self) -> None:
         tokens_requested = min(
             self.cfg.recent_tokens,
             self.tree.num_tokens(),
-            self.cfg.soft_max_length,
         )
         if tokens_requested <= 0:
             return

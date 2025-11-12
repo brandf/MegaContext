@@ -466,9 +466,9 @@ def enwik8_large(enwik8_path):
 
 def time_function(func, *args, **kwargs):
     """Time a function call and return the result and elapsed time"""
-    start_time = time.time()
+    start_time = time.perf_counter()
     result = func(*args, **kwargs)
-    end_time = time.time()
+    end_time = time.perf_counter()
     elapsed = end_time - start_time
     return result, elapsed
 
