@@ -1129,15 +1129,19 @@ class MCController:
     def _wc_token_coverage(self, wc: WorkingContext, tree: MegaContextTree) -> int:
         positions = wc.get_positions()[0]
         lods = wc.get_lod_tensor()[0]
-        total = 0
         total_tokens = tree.num_tokens()
+        if total_tokens <= 0:
+            return 0
+        covered = torch.zeros(total_tokens, dtype=torch.bool)
         for pos_tensor, lod_tensor in zip(positions, lods):
             start = int(pos_tensor.item())
             lod = int(lod_tensor.item())
-            span = tree.tokens_per_entry(lod)
-            remain = max(0, total_tokens - start)
-            total += min(span, remain)
-        return total
+            span = max(1, tree.tokens_per_entry(lod))
+            if start >= total_tokens:
+                continue
+            end = min(total_tokens, start + span)
+            covered[start:end] = True
+        return int(covered.sum().item())
 
     def _lod_equivalent_tokens_from_hist(self, hist: Dict[int, int]) -> int:
         total = 0
