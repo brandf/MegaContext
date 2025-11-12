@@ -463,6 +463,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
         y = y.to(device)
         print0(f"[MC Eval] batch {eval_idx+1}/{steps}: tokens={y.numel()}")
         session_id = controller.begin_inference_session(x, rebuild=True)
+        build_time = time.time() - batch_start
         if log_timers:
             timings = getattr(controller, "last_timings", {}) or {}
             if timings:
@@ -523,6 +524,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
             target_dtype = autocast_dtype if autocast_enabled else next(model.parameters()).dtype
             if embeds.dtype != target_dtype:
                 embeds = embeds.to(target_dtype)
+            t_model0 = time.time()
             loss2d = model(
                 input_tokens,
                 tokens_slice,
@@ -531,6 +533,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
                 alibi_override=alibi_override,
                 inputs_embeds=embeds,
             )
+            t_model1 = time.time()
         loss2d = loss2d.view(-1)
         targets_flat = tokens_slice.view(-1)
         if (targets_flat.int() < 0).any():
@@ -549,7 +552,17 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
             total_bytes += num_bytes2d.sum()
         if log_timers:
             batch_dt = (time.time() - batch_start) * 1000.0
-            print0(f"[MC Eval] batch {eval_idx+1}/{steps} completed in {batch_dt:.1f} ms")
+            model_dt = (t_model1 - t_model0) * 1000.0
+            loader_dt = build_time * 1000.0
+            controller_time = getattr(controller, "last_timings", {}).get("total_ms", None)
+            parts = [
+                f"[MC Eval] batch {eval_idx+1}/{steps} completed in {batch_dt:.1f} ms",
+                f"  loader+controller={loader_dt:.1f} ms",
+                f"  model={model_dt:.1f} ms",
+            ]
+            if controller_time is not None:
+                parts.append(f"  controller_internal={controller_time:.1f} ms")
+            print0("\n".join(parts))
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     if world_size > 1:
         dist.all_reduce(total_nats, op=dist.ReduceOp.SUM)
