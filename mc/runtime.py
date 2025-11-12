@@ -1112,35 +1112,53 @@ class MCController:
         primary_variant: Optional[WorkingContextVariant] = None
         primary_tree_tokens = 0
         primary_tree: Optional[MegaContextTree] = None
-        # Prefer the variant with the highest available LOD across all samples.
-        best_lod = -1
-        best_edits = -1
-        for sample in batch_states:
-            for variant in sample.variants:
+        # Prefer variants that actually ran focus (edits > 0). Tie-break by highest LOD.
+        def _select_variant(candidates: List[WorkingContextVariant]) -> Optional[WorkingContextVariant]:
+            best = None
+            best_lod_local = -1
+            best_edits_local = -1
+            for variant in candidates:
                 if variant.is_baseline:
                     continue
                 lod_hist = self._lod_histogram(variant.working_context)
                 highest_variant_lod = max(lod_hist.keys()) if lod_hist else variant.lod_hint
-                # Prefer higher LOD coverage; tie-break on edits applied
-                if highest_variant_lod > best_lod or (
-                    highest_variant_lod == best_lod and variant.edits_applied > best_edits
+                if (
+                    highest_variant_lod > best_lod_local
+                    or (
+                        highest_variant_lod == best_lod_local
+                        and variant.edits_applied > best_edits_local
+                    )
                 ):
-                    best_lod = highest_variant_lod
-                    best_edits = variant.edits_applied
-                    primary_variant = variant
-                    primary_tree_tokens = sample.tree.num_tokens()
-                    primary_tree = sample.tree
-            if best_lod == self.config.max_lod:
-                break
-        if primary_variant is None:
-            sample = batch_states[0]
+                    best = variant
+                    best_lod_local = highest_variant_lod
+                    best_edits_local = variant.edits_applied
+            return best
+
+        focused_candidates = []
+        unfocused_candidates = []
+        for sample in batch_states:
             for variant in sample.variants:
-                if not variant.is_baseline:
-                    primary_variant = variant
+                if variant.is_baseline:
+                    continue
+                if variant.edits_applied > 0:
+                    focused_candidates.append((sample, variant))
+                else:
+                    unfocused_candidates.append((sample, variant))
+
+        chosen = _select_variant([variant for _, variant in focused_candidates])
+        if chosen is None:
+            chosen = _select_variant([variant for _, variant in unfocused_candidates])
+
+        if chosen is not None:
+            for sample in batch_states:
+                if chosen in sample.variants:
+                    primary_variant = chosen
                     primary_tree_tokens = sample.tree.num_tokens()
                     primary_tree = sample.tree
                     break
-            if primary_variant is None and sample.variants:
+        else:
+            sample = batch_states[0]
+            if sample.variants:
                 primary_variant = sample.variants[0]
                 primary_tree_tokens = sample.tree.num_tokens()
                 primary_tree = sample.tree
