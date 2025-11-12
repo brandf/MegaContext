@@ -1001,26 +1001,20 @@ class MCController:
             rows.append("".join(chars))
         return rows
 
-    def _select_ascii_variant(self, variants: List[WorkingContextVariant]) -> Optional[WorkingContextVariant]:
-        for variant in variants:
-            if variant.is_baseline:
-                return variant
-        return variants[0] if variants else None
-
     def _log_train_lod_ascii(self, step: int, batch_states: List[SampleContext]) -> None:
         if not (self.config.log_lod_ascii_train and self._is_rank0):
             return
         lines: List[str] = []
         for sample_idx, sample in enumerate(batch_states):
-            variant = self._select_ascii_variant(sample.variants)
-            if variant is None:
-                continue
             tree_tokens = sample.tree.num_tokens()
-            ascii_rows = self._render_lod_ascii_lines(variant.working_context, tree_tokens)
-            if not ascii_rows:
-                continue
-            joined = " | ".join(ascii_rows)
-            lines.append(f"  sample{sample_idx:02d}: {joined}")
+            for variant_idx, variant in enumerate(sample.variants):
+                ascii_rows = self._render_lod_ascii_lines(variant.working_context, tree_tokens)
+                if not ascii_rows:
+                    continue
+                joined = " | ".join(ascii_rows)
+                lines.append(
+                    f"  sample{sample_idx:02d}/var{variant_idx:02d} [{variant.source}] {joined}"
+                )
         if lines:
             print(f"[MegaContext][LOD ASCII][train step {step}]", flush=True)
             for line in lines:
