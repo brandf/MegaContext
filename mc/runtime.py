@@ -114,12 +114,12 @@ class MCController:
     """
 
     _LOD_CHAR_MAP = {
-        0: ".",
-        1: "-",
-        2: "=",
-        3: "#",
+        0: "∵",
+        1: "─",
+        2: "═",
+        3: "█",
     }
-    _LOD_PARTIAL_CHAR = ","
+    _LOD_PARTIAL_CHAR = "⋅"
 
     def __init__(
         self,
@@ -998,8 +998,43 @@ class MCController:
                 self._lod_char_for_block(level, idx == num_blocks - 1, remainder)
                 for idx, level in enumerate(block_levels)
             ]
+            self._highlight_high_lod_segments(chars, block_levels)
             rows.append("".join(chars))
         return rows
+
+    def _highlight_high_lod_segments(self, chars: List[str], block_levels: List[int], threshold: int = 2) -> None:
+        num_blocks = len(chars)
+        idx = 0
+        while idx < num_blocks:
+            level = block_levels[idx]
+            if level < threshold:
+                idx += 1
+                continue
+            start = idx
+            while idx < num_blocks and block_levels[idx] >= threshold:
+                idx += 1
+            end = idx - 1
+            segment_levels = block_levels[start : end + 1]
+            standout_level = max(segment_levels) if segment_levels else level
+            for pos in range(start, end + 1):
+                chars[pos] = " "
+            left = start
+            right = end
+            chars[left] = "|"
+            chars[right] = "|" if right >= left else "|"
+            length = right - left + 1
+            if length <= 1:
+                chars[left] = self._LOD_CHAR_MAP.get(min(max(standout_level, 0), 3), self._LOD_CHAR_MAP[3])
+                continue
+            center = left + length // 2
+            if center == left:
+                center = min(left + 1, right)
+            if center == right:
+                center = max(right - 1, left)
+            chars[center] = self._LOD_CHAR_MAP.get(
+                min(max(standout_level, 0), 3),
+                self._LOD_CHAR_MAP[3],
+            )
 
     def _log_train_lod_ascii(self, step: int, batch_states: List[SampleContext]) -> None:
         if not (self.config.log_lod_ascii_train and self._is_rank0):
@@ -1013,7 +1048,7 @@ class MCController:
                     continue
                 joined = " | ".join(ascii_rows)
                 lines.append(
-                    f"  sample{sample_idx:02d}/var{variant_idx:02d} {joined} [{variant.source}]"
+                    f"  sample{sample_idx:02d}/var{variant_idx:02d} {joined} [{variant.source}] ({variant.working_context.length})"
                 )
         if lines:
             print(f"[MegaContext][LOD ASCII][train step {step}]", flush=True)
@@ -1031,7 +1066,7 @@ class MCController:
             return
         print(f"[MegaContext][LOD ASCII][{label}]", flush=True)
         for idx, row in enumerate(ascii_rows):
-            print(f"  seq{idx:02d}: {row}", flush=True)
+            print(f"  seq{idx:02d}: {row} ({state.working_context.length})", flush=True)
 
     def _ensure_wc_full_coverage(self, wc: WorkingContext, tree: MegaContextTree, tag: str) -> WorkingContext:
         expected = tree.num_tokens()
