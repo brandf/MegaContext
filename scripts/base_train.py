@@ -113,6 +113,7 @@ mc_infer_rebuild_max_replacements = None
 mc_infer_rebuild_iterations = None
 mc_train_report = 0
 mc_val_report = 1
+mc_log_timers = 0
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -139,6 +140,7 @@ mc_infer_rebuild_iterations = _parse_optional_int(mc_infer_rebuild_iterations)
 mc_infer_refocus_interval = int(mc_infer_refocus_interval)
 mc_train_report = _parse_bool_flag(mc_train_report)
 mc_val_report = _parse_bool_flag(mc_val_report)
+mc_log_timers = _parse_bool_flag(mc_log_timers)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
 
@@ -438,12 +440,13 @@ def _run_variant_batch_forward(
 
 
 @torch.no_grad()
-def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device, report_enabled=True):
+def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device, report_enabled=True, log_timers=False):
     total_nats = torch.tensor(0.0, dtype=torch.float32, device=device)
     total_bytes = torch.tensor(0, dtype=torch.int64, device=device)
     batch_iter = iter(batches)
     report_printed = False
     for eval_idx in range(steps):
+        batch_start = time.time()
         try:
             x, y = next(batch_iter)
         except StopIteration:
@@ -520,6 +523,9 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
             num_bytes2d = token_bytes[targets_flat]
             total_nats += (loss2d * (num_bytes2d > 0)).sum()
             total_bytes += num_bytes2d.sum()
+        if log_timers:
+            batch_dt = (time.time() - batch_start) * 1000.0
+            print0(f"[MC Eval] batch {eval_idx+1}/{steps} completed in {batch_dt:.1f} ms")
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     if world_size > 1:
         dist.all_reduce(total_nats, op=dist.ReduceOp.SUM)
@@ -564,6 +570,7 @@ for step in range(num_iterations + 1):
                 token_bytes,
                 device,
                 report_enabled=mc_val_report,
+                log_timers=mc_log_timers,
             )
             print0("[MC Eval] finished validation")
         else:
@@ -836,6 +843,16 @@ for step in range(num_iterations + 1):
             log_data["train/loss_lod0"] = vanilla_loss_val
         if mc_lens_loss_val is not None:
             log_data["mc/lens_loss"] = mc_lens_loss_val
+        if mc_log_timers:
+            timer_labels = [
+                ("mc/time_controller_ms", "[Timers] controller"),
+                ("time/forward_ms", "[Timers] forward"),
+                ("time/optimizer_ms", "[Timers] optimizer"),
+                ("time/dataloader_ms", "[Timers] dataloader"),
+            ]
+            for key, label in timer_labels:
+                if key in log_data:
+                    print0(f"{label}: {log_data[key]:.2f} ms")
         wandb_run.log(log_data)
 
 # print a few more stats

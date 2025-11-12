@@ -37,6 +37,7 @@ MC_TREE_TYPE="ram"
 SKIP_DATA_PREP=${SKIP_DATA_PREP:-0}
 MC_AUX_DTYPE="auto"
 MC_AUTO_BATCH=1
+MC_LOG_TIMERS=0
 MC_EVAL_SOFT_MAX_LENGTH=""
 MC_INFER_ALLOCATOR_MAX_REPLACEMENTS=""
 MC_INFER_ALLOCATOR_ITERATIONS=""
@@ -148,6 +149,11 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_val_report" >&2; exit 1; }
             MC_VAL_REPORT="$1"
+            ;;
+        --mc_log_timers)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_log_timers" >&2; exit 1; }
+            MC_LOG_TIMERS="$1"
             ;;
         --block_size)
             shift
@@ -275,7 +281,8 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_infer_allocator_iterations="$MC_INFER_ALLOCATOR_ITERATIONS" \
     --mc_infer_refocus_interval="$MC_INFER_REFOCUS_INTERVAL" \
     --mc_train_report="$MC_TRAIN_REPORT" \
-    --mc_val_report="$MC_VAL_REPORT"
+    --mc_val_report="$MC_VAL_REPORT" \
+    --mc_log_timers="$MC_LOG_TIMERS"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"
