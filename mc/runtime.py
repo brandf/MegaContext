@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import random
 import time
@@ -491,7 +492,14 @@ class MCController:
         if embeddings.shape[1] > window:
             embeddings = embeddings[:, -window:]
             positions = positions[:, -window:]
-        variant = self._create_variant(tree, embeddings, positions, lod=0, source="recency_baseline", wc_config=wc_config)
+        variant = self._create_variant(
+            tree,
+            embeddings,
+            positions,
+            lod=0,
+            source="recency_baseline",
+            wc_config=wc_config,
+        )
         variant.is_baseline = True
         return variant
 
@@ -641,67 +649,101 @@ class MCController:
         wc_config: Optional[WorkingContextConfig] = None,
     ) -> WorkingContextVariant:
         config = wc_config or self.config.wc_config
-        head_embeddings, head_positions, tail_embeddings, tail_positions = self._partition_recent_tail(
-            tree, embeddings, positions
-        )
-        max_length = config.max_length
-        tail_len = tail_embeddings.shape[1] if tail_embeddings is not None else 0
-        if tail_len > max_length:
-            tail_embeddings = tail_embeddings[:, -max_length:]
-            tail_positions = tail_positions[:, -max_length:]
-            tail_len = max_length
-        head_capacity = max(0, max_length - tail_len)
-        if head_capacity > 0 and head_embeddings.shape[1] > head_capacity:
-            head_embeddings = head_embeddings[:, -head_capacity:]
-            head_positions = head_positions[:, -head_capacity:]
-        segments = []
-        pos_segments = []
-        lod_segments = []
-        if head_embeddings.shape[1] > 0:
-            segments.append(head_embeddings)
-            pos_segments.append(head_positions)
-            lod_segments.append(
-                torch.full(
-                    (head_embeddings.shape[0], head_embeddings.shape[1]),
-                    lod,
-                    dtype=torch.long,
-                    device=head_embeddings.device,
-                )
+        tree_tokens = tree.num_tokens()
+        if tree_tokens <= 0:
+            raise RuntimeError("[MegaContext] Cannot build working context with zero tree tokens")
+        if lod == 0 and tree_tokens > config.max_length:
+            raise RuntimeError(
+                "[MegaContext] Pure LOD0 variant exceeds working-context capacity: "
+                f"tree_tokens={tree_tokens}, max_length={config.max_length}"
             )
-        if tail_embeddings is not None and tail_len > 0:
-            tail_embeddings = tail_embeddings[:, -tail_len:]
-            tail_positions = tail_positions[:, -tail_len:]
-            segments.append(tail_embeddings)
-            pos_segments.append(tail_positions)
-            lod_segments.append(
-                torch.zeros(
-                    (tail_embeddings.shape[0], tail_len),
-                    dtype=torch.long,
-                    device=tail_embeddings.device,
-                )
-            )
-        if segments:
-            embeddings = torch.cat(segments, dim=1)
-            positions = torch.cat(pos_segments, dim=1)
-            lod_tensor = torch.cat(lod_segments, dim=1)
-        else:
-            embeddings = head_embeddings
-            positions = head_positions
-            lod_tensor = torch.full(
-                (embeddings.shape[0], embeddings.shape[1]),
-                lod,
+        block = max(1, self.config.block_size)
+        tail_tokens = min(tree_tokens, int(self.config.allocator_recent_tokens))
+        head_limit = max(0, tree_tokens - tail_tokens)
+        remainder = head_limit % block
+        if remainder != 0:
+            # Shift any partial block into the recent tail so head stays block-aligned.
+            extra_tail = min(tree_tokens - tail_tokens, block - remainder)
+            tail_tokens += extra_tail
+            head_limit = max(0, tree_tokens - tail_tokens)
+        tail_tokens = min(tail_tokens, tree_tokens)
+        positions_lod0 = tree.get_positions_for_lod(0)
+
+        segments: List[torch.Tensor] = []
+        pos_segments: List[torch.Tensor] = []
+        lod_segments: List[torch.Tensor] = []
+
+        def append_segment(
+            tensor: torch.Tensor,
+            pos: torch.Tensor,
+            lod_values: torch.Tensor,
+        ) -> None:
+            if tensor.shape[1] == 0:
+                return
+            segments.append(tensor)
+            pos_segments.append(pos.long())
+            lod_segments.append(lod_values.long())
+
+        def append_lod0_range(start: int, end: int) -> None:
+            if end <= start:
+                return
+            slice_embeddings = tree.get_lod0_slice(start, end)
+            slice_positions = positions_lod0[:, start:end]
+            lod_tensor = torch.zeros(
+                (slice_embeddings.shape[0], slice_embeddings.shape[1]),
                 dtype=torch.long,
-                device=embeddings.device,
+                device=slice_embeddings.device,
             )
+            append_segment(slice_embeddings, slice_positions, lod_tensor)
+
+        head_cover = 0
+        if head_limit > 0:
+            if lod > 0:
+                stride = max(1, tree.tokens_per_entry(lod))
+                max_candidates = min(head_limit // stride, embeddings.shape[1])
+                usable = 0
+                while usable < max_candidates:
+                    pos_val = int(positions[0, usable].item())
+                    if pos_val != head_cover:
+                        break
+                    if pos_val + stride > head_limit:
+                        break
+                    usable += 1
+                    head_cover = pos_val + stride
+                if usable > 0:
+                    head_embeddings = embeddings[:, :usable, :]
+                    head_positions = positions[:, :usable]
+                    lod_tensor = torch.full(
+                        (head_embeddings.shape[0], head_embeddings.shape[1]),
+                        lod,
+                        dtype=torch.long,
+                        device=head_embeddings.device,
+                    )
+                    append_segment(head_embeddings, head_positions, lod_tensor)
+            if lod == 0 or head_cover < head_limit:
+                append_lod0_range(head_cover, head_limit)
+                head_cover = head_limit
+
+        if tail_tokens > 0:
+            tail_start = max(0, tree_tokens - tail_tokens)
+            append_lod0_range(tail_start, tree_tokens)
+
+        if not segments:
+            append_lod0_range(0, tree_tokens)
+
+        embeddings_combined = torch.cat(segments, dim=1)
+        positions_combined = torch.cat(pos_segments, dim=1)
+        lod_tensor_combined = torch.cat(lod_segments, dim=1)
+
         wc = WorkingContext(
-            embeddings,
-            positions,
+            embeddings_combined,
+            positions_combined,
             config,
-            lod_tensor=lod_tensor,
+            lod_tensor=lod_tensor_combined,
         )
         self._reinforce_recent_tail(wc, tree)
         self._assert_recent_lod0(wc, tree, source)
-        expected_coverage = min(tree.num_tokens(), config.max_length)
+        expected_coverage = tree_tokens
         coverage = self._wc_token_coverage(wc, tree)
         if coverage != expected_coverage:
             raise RuntimeError(
@@ -757,12 +799,20 @@ class MCController:
                 scores=scores_detached,
             )
             self._reinforce_recent_tail(variant.working_context, tree)
+            fixed_wc = self._ensure_wc_full_coverage(variant.working_context, tree, variant.source)
+            if fixed_wc is not variant.working_context:
+                variant.working_context = fixed_wc
+                if variant.allocator is not None:
+                    variant.allocator.working_context = fixed_wc
             refined.append(variant)
             self._log_wc_snapshot(session_id, variant.working_context, variant.source)
             self._log_focus_stats(session_id, variant, f"{variant.source}_focus")
             siblings = self._generate_sibling_variants(tree, variant, session_id)
             for sibling in siblings:
                 self._reinforce_recent_tail(sibling.working_context, tree)
+                sibling_wc = self._ensure_wc_full_coverage(sibling.working_context, tree, sibling.source)
+                if sibling_wc is not sibling.working_context:
+                    sibling.working_context = sibling_wc
                 refined.append(sibling)
                 self._log_wc_snapshot(session_id, sibling.working_context, sibling.source)
                 self._log_focus_stats(session_id, sibling, f"{sibling.source}_focus")
@@ -892,6 +942,85 @@ class MCController:
                 "[MegaContext] Recent tokens must remain LOD0 "
                 f"(context={tag}). Observed LODs: {offending.tolist()}"
             )
+
+    def _ensure_wc_full_coverage(self, wc: WorkingContext, tree: MegaContextTree, tag: str) -> WorkingContext:
+        expected = tree.num_tokens()
+        if expected <= 0:
+            return wc
+        coverage = self._wc_token_coverage(wc, tree)
+        if coverage == expected:
+            return wc
+        repaired = self._rebuild_wc_with_lod0(wc, tree)
+        self._reinforce_recent_tail(repaired, tree)
+        self._assert_recent_lod0(repaired, tree, tag)
+        repaired_coverage = self._wc_token_coverage(repaired, tree)
+        if repaired_coverage != expected:
+            raise RuntimeError(
+                f"[MegaContext] Unable to restore coverage ({tag}): "
+                f"expected {expected}, got {repaired_coverage}"
+            )
+        self._configure_wc_positional(repaired)
+        return repaired
+
+    def _rebuild_wc_with_lod0(self, wc: WorkingContext, tree: MegaContextTree) -> WorkingContext:
+        positions = wc.get_positions()
+        lods = wc.get_lod_tensor()
+        tensor = wc.to_tensor()
+        total_tokens = tree.num_tokens()
+        positions_lod0 = tree.get_positions_for_lod(0)
+        cursor = 0
+        seg_embeddings: List[torch.Tensor] = []
+        seg_positions: List[torch.Tensor] = []
+        seg_lods: List[torch.Tensor] = []
+
+        def append_lod0_span(start: int, end: int) -> None:
+            if end <= start:
+                return
+            lod0_embed = tree.get_lod0_slice(start, end)
+            lod0_pos = positions_lod0[:, start:end]
+            lod0_tensor = torch.zeros(
+                (lod0_embed.shape[0], lod0_embed.shape[1]),
+                dtype=torch.long,
+                device=lod0_embed.device,
+            )
+            seg_embeddings.append(lod0_embed)
+            seg_positions.append(lod0_pos)
+            seg_lods.append(lod0_tensor)
+
+        for idx in range(wc.length):
+            if cursor >= total_tokens:
+                break
+            pos = int(positions[0, idx].item())
+            lod = int(lods[0, idx].item())
+            span = max(1, tree.tokens_per_entry(lod))
+            if pos < cursor:
+                next_pos = pos + span
+                if next_pos <= cursor:
+                    continue
+                append_lod0_span(cursor, min(next_pos, total_tokens))
+                cursor = min(next_pos, total_tokens)
+                continue
+            if pos > cursor:
+                append_lod0_span(cursor, pos)
+                cursor = pos
+            seg_embeddings.append(tensor[:, idx : idx + 1, :])
+            seg_positions.append(positions[:, idx : idx + 1])
+            seg_lods.append(lods[:, idx : idx + 1])
+            cursor = min(total_tokens, pos + span)
+
+        if cursor < total_tokens:
+            append_lod0_span(cursor, total_tokens)
+
+        new_embeddings = torch.cat(seg_embeddings, dim=1)
+        new_positions = torch.cat(seg_positions, dim=1)
+        new_lods = torch.cat(seg_lods, dim=1)
+        rebuilt = WorkingContext(
+            new_embeddings,
+            new_positions,
+            wc.config,
+            lod_tensor=new_lods,
+        )
+        return rebuilt
 
     def _clone_working_context(self, wc: WorkingContext) -> WorkingContext:
         embeddings = wc.to_tensor().clone()
@@ -1278,7 +1407,7 @@ class MCController:
         aggregate_coverage = 0
         aggregate_expected = 0
         for sample in batch_states:
-            expected = min(sample.tree.num_tokens(), self.config.wc_config.max_length)
+            expected = sample.tree.num_tokens()
             for variant in sample.variants:
                 lod_hist = self._lod_histogram(variant.working_context)
                 for lod, count in lod_hist.items():
@@ -1313,7 +1442,7 @@ class MCController:
                 "lod_counts": lod_hist,
                 "focus_iterations": int(stats.get("iterations", 0)),
                 "focus_replacements": int(stats.get("total", 0)),
-                "expected_tokens": min(primary_tree_tokens, self.config.wc_config.max_length),
+                "expected_tokens": int(primary_tree_tokens),
                 "coverage_tokens": primary_hist,
             }
         aggregate_report = {
@@ -1582,6 +1711,11 @@ class MCController:
             timings["allocator_rebuild_ms"] = (time.time() - t_rebuild0) * 1000.0
         else:
             timings["allocator_rebuild_ms"] = 0.0
+        recency_variant.working_context = self._ensure_wc_full_coverage(
+            recency_variant.working_context,
+            tree,
+            "inference_recency",
+        )
         if self.debug_metrics:
             t_tel = time.time()
             self._log_tree_snapshot(session, tree, tag="inference_init")

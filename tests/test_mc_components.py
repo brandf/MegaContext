@@ -96,7 +96,7 @@ def _build_mc_controller(
     vocab_size = 32
     monkeypatch.setattr(mc_runtime, "get_report", lambda: DummyReport())
     model = DummyModel(vocab_size=vocab_size, embed_dim=embed_dim)
-    max_seq_len = overrides.pop("max_seq_len", 16)
+    max_seq_len = overrides.pop("max_seq_len", 512)
     config = MCConfig(
         embed_dim=embed_dim,
         max_seq_len=max_seq_len,
@@ -313,25 +313,22 @@ def test_partial_blocks_remain_lod0():
 
 
 def test_random_span_sampling_uses_seed(monkeypatch):
-    tokens = torch.arange(0, 64).view(1, 64)
-    controller_a = _build_mc_controller(monkeypatch, random_seed=42)
-    embedder_a = nn.Embedding(64, controller_a.config.embed_dim)
-    tree_a = MegaContextTree.from_tokens(tokens, embedder_a, controller_a.config.tree_config)
-    cache_a = {}
-    variant_a = controller_a._build_random_span_variant(tree_a, cache_a)
-    controller_b = _build_mc_controller(monkeypatch, random_seed=42)
-    embedder_b = nn.Embedding(64, controller_b.config.embed_dim)
+    tokens = torch.arange(0, 128).view(1, 128)
+    controller_a = _build_mc_controller(monkeypatch, random_seed=42, max_seq_len=64)
+    embedder = nn.Embedding(128, controller_a.config.embed_dim)
+    tree = MegaContextTree.from_tokens(tokens, embedder, controller_a.config.tree_config)
+    cache = {}
+    starts_a = controller_a._sample_random_span_starts(tree, cache, count=4)
+    controller_b = _build_mc_controller(monkeypatch, random_seed=42, max_seq_len=64)
+    embedder_b = nn.Embedding(128, controller_b.config.embed_dim)
     tree_b = MegaContextTree.from_tokens(tokens, embedder_b, controller_b.config.tree_config)
-    cache_b = {}
-    variant_b = controller_b._build_random_span_variant(tree_b, cache_b)
-    assert variant_a is not None and variant_b is not None
-    assert variant_a.source == variant_b.source
-    controller_alt = _build_mc_controller(monkeypatch, random_seed=7)
-    embedder_alt = nn.Embedding(64, controller_alt.config.embed_dim)
+    starts_b = controller_b._sample_random_span_starts(tree_b, {}, count=4)
+    assert starts_a == starts_b
+    controller_alt = _build_mc_controller(monkeypatch, random_seed=7, max_seq_len=64)
+    embedder_alt = nn.Embedding(128, controller_alt.config.embed_dim)
     tree_alt = MegaContextTree.from_tokens(tokens, embedder_alt, controller_alt.config.tree_config)
-    variant_c = controller_alt._build_random_span_variant(tree_alt, {})
-    assert variant_c is not None
-    assert variant_c.source != variant_a.source
+    starts_c = controller_alt._sample_random_span_starts(tree_alt, {}, count=4)
+    assert starts_c != starts_a
 
 
 def test_mc_controller_logs_batch_counters(monkeypatch):
@@ -409,7 +406,7 @@ def test_train_report_uses_non_baseline_variant(monkeypatch):
         max_lod=2,
         allocator_iterations=1,
         allocator_max_replacements=1,
-        max_seq_len=64,
+        max_seq_len=512,
     )
     tokens = (torch.arange(0, 512) % 32).view(1, 512)
     _, sample_state, _, _ = controller._build_tree_sample(tokens, "train_report")
@@ -422,8 +419,8 @@ def test_train_report_uses_non_baseline_variant(monkeypatch):
     assert lod_counts.get(controller.config.max_lod, 0) > 0, "primary report should highlight highest LOD variant"
 
 
-def test_variants_respect_recent_tokens_tail(monkeypatch):
-    recent = 16
+@pytest.mark.parametrize("recent", [8, 16, 32])
+def test_variants_respect_recent_tokens_tail(monkeypatch, recent):
     controller = _build_mc_controller(
         monkeypatch,
         initial_working_contexts=4,
@@ -432,6 +429,7 @@ def test_variants_respect_recent_tokens_tail(monkeypatch):
         allocator_recent_tokens=recent,
         allocator_iterations=1,
         allocator_max_replacements=2,
+        max_seq_len=512,
     )
     tokens = (torch.arange(0, 512) % 32).view(1, 512)
     tree, sample_state, _, _ = controller._build_tree_sample(tokens, "recent_tail")
@@ -447,7 +445,7 @@ def test_variants_respect_recent_tokens_tail(monkeypatch):
         coverage = controller._wc_token_coverage(wc, tree)
         hist_equiv = controller._lod_equivalent_tokens_from_hist(hist)
         assert hist_equiv == coverage
-        expected = min(tree.num_tokens(), controller.config.wc_config.max_length)
+        expected = tree.num_tokens()
         assert coverage == expected
 
 
@@ -456,7 +454,7 @@ def test_inference_session_preserves_tail_and_coverage(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
         allocator_recent_tokens=recent,
-        max_seq_len=256,
+        max_seq_len=512,
         max_lod=2,
     )
     tokens = (torch.arange(0, 512) % 32).view(1, 512)
@@ -465,7 +463,7 @@ def test_inference_session_preserves_tail_and_coverage(monkeypatch):
     assert state is not None
     report = controller.get_inference_report()
     assert report is not None
-    assert report["coverage_tokens"] == min(tokens.shape[1], controller.config.eval_soft_max_length)
+    assert report["coverage_tokens"] == state.tree.num_tokens()
     wc = controller.get_inference_working_context()
     assert wc is not None
     lods = wc.get_lod_tensor()[0]
@@ -475,7 +473,7 @@ def test_inference_session_preserves_tail_and_coverage(monkeypatch):
     if torch.any(mask):
         assert torch.all(lods[mask] == 0)
     coverage = controller._wc_token_coverage(wc, state.tree)
-    expected = min(state.tree.num_tokens(), controller.config.eval_soft_max_length)
+    expected = state.tree.num_tokens()
     assert coverage == expected
 
 
@@ -486,6 +484,40 @@ def test_mc_controller_returns_cached_embeddings(monkeypatch):
     assert result.cached_embeddings is not None
     direct = controller.embed(tokens.to(controller.device))
     assert torch.allclose(result.cached_embeddings, direct)
+
+
+def test_process_batch_enforces_variant_coverage(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        initial_working_contexts=3,
+        max_counterfactuals=6,
+        allocator_recent_tokens=32,
+        allocator_iterations=1,
+        allocator_max_replacements=2,
+        max_seq_len=512,
+    )
+    tokens = (torch.arange(0, 512) % 32).repeat(2).view(2, 512)
+    controller.process_batch(tokens, step=0, context="train")
+    report = controller.get_training_report()
+    assert report is not None
+    aggregate = report["aggregate"]
+    assert aggregate["coverage_tokens"] == aggregate["expected_tokens"]
+
+
+def test_validation_smoke_runs_inference_path(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        allocator_recent_tokens=32,
+        max_seq_len=256,
+        max_lod=2,
+    )
+    tokens = (torch.arange(0, 256) % 32).view(1, 256)
+    controller.begin_inference_session(tokens)
+    wc = controller.get_inference_working_context()
+    assert wc is not None
+    lods = wc.get_lod_tensor()[0]
+    assert wc.length == controller.config.eval_soft_max_length
+    assert torch.sum(lods == 0) >= controller.config.allocator_recent_tokens
 
 
 def test_mc_controller_provides_per_sample_positional(monkeypatch):
