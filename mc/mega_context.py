@@ -16,9 +16,10 @@ if TYPE_CHECKING:
 class MegaContextTree:
     """Tensor-first MegaContext that stores LOD0 as tokens and higher LODs as embeddings."""
 
-    def __init__(self, config: MegaContextConfig, device: torch.device) -> None:
+    def __init__(self, config: MegaContextConfig, device: torch.device, lazy_levels: bool = False) -> None:
         self.config = config
         self.device = device
+        self._lazy_levels = lazy_levels
         self.levels: Dict[int, torch.Tensor] = {}
         self.tokens: Optional[torch.Tensor] = None
         self.embedder: Optional[nn.Module] = None
@@ -26,6 +27,7 @@ class MegaContextTree:
         self._cache_lod0: bool = True
         self.gistnet: Optional["GistNetBase"] = None
         self.batch_size: Optional[int] = None
+        self._max_ready_lod = 0
         self.access_counters = {
             "child": defaultdict(int),
             "parent": defaultdict(int),
@@ -40,8 +42,9 @@ class MegaContextTree:
         config: MegaContextConfig,
         gistnet: Optional["GistNetBase"] = None,
         precomputed_embeddings: Optional[torch.Tensor] = None,
+        lazy_levels: bool = False,
     ) -> "MegaContextTree":
-        tree = cls(config, tokens.device)
+        tree = cls(config, tokens.device, lazy_levels=lazy_levels)
         tree.attach_gistnet(gistnet)
         tree.embedder = embedder
         tree.tokens = tokens.to(tree.device).long()
@@ -52,7 +55,8 @@ class MegaContextTree:
         else:
             lod0_embeddings = embedder(tree.tokens)
         tree._lod0_cache = lod0_embeddings
-        tree._build_higher_levels(lod0_embeddings)
+        if not lazy_levels:
+            tree._build_higher_levels(lod0_embeddings)
         return tree
 
     @classmethod
@@ -61,14 +65,16 @@ class MegaContextTree:
         embeddings: torch.Tensor,
         config: MegaContextConfig,
         gistnet: Optional["GistNetBase"] = None,
+        lazy_levels: bool = False,
     ) -> "MegaContextTree":
-        tree = cls(config, embeddings.device)
+        tree = cls(config, embeddings.device, lazy_levels=lazy_levels)
         tree.attach_gistnet(gistnet)
         tree.batch_size = embeddings.shape[0]
         batch, seq_len, _ = embeddings.shape
         tree.levels[0] = embeddings.clone()
         tree._lod0_cache = embeddings.clone()
-        tree._build_higher_levels(embeddings)
+        if not lazy_levels:
+            tree._build_higher_levels(embeddings)
         return tree
 
     # ------------------------------------------------------------------ #
@@ -77,10 +83,13 @@ class MegaContextTree:
     def attach_gistnet(self, gistnet: Optional["GistNetBase"]) -> None:
         self.gistnet = gistnet
 
-    def _build_higher_levels(self, base_embeddings: torch.Tensor) -> None:
+    def _build_higher_levels(self, base_embeddings: torch.Tensor, target_lod: Optional[int] = None) -> None:
         batch, seq_len, _ = base_embeddings.shape
+        max_target = self.config.max_lod if target_lod is None else min(target_lod, self.config.max_lod)
+        if max_target <= 0:
+            return
         level_embeddings = base_embeddings.to(self.device)
-        for lod in range(1, self.config.max_lod + 1):
+        for lod in range(1, max_target + 1):
             grouped, new_len = self._reshape_for_pool(level_embeddings, self.config.block_size)
             if new_len == 0:
                 break
@@ -92,6 +101,7 @@ class MegaContextTree:
                 pooled = grouped.mean(dim=2)
             self.levels[lod] = pooled
             level_embeddings = pooled
+            self._max_ready_lod = max(self._max_ready_lod, lod)
 
     def _reshape_for_pool(self, x: torch.Tensor, block_size: int) -> Tuple[torch.Tensor, int]:
         if x.dim() == 2:
@@ -133,7 +143,10 @@ class MegaContextTree:
         total_tokens = self.tokens.shape[1] if self.tokens is not None else 0
         if total_tokens <= 0:
             return
-        for lod in range(1, self.config.max_lod + 1):
+        max_ready = min(self._max_ready_lod, self.config.max_lod)
+        if max_ready <= 0:
+            return
+        for lod in range(1, max_ready + 1):
             tokens_per_node = self.tokens_per_entry(lod)
             if tokens_per_node == 0:
                 continue
@@ -194,6 +207,7 @@ class MegaContextTree:
     def get_level(self, lod: int) -> torch.Tensor:
         if lod == 0:
             return self._get_lod0_embeddings()
+        self._ensure_levels_up_to(lod)
         if lod not in self.levels:
             raise ValueError(f"LOD {lod} not available")
         return self.levels[lod]
@@ -340,6 +354,7 @@ class MegaContextTree:
         if lod == 0:
             length = self.num_tokens()
         else:
+            self._ensure_levels_up_to(lod)
             if lod not in self.levels:
                 raise ValueError(f"LOD {lod} not available")
             length = self.levels[lod].shape[1]
@@ -347,6 +362,15 @@ class MegaContextTree:
             return torch.zeros(self._batch_size(), 0, dtype=torch.long, device=self.device)
         base_positions = torch.arange(length, device=self.device, dtype=torch.long) * stride
         return base_positions.unsqueeze(0).repeat(self._batch_size(), 1)
+
+    def _ensure_levels_up_to(self, target_lod: int) -> None:
+        if target_lod <= 0:
+            return
+        target = min(target_lod, self.config.max_lod)
+        if target <= self._max_ready_lod and target in self.levels:
+            return
+        base_embeddings = self._get_lod0_embeddings()
+        self._build_higher_levels(base_embeddings, target_lod=target)
 
 
 def build_mega_context(
@@ -356,6 +380,8 @@ def build_mega_context(
     config: MegaContextConfig,
     gistnet: Optional["GistNetBase"] = None,
     precomputed_embeddings: Optional[torch.Tensor] = None,
+    *,
+    lazy_levels: bool = False,
 ) -> MegaContextTree:
     key = kind.lower()
     try:
@@ -370,6 +396,7 @@ def build_mega_context(
             config,
             gistnet=gistnet,
             precomputed_embeddings=precomputed_embeddings,
+            lazy_levels=lazy_levels,
         )
     if key == "disk":
         raise NotImplementedError("Disk-backed MegaContextTree is not implemented yet")

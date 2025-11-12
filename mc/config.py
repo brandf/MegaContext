@@ -68,6 +68,7 @@ class MCConfig:
     infer_refocus_interval: int = 32
     infer_rebuild_max_replacements: Optional[int] = None
     infer_rebuild_iterations: Optional[int] = None
+    collect_debug_metrics: bool = False
 
     def __post_init__(self) -> None:
         self.mc_tree_type = self.mc_tree_type.lower()

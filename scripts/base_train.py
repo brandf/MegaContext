@@ -242,6 +242,7 @@ if mc_enabled:
         infer_refocus_interval=mc_infer_refocus_interval,
         infer_rebuild_max_replacements=mc_infer_rebuild_max_replacements,
         infer_rebuild_iterations=mc_infer_rebuild_iterations,
+        collect_debug_metrics=bool(mc_log_timers),
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,
@@ -467,13 +468,19 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
         if log_timers:
             timings = getattr(controller, "last_timings", {}) or {}
             if timings:
-                order = ["tree_build_ms", "allocator_rebuild_ms", "total_ms"]
+                order = ["tree_build_ms", "allocator_init_ms", "allocator_rebuild_ms", "telemetry_ms", "total_ms"]
                 formatted = []
                 for key in order:
                     if key in timings:
                         formatted.append(f"{key.replace('_ms','')}={timings[key]:.2f}ms")
-                extra = [f"{k}={v:.2f}ms" for k, v in timings.items() if k not in order]
+                extra = [
+                    f"{k.replace('_ms','')}={v:.2f}ms"
+                    for k, v in timings.items()
+                    if k not in order and k.endswith("_ms")
+                ]
                 formatted.extend(extra)
+                if "early_exit" in timings:
+                    formatted.append(f"early_exit={int(timings['early_exit'])}")
                 print0("[MC Eval Timers] " + ", ".join(formatted))
         if report_enabled and not report_printed:
             report = controller.get_inference_report() if hasattr(controller, "get_inference_report") else None

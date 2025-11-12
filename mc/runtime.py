@@ -52,10 +52,13 @@ class InferenceState:
     session_id: str
     tree: MegaContextTree
     working_context: WorkingContext
-    allocator: FocusAllocatorBase
+    allocator: Optional[FocusAllocatorBase]
+    rebuild_max_replacements: int
+    rebuild_iterations: int
     refocus_max_replacements: int
     refocus_iterations: int
     refocus_interval: int
+    soft_max_length: int
     original_seq_len: int = 0
     prefill_iterations: int = 0
     prefill_replacements: int = 0
@@ -185,6 +188,7 @@ class MCController:
         self.inference_state: Optional[InferenceState] = None
         self.last_timings: Dict[str, float] = {}
         self._focus_time_accum: float = 0.0
+        self.debug_metrics = config.collect_debug_metrics
 
     @staticmethod
     def _resolve_embedding_layer(model: torch.nn.Module):
@@ -244,11 +248,13 @@ class MCController:
             variant_counts.append(len(sample_state.variants))
             if context == "train":
                 train_variants.extend(sample_state.variants)
-            self._log_tree_snapshot(session_id, tree, tag="training_build")
-            self.telemetry.log_tree(step, tree)
+            if self.debug_metrics:
+                self._log_tree_snapshot(session_id, tree, tag="training_build")
+                self.telemetry.log_tree(step, tree)
         t_build1 = time.time()
         self.current_batch_states = batch_states
-        self.telemetry.log_focus(step, total_edits)
+        if self.debug_metrics:
+            self.telemetry.log_focus(step, total_edits)
         t_pos0 = time.time()
         positional_cache = self._build_primary_positional(batch_states) if len(batch_states) == 1 else None
         positional_cache_map = self._build_session_positional(batch_states)
@@ -704,7 +710,9 @@ class MCController:
                 return sample.variants[0].working_context
         return None
 
-    def _log_event(self, session_id: str, event_type: str, payload: Dict[str, any]) -> None:
+    def _log_event(self, session_id: str, event_type: str, payload: Dict[str, any], *, force: bool = False) -> None:
+        if not (self.debug_metrics or force):
+            return
         event = TelemetryEvent(session_id=session_id, event_type=event_type, payload=payload)
         self.telemetry_provider.log_event(event)
 
@@ -718,7 +726,7 @@ class MCController:
     def _emit_batch_counters(self, step: int) -> None:
         payload = {"step": int(step)}
         payload.update({k: int(v) for k, v in self._batch_counters.items()})
-        self._log_event(f"train_step_{step}", "mc_batch_counters", payload)
+        self._log_event(f"train_step_{step}", "mc_batch_counters", payload, force=True)
 
     def _log_memory(self, tag: str) -> None:
         if not self._mem_debug:
@@ -959,6 +967,8 @@ class MCController:
     # Telemetry helpers
     # ------------------------------------------------------------------ #
     def _log_tree_snapshot(self, session_id: str, tree: MegaContextTree, tag: str) -> None:
+        if not self.debug_metrics:
+            return
         payload = {
             "tag": tag,
             "summary": {str(k): [int(v[0]), int(v[1])] for k, v in tree.summary().items()},
@@ -969,6 +979,8 @@ class MCController:
         self._log_event(session_id, "mc_tree_snapshot", payload)
 
     def _log_wc_snapshot(self, session_id: str, wc: WorkingContext, tag: str) -> None:
+        if not self.debug_metrics:
+            return
         positions = wc.get_positions()[0].tolist()
         lods = wc.get_lod_tensor()[0].tolist()
         payload = {
@@ -985,7 +997,11 @@ class MCController:
         session_id: str,
         variant: WorkingContextVariant,
         tag: str,
+        *,
+        force: bool = False,
     ) -> None:
+        if not self.debug_metrics and not force:
+            return
         scores = variant.lens_scores
         score_payload = {}
         if scores is not None:
@@ -1019,7 +1035,7 @@ class MCController:
             "residency_p95": float(stats.get("residency_p95", 0.0)),
         })
         payload.update(score_payload)
-        self._log_event(session_id, "focus_allocator", payload)
+        self._log_event(session_id, "focus_allocator", payload, force=force)
 
     def _refresh_inference_report(self) -> None:
         if self.inference_state is None:
@@ -1291,10 +1307,13 @@ class MCController:
         Initialize a persistent MegaContext for inference/autoregressive decoding.
         """
         t_total0 = time.time()
+        timings: Dict[str, float] = {}
         if initial_tokens.dim() == 1:
             initial_tokens = initial_tokens.unsqueeze(0)
         tokens = initial_tokens.to(self.device)
         original_len = int(tokens.shape[1])
+        eval_soft_max = self.config.eval_soft_max_length or self.config.wc_config.max_length
+        fits_soft_max = original_len <= eval_soft_max
         session = session_id or f"infer_{uuid.uuid4().hex}"
         t_tree0 = time.time()
         with torch.no_grad():
@@ -1304,8 +1323,9 @@ class MCController:
                 self.embed,
                 self.config.tree_config,
                 gistnet=self.gistnet,
+                lazy_levels=fits_soft_max,
             )
-        t_tree1 = time.time()
+        timings["tree_build_ms"] = (time.time() - t_tree0) * 1000.0
         if not self.config.cache_lod0:
             tree.release_lod0_cache(disable_future_cache=True)
         # Build a recency-based working context with a local level cache,
@@ -1314,12 +1334,18 @@ class MCController:
         recency_variant = self._build_recency_variant(tree, level_cache, wc_config=self._eval_wc_config)
         if recency_variant is None:
             raise ValueError("Unable to build initial working context for inference")
-        eval_soft_max = self.config.eval_soft_max_length or self.config.wc_config.max_length
-        allocator = self._build_allocator(
-            tree,
-            recency_variant.working_context,
-            soft_max_length=eval_soft_max,
-        )
+        fits_soft_max = fits_soft_max and (recency_variant.working_context.length <= eval_soft_max)
+        allocator: Optional[FocusAllocatorBase] = None
+        alloc_init_ms = 0.0
+        if not fits_soft_max:
+            t_alloc0 = time.time()
+            allocator = self._build_allocator(
+                tree,
+                recency_variant.working_context,
+                soft_max_length=eval_soft_max,
+            )
+            alloc_init_ms = (time.time() - t_alloc0) * 1000.0
+        timings["allocator_init_ms"] = alloc_init_ms
         rebuild_repl = self.config.infer_rebuild_max_replacements
         if rebuild_repl is None:
             rebuild_repl = self.config.infer_allocator_max_replacements
@@ -1343,8 +1369,9 @@ class MCController:
         refocus_interval = self.config.infer_refocus_interval
         prefill_iterations = 0
         prefill_replacements = 0
-        t_rebuild0 = time.time()
-        if rebuild:
+        telemetry_time = 0.0
+        if allocator is not None and rebuild:
+            t_rebuild0 = time.time()
             allocator.rebuild(
                 max_replacements_per_iteration=rebuild_repl,
                 num_iterations=rebuild_iters,
@@ -1352,28 +1379,35 @@ class MCController:
             stats = getattr(allocator, "_last_edit_stats", {}) or {}
             prefill_iterations = int(stats.get("iterations", 0))
             prefill_replacements = int(stats.get("total", 0))
-        t_rebuild1 = time.time()
-        self._log_tree_snapshot(session, tree, tag="inference_init")
-        self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
+            timings["allocator_rebuild_ms"] = (time.time() - t_rebuild0) * 1000.0
+        else:
+            timings["allocator_rebuild_ms"] = 0.0
+        if self.debug_metrics:
+            t_tel = time.time()
+            self._log_tree_snapshot(session, tree, tag="inference_init")
+            self._log_wc_snapshot(session, recency_variant.working_context, recency_variant.source)
+            telemetry_time += time.time() - t_tel
         self.inference_state = InferenceState(
             session_id=session,
             tree=tree,
             working_context=recency_variant.working_context,
             allocator=allocator,
+            rebuild_max_replacements=rebuild_repl,
+            rebuild_iterations=rebuild_iters,
             refocus_max_replacements=refocus_repl,
             refocus_iterations=refocus_iters,
             refocus_interval=refocus_interval,
+            soft_max_length=eval_soft_max,
             original_seq_len=original_len,
             prefill_iterations=prefill_iterations,
             prefill_replacements=prefill_replacements,
         )
         self._refresh_inference_report()
         total_ms = (time.time() - t_total0) * 1000.0
-        self.last_timings = {
-            "tree_build_ms": (t_tree1 - t_tree0) * 1000.0,
-            "allocator_rebuild_ms": (t_rebuild1 - t_rebuild0) * 1000.0,
-            "total_ms": total_ms,
-        }
+        timings["telemetry_ms"] = telemetry_time * 1000.0
+        timings["total_ms"] = total_ms
+        timings["early_exit"] = 1.0 if fits_soft_max else 0.0
+        self.last_timings = timings
         return session
 
     def inference_step(self, new_tokens: torch.Tensor) -> None:
@@ -1388,22 +1422,25 @@ class MCController:
         state = self.inference_state
         with torch.no_grad():
             embeddings = self.embed(tokens)
-            state.allocator.append(tokens, embeddings)
-            state.steps_since_refocus += tokens.shape[1]
-            if (
-                state.refocus_max_replacements > 0
-                and state.refocus_iterations > 0
-                and state.steps_since_refocus >= state.refocus_interval
-            ):
-                state.allocator.update_focus(
-                    max_replacements_per_iteration=state.refocus_max_replacements,
-                    num_iterations=state.refocus_iterations,
-                )
-                stats = getattr(state.allocator, "_last_edit_stats", {}) or {}
-                state.refocus_updates += 1
-                state.refocus_iterations_accum += int(stats.get("iterations", 0))
-                state.refocus_replacements += int(stats.get("total", 0))
-                state.steps_since_refocus = 0
+            if state.allocator is None:
+                self._inference_append_without_allocator(state, tokens, embeddings)
+            else:
+                state.allocator.append(tokens, embeddings)
+                state.steps_since_refocus += tokens.shape[1]
+                if (
+                    state.refocus_max_replacements > 0
+                    and state.refocus_iterations > 0
+                    and state.steps_since_refocus >= state.refocus_interval
+                ):
+                    state.allocator.update_focus(
+                        max_replacements_per_iteration=state.refocus_max_replacements,
+                        num_iterations=state.refocus_iterations,
+                    )
+                    stats = getattr(state.allocator, "_last_edit_stats", {}) or {}
+                    state.refocus_updates += 1
+                    state.refocus_iterations_accum += int(stats.get("iterations", 0))
+                    state.refocus_replacements += int(stats.get("total", 0))
+                    state.steps_since_refocus = 0
         self._log_wc_snapshot(state.session_id, state.working_context, tag="inference_update")
         self._log_focus_stats(
             state.session_id,
@@ -1416,7 +1453,53 @@ class MCController:
                 allocator=state.allocator,
             ),
             tag="inference_focus",
+            force=True,
         )
+        self._refresh_inference_report()
+
+    def _inference_append_without_allocator(
+        self,
+        state: InferenceState,
+        tokens: torch.Tensor,
+        embeddings: torch.Tensor,
+    ) -> None:
+        if embeddings.dim() == 2:
+            embeddings = embeddings.unsqueeze(1)
+        append_len = embeddings.shape[1]
+        state.tree.append_with_embeddings(tokens, embeddings)
+        start_pos = max(0, state.tree.num_tokens() - append_len)
+        for offset in range(append_len):
+            slice_embed = embeddings[:, offset, :].contiguous()
+            state.working_context.append(
+                slice_embed,
+                lod=0,
+                global_position=start_pos + offset,
+            )
+        state.steps_since_refocus += append_len
+        if state.working_context.length > state.soft_max_length:
+            self._bootstrap_inference_allocator(state)
+
+    def _bootstrap_inference_allocator(self, state: InferenceState) -> None:
+        if state.allocator is not None:
+            return
+        allocator = self._build_allocator(
+            state.tree,
+            state.working_context,
+            soft_max_length=state.soft_max_length,
+        )
+        state.allocator = allocator
+        if state.rebuild_iterations > 0 and state.rebuild_max_replacements > 0:
+            allocator.rebuild(
+                max_replacements_per_iteration=state.rebuild_max_replacements,
+                num_iterations=state.rebuild_iterations,
+            )
+            stats = getattr(allocator, "_last_edit_stats", {}) or {}
+            state.prefill_iterations = int(stats.get("iterations", 0))
+            state.prefill_replacements = int(stats.get("total", 0))
+        else:
+            state.prefill_iterations = 0
+            state.prefill_replacements = 0
+        state.steps_since_refocus = 0
         self._refresh_inference_report()
 
     def get_inference_working_context(self) -> Optional[WorkingContext]:
