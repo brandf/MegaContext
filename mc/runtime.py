@@ -574,19 +574,12 @@ class MCController:
         total_tokens = tree.num_tokens()
         if total_tokens <= 0:
             return embeddings, positions, None, None
-        tail_len = min(recent, embeddings.shape[1])
-        head_len = max(0, embeddings.shape[1] - tail_len)
-        head_embeddings = embeddings[:, :head_len]
-        head_positions = positions[:, :head_len]
         tail_start = max(0, total_tokens - recent)
+        mask = (positions[0] < tail_start)
+        head_embeddings = embeddings[:, mask, :]
+        head_positions = positions[:, mask]
         tail_embeddings = tree.get_lod0_slice(tail_start, total_tokens)
         tail_positions = tree.get_positions_for_lod(0)[:, tail_start:total_tokens]
-        if tail_embeddings.shape[1] > tail_len:
-            tail_embeddings = tail_embeddings[:, -tail_len:]
-            tail_positions = tail_positions[:, -tail_len:]
-        if head_embeddings.shape[0] != tail_embeddings.shape[0]:
-            tail_embeddings = tail_embeddings.expand(head_embeddings.shape[0], -1, -1).contiguous()
-            tail_positions = tail_positions.expand(head_positions.shape[0], -1).contiguous()
         return head_embeddings, head_positions, tail_embeddings, tail_positions
 
     def _reinforce_recent_tail(self, wc: WorkingContext, tree: MegaContextTree) -> None:
@@ -653,6 +646,10 @@ class MCController:
         )
         max_length = config.max_length
         tail_len = tail_embeddings.shape[1] if tail_embeddings is not None else 0
+        if tail_len > max_length:
+            tail_embeddings = tail_embeddings[:, -max_length:]
+            tail_positions = tail_positions[:, -max_length:]
+            tail_len = max_length
         head_capacity = max(0, max_length - tail_len)
         if head_capacity > 0 and head_embeddings.shape[1] > head_capacity:
             head_embeddings = head_embeddings[:, -head_capacity:]
@@ -702,9 +699,15 @@ class MCController:
             config,
             lod_tensor=lod_tensor,
         )
-        if tail_embeddings is not None and tail_embeddings.shape[1] > 0:
-            self._reinforce_recent_tail(wc, tree)
-            self._assert_recent_lod0(wc, tree, source)
+        self._reinforce_recent_tail(wc, tree)
+        self._assert_recent_lod0(wc, tree, source)
+        expected_coverage = min(tree.num_tokens(), config.max_length)
+        coverage = self._wc_token_coverage(wc, tree)
+        if coverage != expected_coverage:
+            raise RuntimeError(
+                f"[MegaContext] Working context coverage mismatch ({source}): "
+                f"expected {expected_coverage}, got {coverage}"
+            )
         self._configure_wc_positional(wc)
         return WorkingContextVariant(working_context=wc, source=source, lod_hint=lod)
 

@@ -447,6 +447,8 @@ def test_variants_respect_recent_tokens_tail(monkeypatch):
         coverage = controller._wc_token_coverage(wc, tree)
         hist_equiv = controller._lod_equivalent_tokens_from_hist(hist)
         assert hist_equiv == coverage
+        expected = min(tree.num_tokens(), controller.config.wc_config.max_length)
+        assert coverage == expected
 
 
 def test_inference_session_preserves_tail_and_coverage(monkeypatch):
@@ -472,6 +474,9 @@ def test_inference_session_preserves_tail_and_coverage(monkeypatch):
     mask = positions >= tail_start
     if torch.any(mask):
         assert torch.all(lods[mask] == 0)
+    coverage = controller._wc_token_coverage(wc, state.tree)
+    expected = min(state.tree.num_tokens(), controller.config.eval_soft_max_length)
+    assert coverage == expected
 
 
 def test_mc_controller_returns_cached_embeddings(monkeypatch):
