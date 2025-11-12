@@ -91,6 +91,8 @@ class FocusAllocatorBase:
         self._initialize_working_context(target_tokens, tail_tokens)
         self._residency = torch.zeros(self.working_context.length, dtype=torch.long)
         self._reinforce_recent_tokens()
+        if self._should_skip_prefocus():
+            return 0
         if max_replacements_per_iteration <= 0 or num_iterations <= 0:
             return 0
         return self.update_focus(max_replacements_per_iteration, num_iterations)
@@ -428,6 +430,12 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             if int(positions[idx].item()) >= slice_start:
                 return idx
         return positions.shape[0]
+
+    def _should_skip_prefocus(self) -> bool:
+        if self.working_context.length > self.cfg.soft_max_length:
+            return False
+        lods = self.working_context.get_lod_tensor()
+        return bool((lods != 0).sum().item() == 0)
 
 
 def build_focus_allocator(
