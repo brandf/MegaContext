@@ -10,7 +10,7 @@ summary: Assessment of the current LensNet implementation/training vs. the inten
 ## High-level goals for an “ideal” LensNet
 
 1. **Policy quality**
-   - Emits signed utilities whose sign correlates with the counterfactual ΔNLL benefit of expanding vs. collapsing each WC entry.
+   - Emits signed per-entry utilities whose sign correlates with the counterfactual ΔNLL benefit of either (a) expanding that entry, or (b) collapsing the *block* (stride = block_size) that contains it. Today the focus allocator collapses aligned spans—so LensNet must aggregate per-entry collapse scores into block-level decisions. The easy path is to average (or max) over the entries that share a parent and feed that to the allocator; the better path is to let LensNet learn the mapping by supervising the parent block’s ΔNLL on every constituent entry (i.e., copy the collapse label onto all entries that will be collapsed together). Either way, policy quality means the allocator can hand LensNet per-entry scores and still take block-level actions deterministically.
    - Keeps scores calibrated so the focus allocator can trade expansions vs. collapses without thrashing.
 2. **Training loop**
    - Uses explicit ΔNLL labels (or high-fidelity proxies) collected under the same distribution as deployment.
@@ -30,7 +30,7 @@ summary: Assessment of the current LensNet implementation/training vs. the inten
 | Area | What the code does today | Observations / gaps |
 |------|-------------------------|---------------------|
 | Architecture (`mc/lensnet.py`) | 2-layer nanochat block stack with Gaussian RoPE + tanh head.| Matches doc simplification (“phase 1 ignores tail gists”). No auxiliary features (span width, cursor distance) wired yet. |
-| Training target (`_build_lens_targets`, `mc/runtime.py:1675`) | Compares each variant to the “best” (lowest-token-loss) variant and sets target = `+1` if best uses more detail (expand), `-1` if best uses less detail (collapse). | This is *relative to the best variant’s LOD map*, not ΔNLL per position. If the best variant keeps a gist collapsed, but a different variant has lower ΔNLL in that region, we never see the label. |
+| Training target (`_build_lens_targets`, `mc/runtime.py:1675`) | Compares each variant to the “best” (lowest-token-loss) variant and sets target = `+1` if best uses more detail (expand), `-1` if best uses less detail (collapse). | This is *relative to the best variant’s LOD map*, not ΔNLL per position. If the best variant keeps a gist collapsed, but a different variant actually improves ΔNLL in that region, we never see the label. On the flip side, piggybacking on the best variant is still desirable because it costs zero extra ΔNLL evaluations (we already paid the base-model forward for GistNet training). Any improved approach must stay compute efficient—e.g., reuse the per-variant losses we already have, or cache ΔNLL deltas from those runs, instead of running new counterfactual passes. |
 | Loss (`_compute_lens_losses`, `mc/runtime.py:1409`) | Pure MSE versus the `±1` targets (no ranking/budget/legality terms). Loss weighting = `1 + max(0, variant_loss - best_loss)`. | Docs promise regression + ranking + budget penalties, but only regression remains. Weighting scales loss by how much *worse* a variant is, so good edits barely backprop. |
 | Legality masking | At inference the allocator clamps illegal actions, but training targets include every WC entry regardless of LOD. | LensNet is penalized for not collapsing the root (LOD2) even though collapse is illegal, confusing gradients. |
 | ΔNLL usage | We only use ΔNLL to pick the “best variant”. No per-span ΔNLL is logged. | The doc’s “counterfactual utilities” are unimplemented—hence the dangling TODO references in `obsidian/architecture/components/LensNet Training.md`. |
@@ -98,10 +98,21 @@ summary: Assessment of the current LensNet implementation/training vs. the inten
 5. **End-to-end smoke**
    - Run a tiny training step with synthetic ΔNLL labels and assert corr_mean < 0 (scores anti-correlate with delta). This becomes part of the regression suite.
 
-## Next steps (after review)
+## Prioritized action plan
 
-1. Fix `_build_lens_targets` / loss weighting polarity so positive scores align with ΔNLL improvements (should flip corr_mean negative).
-2. Add legality masking + optional ranking/budget terms from the PRD.
-3. Surface WandB metrics for correlation + score stats.
-4. Expand tests per the checklist above.
-5. Re-run training with `--mc_log_lens_debug 1` to validate improvements before touching allocator logic.
+- [ ] **(P0) Fix target polarity / legality masking**
+  - Rebuild `_build_lens_targets` so it copies the “best variant” map but only over *actionable entries*, and flips the sign so expand (more detail) ⇒ negative ΔNLL. Weight loss by improvement (`best_loss - variant_loss`), not penalty.
+  - Mask illegal entries (LOD0 expand, LODmax collapse) during both target construction and loss.
+- [ ] **(P0) Add budget & ranking losses**
+  - Implement `L_budget` and `L_rank` from the spec so LensNet learns ordering + net-zero token flow.
+- [ ] **(P1) Score/ΔNLL telemetry in WandB**
+  - Log corr_mean/corr_max/corr_min and score histograms so we can monitor polarity without scrolling logs.
+- [ ] **(P1) Reinstate auxiliary features** (LOD level, span width, cursor distance) ahead of the scoring head to help calibration.
+- [ ] **(P1) Update tests**
+  - Add unit tests for target masks, polarity, and loss composition; add smoke test for negative correlation.
+- [ ] **(P2) Explore per-block collapse supervision**
+  - Aggregate collapse utilities per block and broadcast to entries so per-entry scores align with allocator behavior without extra ΔNLL calls.
+- [ ] **(P2) Replay / tail-gist conditioning**
+  - Decide whether to reintroduce tail gists or a small replay buffer once the core loop is stable.
+
+We’ll start executing from the top of the list (P0 items first), validating each change with `--mc_log_lens_debug 1` before moving down the stack.

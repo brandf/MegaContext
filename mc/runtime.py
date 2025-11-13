@@ -1423,11 +1423,12 @@ class MCController:
                     scores_1d = scores_live.squeeze(0)
                 else:
                     scores_1d = scores_live
-                targets = self._build_lens_targets(variant, best_map, scores_1d)
-                base_loss = F.mse_loss(scores_1d, targets, reduction='mean')
-                if variant.token_loss_value is not None:
-                    weight = 1.0 + (variant.token_loss_value - best_loss).clamp(min=0)
-                    base_loss = base_loss * weight
+                targets, mask = self._build_lens_targets(variant, best_map, scores_1d)
+                if not torch.any(mask):
+                    continue
+                masked_scores = scores_1d[mask]
+                masked_targets = targets[mask]
+                base_loss = F.mse_loss(masked_scores, masked_targets, reduction="mean")
                 losses.append(base_loss)
         if not losses:
             return None
@@ -1699,20 +1700,29 @@ class MCController:
         variant: WorkingContextVariant,
         best_map: Dict[int, int],
         score_template: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         positions = variant.working_context.get_positions()[0]
         lods = variant.working_context.get_lod_tensor()[0]
         targets = torch.zeros_like(score_template)
-        for idx, (pos, lod) in enumerate(zip(positions, lods)):
+        mask = torch.zeros_like(score_template, dtype=torch.bool)
+        max_lod = self.config.max_lod
+        for idx, (pos, lod_tensor) in enumerate(zip(positions, lods)):
+            lod = int(lod_tensor.item())
             pos_int = int(pos.item())
-            desired_lod = best_map.get(pos_int, lod.item() + 1)
-            if desired_lod < lod.item():
-                targets[idx] = 1.0  # expand
-            elif desired_lod > lod.item():
-                targets[idx] = -1.0  # collapse
-            else:
-                targets[idx] = 0.0
-        return targets
+            desired_lod = best_map.get(pos_int, lod)
+            if desired_lod < lod:
+                # Need to expand (more detail)
+                if lod <= 0:
+                    continue  # already at finest detail
+                targets[idx] = 1.0
+                mask[idx] = True
+            elif desired_lod > lod:
+                # Need to collapse (less detail)
+                if lod >= max_lod:
+                    continue  # cannot collapse further
+                targets[idx] = -1.0
+                mask[idx] = True
+        return targets, mask
 
     def _force_expand_variant(
         self,

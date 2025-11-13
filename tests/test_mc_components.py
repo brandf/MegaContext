@@ -11,7 +11,7 @@ from mc.config import MegaContextConfig, WorkingContextConfig, MCConfig
 from mc.focus_allocator import build_focus_allocator, FocusAllocatorConfig
 from mc.gistnet import GistNetBase
 from mc.mega_context import MegaContextTree
-from mc.runtime import MCController
+from mc.runtime import MCController, WorkingContextVariant
 import mc.runtime as mc_runtime
 from mc.telemetry import NoOpTelemetryProvider, TelemetryEvent, TelemetryProvider
 from mc.working_context import WorkingContext, WorkingContextEdit
@@ -411,6 +411,46 @@ def test_lod0_baseline_skips_focus_and_stays_lod0(monkeypatch):
     assert baseline.allocator is None
     assert baseline.edits_applied == 0
     assert torch.all(baseline.working_context.get_lod_tensor() == 0)
+
+
+def test_lens_targets_mask_respects_legality(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        max_lod=3,
+    )
+    embed_dim = controller.config.embed_dim
+    wc_config = controller.config.wc_config
+    positions = torch.tensor([[0, controller.config.block_size, controller.config.block_size * 2, controller.config.block_size * 3]])
+    lods = torch.tensor([[1, 2, 0, controller.config.max_lod]])
+    embeddings = torch.randn(1, positions.shape[1], embed_dim)
+    wc = WorkingContext(
+        embeddings,
+        positions,
+        wc_config,
+        lod_tensor=lods,
+    )
+    controller._configure_wc_positional(wc)
+    variant = WorkingContextVariant(working_context=wc, source="test_variant", lod_hint=1)
+    best_map = {
+        int(positions[0, 0]): 0,  # desire more detail
+        int(positions[0, 1]): 3,  # desire less detail (collapse)
+        int(positions[0, 2]): 0,  # already finest, should stay
+        int(positions[0, 3]): controller.config.max_lod,  # max detail, no collapse
+    }
+    scores = torch.zeros(wc.length)
+    targets, mask = controller._build_lens_targets(variant, best_map, scores)
+    # Entry 0: lod=1 -> target expand
+    assert mask[0]
+    assert targets[0].item() == 1.0
+    # Entry 1: lod=2 -> collapse target
+    assert mask[1]
+    assert targets[1].item() == -1.0
+    # Entry 2: lod=0 cannot expand
+    assert not mask[2]
+    assert targets[2].item() == 0.0
+    # Entry 3: lod=max cannot collapse further
+    assert not mask[3]
+    assert targets[3].item() == 0.0
 
 
 def test_train_report_uses_non_baseline_variant(monkeypatch):
