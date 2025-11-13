@@ -243,19 +243,19 @@ See [[LensNet Scoring]] for computation details and [[LensNet Training]] for how
 ### Algorithm
 
 ```python
-def refocus_working_context(working_context, lens_scores, W_max, N_diff=4):
+def refocus_working_context(working_context, policy_scores, W_max, N_diff=4):
     """
     Apply up to N_diff expand/collapse operations.
     """
     # 1. Collect candidates
     expand_candidates = [
         (score, entry)
-        for entry, score in zip(working_context, lens_scores)
+        for entry, score in zip(working_context, policy_scores)
         if score > 0.2 and can_expand(entry)
     ]
     collapse_candidates = [
         (score, entry)
-        for entry, score in zip(working_context, lens_scores)
+        for entry, score in zip(working_context, policy_scores)
         if score < -0.2 and can_collapse(entry)
     ]
 

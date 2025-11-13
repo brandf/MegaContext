@@ -76,6 +76,7 @@ class MCConfig:
     lens_margin: float = 0.1
     disable_validation: bool = False
     lens_collapse_weight: float = 1.0
+    lens_temperature: float = 1.0
     train_wc_length: Optional[int] = None
     num_random_variants: int = 4
     random_variant_iterations: int = 4
@@ -110,3 +111,5 @@ class MCConfig:
         self.num_random_variants = max(0, int(self.num_random_variants))
         self.random_variant_iterations = max(1, int(self.random_variant_iterations))
         self.max_lens_pairs = max(1, int(self.max_lens_pairs))
+        if self.lens_temperature <= 0:
+            raise ValueError("lens_temperature must be > 0")

@@ -13,7 +13,7 @@ During MC training we now:
 1. Build a *baseline* working context (pure LOD0 tail-preserving window).
 2. Sample `N` *random variants* by stochastically collapsing/expanding the baseline down to a fixed `train_wc_length`.
 3. Run next-token loss for every variant, producing per-variant NLLs and the natural “preference” ordering between them.
-4. Supervise LensNet by comparing variant pairs: the lower-loss WC is the “better” policy action, and we regress LensNet’s per-entry focus scores so that it prefers the edits that differentiate better vs. worse variants.
+4. Supervise LensNet by comparing variant pairs (our `preference_pairs`): the lower-loss WC is the “better” policy action, and we regress LensNet’s per-entry focus scores so that it prefers the edits that differentiate better vs. worse variants.
 
 ## Connection to Reinforcement Learning
 
@@ -44,6 +44,14 @@ The pairwise supervision also maps cleanly to contrastive objectives:
 - Each sample provides *positive* (better WC) and *negative* (worse WC) views of the **same underlying sequence**.
 - The regression/ranking loss can be seen as aligning LensNet scores with the *relative* quality of each entry, akin to InfoNCE where we want embeddings to move closer to positives and away from negatives.
 - Because the two variants share the same tail and differ only in focus decisions, the training signal is inherently contrastive: we only care about *differences* between variants.
+
+**Instrumentation**  
+To mirror RLHF dashboards we now emit:
+
+- `mc/adv_delta_mean` / `mc/adv_delta_p95` — running statistics of the per-variant advantage (ΔNLL relative to the baseline WC).
+- `mc/preference_corr_{mean,max,min}` — correlation between policy scores and the observed advantages.
+
+These WandB traces serve as the “reward model agreement” + “advantage histogram” analogs from standard RLHF setups.
 
 Contrastive parallels:
 
@@ -88,26 +96,26 @@ However, the *mechanics* of our loss—pairwise comparisons over different “vi
 | Contrastive learning (InfoNCE, SimCLR) | Temperature scaling, hard negative mining, multi-positive batches | Treat large Δloss pairs as “hard negatives,” schedule a temperature parameter that sharpens targets when Δloss is big, and group pairs across the batch to improve sample efficiency. |
 | Curriculum / self-play | Progressive difficulty, adversarial perturbations | Start with mild compressions (small train_wc_length drop) and gradually introduce harsher edits so LensNet learns a spectrum of focus decisions. |
 
-### Proposed Roadmap
+### Execution Checklist
 
-1. **Terminology alignment**
+1. [x] **Terminology alignment**
    - Update docs + metrics to use RLHF-style names (`preference_pairs`, `policy_scores`, `adv_delta`).
    - Add WandB charts mirroring RLHF dashboards (reward mean, advantage histogram).
 
-2. **Loss upgrades**
-   - Replace the per-entry MSE with a logistic/Bradley–Terry preference loss using ΔNLL as the logit difference.
-   - Introduce a temperature (contrastive-style) hyperparameter; sweep to match LensDebug correlations.
+2. [x] **Loss upgrades**
+   - Replaced the per-entry MSE with a Bradley–Terry (logistic) preference loss scaled by ΔNLL magnitude and a tunable temperature.
+   - Added `mc_lens_temperature` CLI/config knob so we can sweep how sharp the preference comparisons are.
 
-3. **Stability enhancements**
+3. [ ] **Stability enhancements**
    - Track running mean/variance of ΔNLL to normalize advantages before feeding them into the loss (akin to advantage normalization in PPO).
    - Add optional KL regularization between consecutive LensNet policies (`KL(old_scores || new_scores)`) to keep updates smooth.
 
-4. **Curriculum + hard-negative mining**
+4. [ ] **Curriculum + hard-negative mining**
    - Bucket variant pairs by Δloss magnitude; oversample “hard” comparisons to accelerate learning, similar to contrastive hard-negative mining.
    - Gradually shrink `train_wc_length` or increase `num_random_variants` during training to expose LensNet to more challenging edits over time.
 
-5. **Evaluation + ablations**
+5. [ ] **Evaluation + ablations**
    - Extend LensDebug to log reward-model style metrics (agreement rate, normalized advantage) and contrastive ones (temperature-scaled loss, InfoNCE analog).
-   - Run controlled ablations to measure the impact of each addition on `mc/lens_corr_mean`, swap rate, and downstream validation loss.
+   - Run controlled ablations to measure the impact of each addition on `mc/preference_corr_mean`, swap rate, and downstream validation loss.
 
 Executing this roadmap lets us systematically inject proven RLHF/contrastive tricks into LensNet while keeping the mental model firmly rooted in preference-based policy learning.

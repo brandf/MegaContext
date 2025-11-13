@@ -53,6 +53,7 @@ MC_LENS_BUDGET_WEIGHT=0.1
 MC_LENS_MARGIN=0.1
 MC_DISABLE_VAL=0
 MC_LENS_COLLAPSE_WEIGHT=1.0
+MC_LENS_TEMPERATURE=1.0
 MC_TRAIN_WC_LENGTH=""
 MC_NUM_RANDOM_VARIANTS=4
 MC_RANDOM_VARIANT_ITERATIONS=4
@@ -206,6 +207,11 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_collapse_weight" >&2; exit 1; }
             MC_LENS_COLLAPSE_WEIGHT="$1"
+            ;;
+        --mc_lens_temperature)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_temperature" >&2; exit 1; }
+            MC_LENS_TEMPERATURE="$1"
             ;;
         --mc_train_wc_length)
             shift
@@ -363,6 +369,7 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_lens_margin="$MC_LENS_MARGIN" \
     --mc_disable_val="$MC_DISABLE_VAL" \
     --mc_lens_collapse_weight="$MC_LENS_COLLAPSE_WEIGHT" \
+    --mc_lens_temperature="$MC_LENS_TEMPERATURE" \
     --mc_train_wc_length="$MC_TRAIN_WC_LENGTH" \
     --mc_num_random_variants="$MC_NUM_RANDOM_VARIANTS" \
     --mc_random_variant_iterations="$MC_RANDOM_VARIANT_ITERATIONS" \

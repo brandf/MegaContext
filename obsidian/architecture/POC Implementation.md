@@ -290,11 +290,11 @@ See [[Focus Allocator]] for algorithm, [[Focus Allocator Strategies]] for variat
 #### Greedy Algorithm
 
 ```python
-def focus_allocator_step(working_context, lens_scores, W_max):
+def focus_allocator_step(working_context, policy_scores, W_max):
     # 1. Collect candidates
-    expand_queue = [(score, entry) for entry, score in zip(working_context, lens_scores)
+    expand_queue = [(score, entry) for entry, score in zip(working_context, policy_scores)
                     if score > τ_expand and can_expand(entry)]
-    collapse_queue = [(score, entry) for entry, score in zip(working_context, lens_scores)
+    collapse_queue = [(score, entry) for entry, score in zip(working_context, policy_scores)
                       if score < -τ_collapse and can_collapse(entry)]
 
     # 2. Sort queues

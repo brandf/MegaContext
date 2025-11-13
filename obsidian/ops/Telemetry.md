@@ -54,8 +54,8 @@ delta_nll = loss_replaced - loss_full
 
 # Log per-block and aggregated
 wandb.log({
-    "train/delta_nll_mean": delta_nll.mean(),
-    "train/delta_nll_p95": torch.quantile(delta_nll, 0.95),
+    "mc/adv_delta_mean": delta_nll.mean(),
+    "mc/adv_delta_p95": torch.quantile(delta_nll, 0.95),
     "train/horizon_length": H
 })
 ```
@@ -436,7 +436,7 @@ print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 **Symptoms:** ΔNLL@`H` increases over training cycles despite loss convergence.
 
 **Diagnosis:**
-1. Check W&B: plot `train/delta_nll_mean` across JT1 phases—should decrease.
+1. Check W&B: plot `mc/adv_delta_mean` across JT1 phases—should decrease.
 2. Load checkpoints: compare gist embeddings via cosine similarity to initial checkpoint.
 3. Validate labels: ensure ΔNLL labels refreshed after each JT1 (on-policy requirement).
 

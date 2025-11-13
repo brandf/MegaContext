@@ -1,16 +1,16 @@
 ---
 tags:
   - components
-summary: Transformer-based controller that scores working-context entries for expansion or collapse.
+summary: Transformer-based controller that scores working-context entries for expansion or collapse, trained via pairwise preference comparisons.
 ---
 
 LensNet reads the [[Working Context|working-context]] window and emits signed utilities that tell the [[Focus Allocator]] where to zoom in or back off, keeping the window relevant at constant compute.
 
 - **Operates on:** current working-context embeddings plus per-entry metadata (LOD level, global position).
-- **Outputs:** signed focus scores per entry (tanh-clamped to ±1); positive ⇒ expand, negative ⇒ collapse.
+- **Outputs:** signed policy scores per entry (tanh-clamped to ±1, later temperature-scaled); positive ⇒ expand, negative ⇒ collapse.
 - **Architecture:** mini transformer stack (2/4/8 layers) with Gaussian RoPE and a linear/MLP scoring head.
 - **Cadence:** runs every `K` tokens before allocator actions. See [[POC Implementation]] for concrete values.
-- **Training:** counterfactual ΔNLL utilities, budget regularizers, legality penalties. See [[LensNet Training]].
+- **Training:** random-variant preference comparisons, Bradley–Terry (logistic) loss + optional budget/rank regularizers. See [[LensNet Training]].
 - **Interfaces:** consumes [[GistNet]] outputs and feeds the greedy [[Focus Allocator]].
 
 ## Role in the System
@@ -62,7 +62,14 @@ The [[Working Context]] now exposes a `get_rotary_embeddings(cache_key, builder)
 
 ## Training & Scoring
 
-Training remains counterfactual: we measure ΔNLL when expanding/collapsing spans, assign signed utilities, and regress/rank those utilities with budget/legality regularizers. See [[LensNet Training]] and [[LensNet Scoring]] for the current loss functions, replay buffers, and inference masking rules.
+Training remains counterfactual but now flows through **pairwise preference data**:
+
+1. Build one LOD0 baseline WC plus `N` random compressions per sequence.
+2. Run the base model on every variant to obtain next-token losses.
+3. Convert the losses into advantages (`adv_delta`) relative to the baseline.
+4. Form preference pairs (`preference_pairs`) and apply a Bradley–Terry loss with temperature `mc_lens_temperature`, plus optional rank/budget penalties.
+
+The resulting policy scores feed the greedy [[Focus Allocator]], and telemetry (`mc/adv_delta_*`, `mc/preference_corr_*`) tracks how well scores align with observed ΔNLL improvements.
 
 ## References
 

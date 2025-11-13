@@ -119,15 +119,15 @@ class FocusAllocatorBase:
             # One residency tick per allocator iteration
             if self._residency.numel() > 0:
                 self._residency += 1
-            lens_scores = scores
-            if lens_scores is None:
-                lens_scores = self.lensnet(self.working_context)
-            lens_scores = lens_scores.detach()
-            if lens_scores.dim() == 2:
+            policy_scores = scores
+            if policy_scores is None:
+                policy_scores = self.lensnet(self.working_context)
+            policy_scores = policy_scores.detach()
+            if policy_scores.dim() == 2:
                 # Average across batch; allocator operates on shared WC indices.
-                scores_1d = lens_scores.mean(dim=0)
+                scores_1d = policy_scores.mean(dim=0)
             else:
-                scores_1d = lens_scores.squeeze(0)
+                scores_1d = policy_scores.squeeze(0)
             prefer_collapse = self.working_context.length > self.cfg.soft_max_length
             edits = self._select_edits(scores_1d, max_replacements_per_iteration, prefer_collapse)
             if not edits:

@@ -106,7 +106,7 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
 ## Phase 7 — Gist Visibility & Fair Eval
 
 1. **ΔNLL logging** *(DONE)*  
-   - Controller now logs `mc/delta_mean` / `mc/delta_p95` based on per-variant vs. LOD0 losses so you can see how substitutable gists are.
+   - Controller now logs `mc/adv_delta_mean` / `mc/adv_delta_p95` based on per-variant vs. LOD0 losses so you can see how substitutable gists are.
 2. **LOD loss buckets** *(DONE)*  
    - Per-LOD average losses (`mc/lod_loss/{0,1,2}`) surface GistNet health without the old horizon machinery.
 3. **MC-aware validation** *(DONE)*  

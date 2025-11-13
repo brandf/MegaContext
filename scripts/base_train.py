@@ -121,6 +121,7 @@ mc_lens_rank_weight = 0.5
 mc_lens_budget_weight = 0.1
 mc_lens_margin = 0.1
 mc_lens_collapse_weight = 1.0
+mc_lens_temperature = 1.0
 mc_train_wc_length = None
 mc_num_random_variants = 4
 mc_random_variant_iterations = 4
@@ -160,6 +161,7 @@ mc_lens_rank_weight = float(mc_lens_rank_weight)
 mc_lens_budget_weight = float(mc_lens_budget_weight)
 mc_lens_margin = float(mc_lens_margin)
 mc_lens_collapse_weight = float(mc_lens_collapse_weight)
+mc_lens_temperature = float(mc_lens_temperature)
 mc_train_wc_length = _parse_optional_int(mc_train_wc_length)
 mc_num_random_variants = int(mc_num_random_variants)
 mc_random_variant_iterations = int(mc_random_variant_iterations)
@@ -274,6 +276,7 @@ if mc_enabled:
         lens_margin=mc_lens_margin,
         disable_validation=bool(mc_disable_val),
         lens_collapse_weight=mc_lens_collapse_weight,
+        lens_temperature=mc_lens_temperature,
         train_wc_length=mc_train_wc_length,
         num_random_variants=mc_num_random_variants,
         random_variant_iterations=mc_random_variant_iterations,
@@ -954,19 +957,19 @@ for step in range(num_iterations + 1):
             log_data["mc/variants_mean"] = sum(mc_variant_counts) / len(mc_variant_counts)
             log_data["mc/variants_total"] = sum(mc_variant_counts)
             mc_variant_counts.clear()
-        if mc_result is not None and mc_result.delta_mean is not None:
-            log_data["mc/delta_mean"] = mc_result.delta_mean
-        if mc_result is not None and mc_result.delta_p95 is not None:
-            log_data["mc/delta_p95"] = mc_result.delta_p95
+        if mc_result is not None and mc_result.adv_delta_mean is not None:
+            log_data["mc/adv_delta_mean"] = mc_result.adv_delta_mean
+        if mc_result is not None and mc_result.adv_delta_p95 is not None:
+            log_data["mc/adv_delta_p95"] = mc_result.adv_delta_p95
         if mc_result is not None and mc_result.lod_metrics:
             for lod, val in mc_result.lod_metrics.items():
                 log_data[f"mc/lod_loss/{lod}"] = val
-        if mc_result is not None and mc_result.lens_corr_mean is not None:
-            log_data["mc/lens_corr_mean"] = mc_result.lens_corr_mean
-            if mc_result.lens_corr_max is not None:
-                log_data["mc/lens_corr_max"] = mc_result.lens_corr_max
-            if mc_result.lens_corr_min is not None:
-                log_data["mc/lens_corr_min"] = mc_result.lens_corr_min
+        if mc_result is not None and mc_result.preference_corr_mean is not None:
+            log_data["mc/preference_corr_mean"] = mc_result.preference_corr_mean
+            if mc_result.preference_corr_max is not None:
+                log_data["mc/preference_corr_max"] = mc_result.preference_corr_max
+            if mc_result.preference_corr_min is not None:
+                log_data["mc/preference_corr_min"] = mc_result.preference_corr_min
         if mc_result is not None and mc_result.lod_counts:
             for lod, count in mc_result.lod_counts.items():
                 log_data[f"mc/lod_count/{lod}"] = count

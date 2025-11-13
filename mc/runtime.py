@@ -35,12 +35,12 @@ class WorkingContextVariant:
     lod_hint: int
     edits_applied: int = 0
     allocator: Optional[FocusAllocatorBase] = None
-    lens_scores: Optional[torch.Tensor] = None
+    policy_scores: Optional[torch.Tensor] = None
     token_loss_value: Optional[torch.Tensor] = None
     lod1_loss_value: Optional[torch.Tensor] = None
     batch_index: int = 0
     is_baseline: bool = False
-    delta_loss: float = 0.0
+    adv_delta: float = 0.0
 
 
 @dataclass
@@ -80,13 +80,13 @@ class MCBatchResult:
     cached_embeddings: Optional[torch.Tensor]
     positional_caches: Dict[str, Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = field(default_factory=dict)
     variants: List["WorkingContextVariant"] = field(default_factory=list)
-    delta_mean: Optional[float] = None
-    delta_p95: Optional[float] = None
+    adv_delta_mean: Optional[float] = None
+    adv_delta_p95: Optional[float] = None
     lod_metrics: Dict[int, float] = field(default_factory=dict)
     lod_counts: Dict[int, int] = field(default_factory=dict)
-    lens_corr_mean: Optional[float] = None
-    lens_corr_max: Optional[float] = None
-    lens_corr_min: Optional[float] = None
+    preference_corr_mean: Optional[float] = None
+    preference_corr_max: Optional[float] = None
+    preference_corr_min: Optional[float] = None
 
 
 class MCTelemetry:
@@ -191,7 +191,7 @@ class MCController:
         )
         self.last_inference_report: Optional[Dict[str, Any]] = None
         self.last_train_report: Optional[Dict[str, Any]] = None
-        self._last_lens_corr: Dict[str, float] = {}
+        self._last_preference_corr: Dict[str, float] = {}
         if config.positional_type:
             if config.positional_type in {"gaussian_lod2d", "gaussian_lod2d_alibi"}:
                 raise ValueError(
@@ -305,7 +305,7 @@ class MCController:
             }
             return result
         t_var0 = time.time()
-        variant_loss, lod0_loss, delta_mean, delta_p95, lod_metrics, lod_counts = self._compute_variant_losses(batch_states, tokens_device)
+        variant_loss, lod0_loss, adv_delta_mean, adv_delta_p95, lod_metrics, lod_counts = self._compute_variant_losses(batch_states, tokens_device)
         t_var1 = time.time()
         t_lens0 = time.time()
         lens_loss = self._compute_lens_losses(batch_states)
@@ -318,37 +318,37 @@ class MCController:
             cached_embeddings=torch.cat(cached_embeddings, dim=0) if cached_embeddings else None,
             positional_caches=positional_cache_map,
             variants=train_variants,
-            delta_mean=delta_mean,
-            delta_p95=delta_p95,
+            adv_delta_mean=adv_delta_mean,
+            adv_delta_p95=adv_delta_p95,
             lod_metrics=lod_metrics,
             lod_counts=lod_counts,
         )
-        if getattr(self, "_last_lens_corr", None):
-            result.lens_corr_mean = self._last_lens_corr.get("lens_corr_mean")
-            result.lens_corr_max = self._last_lens_corr.get("lens_corr_max")
-            result.lens_corr_min = self._last_lens_corr.get("lens_corr_min")
-            if result.lens_corr_mean is not None:
+        if getattr(self, "_last_preference_corr", None):
+            result.preference_corr_mean = self._last_preference_corr.get("preference_corr_mean")
+            result.preference_corr_max = self._last_preference_corr.get("preference_corr_max")
+            result.preference_corr_min = self._last_preference_corr.get("preference_corr_min")
+            if result.preference_corr_mean is not None:
                 print(
-                    f"[MegaContext][LensSummary] corr_mean={result.lens_corr_mean:.3f} "
-                    f"corr_max={result.lens_corr_max if result.lens_corr_max is not None else float('nan'):.3f} "
-                    f"corr_min={result.lens_corr_min if result.lens_corr_min is not None else float('nan'):.3f}",
+                    f"[MegaContext][PreferenceSummary] corr_mean={result.preference_corr_mean:.3f} "
+                    f"corr_max={result.preference_corr_max if result.preference_corr_max is not None else float('nan'):.3f} "
+                    f"corr_min={result.preference_corr_min if result.preference_corr_min is not None else float('nan'):.3f}",
                     flush=True,
                 )
         self.current_batch_states = []
         self._emit_batch_counters(step)
         self._refresh_train_report(batch_states)
         self._log_train_lod_ascii(step, batch_states)
-        self._log_lens_debug(batch_states)
+        self._log_preference_debug(batch_states)
         total_variants = sum(variant_counts) if variant_counts else 0
         self.last_batch_profile = {
             "variant_counts": variant_counts,
             "total_variants": total_variants,
         }
-        if delta_mean is not None:
+        if adv_delta_mean is not None:
             self._log_event(
                 f"train_step_{step}",
                 "delta_nll",
-                {"mean": float(delta_mean), "p95": float(delta_p95 or delta_mean)},
+                {"mean": float(adv_delta_mean), "p95": float(adv_delta_p95 or adv_delta_mean)},
             )
         if lod_metrics:
             self._log_event(
@@ -920,45 +920,45 @@ class MCController:
         for idx, row in enumerate(ascii_rows):
             print(f"  seq{idx:02d}: {row} ({state.working_context.length})", flush=True)
 
-    def _ensure_lens_scores_logged(
+    def _ensure_policy_scores_logged(
         self,
         variants: List[WorkingContextVariant],
         score_cache: Optional[Dict[int, torch.Tensor]] = None,
     ) -> None:
         with torch.no_grad():
             for variant in variants:
-                if variant.lens_scores is not None:
+                if variant.policy_scores is not None:
                     continue
                 if score_cache is not None:
                     cached = score_cache.get(id(variant))
                     if cached is not None:
-                        variant.lens_scores = cached.detach()
+                        variant.policy_scores = cached.detach()
                         continue
                 preview = self.lensnet(variant.working_context)
-                variant.lens_scores = preview.detach()
+                variant.policy_scores = preview.detach()
 
-    def _log_lens_debug(self, batch_states: List[SampleContext]) -> None:
+    def _log_preference_debug(self, batch_states: List[SampleContext]) -> None:
         if not (self.config.log_lens_debug and self._is_rank0):
             return
         rows: List[Tuple[str, float, float, float, float, float]] = []
         mean_scores: List[float] = []
-        delta_values: List[float] = []
+        adv_values: List[float] = []
         max_scores: List[float] = []
         min_scores: List[float] = []
         for sample in batch_states:
             for variant in sample.variants:
-                scores = variant.lens_scores
-                delta = getattr(variant, "delta_loss", None)
-                if scores is None or delta is None:
+                scores = variant.policy_scores
+                adv = getattr(variant, "adv_delta", None)
+                if scores is None or adv is None:
                     continue
                 scores_flat = scores.float().view(-1)
                 score_mean = float(scores_flat.mean().item())
                 score_std = float(scores_flat.std(unbiased=False).item())
                 score_max = float(scores_flat.max().item())
                 score_min = float(scores_flat.min().item())
-                rows.append((variant.source, score_mean, score_std, score_max, score_min, float(delta)))
+                rows.append((variant.source, score_mean, score_std, score_max, score_min, float(adv)))
                 mean_scores.append(score_mean)
-                delta_values.append(float(delta))
+                adv_values.append(float(adv))
                 max_scores.append(score_max)
                 min_scores.append(score_min)
         if not rows:
@@ -975,16 +975,16 @@ class MCController:
             if den_x <= 0 or den_y <= 0:
                 return None
             return num / (den_x ** 0.5 * den_y ** 0.5)
-        corr_mean = _corr(mean_scores, delta_values)
-        corr_max = _corr(max_scores, delta_values)
-        corr_min = _corr(min_scores, delta_values)
-        self._last_lens_corr = {
-            "lens_corr_mean": corr_mean if corr_mean is not None else float("nan"),
-            "lens_corr_max": corr_max if corr_max is not None else float("nan"),
-            "lens_corr_min": corr_min if corr_min is not None else float("nan"),
+        corr_mean = _corr(mean_scores, adv_values)
+        corr_max = _corr(max_scores, adv_values)
+        corr_min = _corr(min_scores, adv_values)
+        self._last_preference_corr = {
+            "preference_corr_mean": corr_mean if corr_mean is not None else float("nan"),
+            "preference_corr_max": corr_max if corr_max is not None else float("nan"),
+            "preference_corr_min": corr_min if corr_min is not None else float("nan"),
         }
         print(
-            "[MegaContext][LensDebug] variants=%d corr_mean=%.3f corr_max=%.3f corr_min=%.3f"
+            "[MegaContext][PrefDebug] pairs=%d corr_mean=%.3f corr_max=%.3f corr_min=%.3f"
             % (
                 len(rows),
                 corr_mean if corr_mean is not None else float("nan"),
@@ -994,10 +994,10 @@ class MCController:
             flush=True,
         )
         for entry in rows[:5]:
-            source, mean_val, std_val, max_val, min_val, delta = entry
+            source, mean_val, std_val, max_val, min_val, adv = entry
             print(
                 f"   {source:>16} score_mean={mean_val:.3f} std={std_val:.3f} "
-                f"max={max_val:.3f} min={min_val:.3f} delta={delta:.3f}",
+                f"max={max_val:.3f} min={min_val:.3f} adv={adv:.3f}",
                 flush=True,
             )
 
@@ -1109,31 +1109,31 @@ class MCController:
             return None, None, None, None, {}, {}
         loss_tensor = torch.stack(losses)
         lod0_loss = None
-        delta_values: List[float] = []
+        adv_values: List[float] = []
         lod_buckets: Dict[int, List[float]] = {}
         for sample in batch_states:
             for variant in sample.variants:
-                variant.delta_loss = None  # type: ignore[attr-defined]
+                variant.adv_delta = None  # type: ignore[attr-defined]
             baseline = None
             for variant in sample.variants:
                 if variant.lod_hint == 0 and variant.token_loss_value is not None:
                     baseline = float(variant.token_loss_value.detach())
                     lod0_loss = baseline if lod0_loss is None else lod0_loss
-                    variant.delta_loss = 0.0
+                    variant.adv_delta = 0.0
                     break
             for variant in sample.variants:
                 if variant.token_loss_value is None:
                     continue
                 val = float(variant.token_loss_value.detach())
                 if baseline is not None:
-                    variant.delta_loss = val - baseline
+                    variant.adv_delta = val - baseline
                 lod_buckets.setdefault(variant.lod_hint, []).append(val)
                 if baseline is not None and variant is not None and variant.lod_hint != 0:
-                    delta_values.append(val - baseline)
-        delta_mean = float(torch.tensor(delta_values).mean().item()) if delta_values else None
-        delta_p95 = (
-            float(torch.quantile(torch.tensor(delta_values), 0.95).item())
-            if delta_values
+                    adv_values.append(val - baseline)
+        adv_delta_mean = float(torch.tensor(adv_values).mean().item()) if adv_values else None
+        adv_delta_p95 = (
+            float(torch.quantile(torch.tensor(adv_values), 0.95).item())
+            if adv_values
             else None
         )
         lod_metrics = {
@@ -1142,7 +1142,7 @@ class MCController:
             if vals
         }
         lod_counts = {lod: len(vals) for lod, vals in lod_buckets.items()}
-        return loss_tensor.mean(), lod0_loss, delta_mean, delta_p95, lod_metrics, lod_counts
+        return loss_tensor.mean(), lod0_loss, adv_delta_mean, adv_delta_p95, lod_metrics, lod_counts
 
     def _prepare_variant_entries(
         self,
@@ -1289,10 +1289,11 @@ class MCController:
         budget_weight = float(self.config.lens_budget_weight)
         margin = float(self.config.lens_margin)
         collapse_weight = float(self.config.lens_collapse_weight)
+        temperature = max(1e-6, float(self.config.lens_temperature))
         for sample in batch_states:
-            variant_pairs = self._build_variant_pairs(sample.variants)
-            if not variant_pairs:
-                self._ensure_lens_scores_logged(sample.variants)
+            preference_pairs = self._build_preference_pairs(sample.variants)
+            if not preference_pairs:
+                self._ensure_policy_scores_logged(sample.variants)
                 continue
             map_cache: Dict[int, Dict[int, int]] = {}
             score_cache: Dict[int, torch.Tensor] = {}
@@ -1303,10 +1304,10 @@ class MCController:
                 if cached is None:
                     cached = self.lensnet(variant.working_context)
                     score_cache[key] = cached
-                    variant.lens_scores = cached.detach()
+                    variant.policy_scores = cached.detach()
                 return cached
 
-            for better, worse, strength in variant_pairs:
+            for better, worse, strength in preference_pairs:
                 scores_live = _get_scores(worse)
                 if scores_live.dim() > 1:
                     scores_1d = scores_live.squeeze(0)
@@ -1330,12 +1331,12 @@ class MCController:
                 sample_weights = torch.ones_like(masked_targets)
                 if collapse_weight != 1.0:
                     sample_weights[masked_targets < 0] = collapse_weight
-                reg_loss = F.mse_loss(
-                    masked_scores,
-                    masked_targets,
-                    reduction="none",
-                )
-                reg_loss = (reg_loss * sample_weights).mean()
+                target_sign = torch.sign(masked_targets)
+                target_strength = torch.abs(masked_targets).clamp_min(1e-6)
+                logit = target_sign * (masked_scores / temperature)
+                pref_loss = F.softplus(-logit)
+                pref_loss = pref_loss * target_strength
+                pref_loss = (pref_loss * sample_weights).mean()
                 rank_loss = masked_scores.new_tensor(0.0)
                 budget_loss = masked_scores.new_tensor(0.0)
                 if rank_weight > 0.0:
@@ -1351,9 +1352,9 @@ class MCController:
                     neg_mass = (span_vals * torch.relu(-masked_scores)).sum()
                     denom = pos_mass + neg_mass + 1e-6
                     budget_loss = ((pos_mass - neg_mass) / denom) ** 2
-                total_loss = reg_loss + rank_weight * rank_loss + budget_weight * budget_loss
+                total_loss = pref_loss + rank_weight * rank_loss + budget_weight * budget_loss
                 losses.append(total_loss)
-            self._ensure_lens_scores_logged(sample.variants, score_cache)
+            self._ensure_policy_scores_logged(sample.variants, score_cache)
         if not losses:
             return None
         return torch.stack(losses).mean()
@@ -1397,7 +1398,7 @@ class MCController:
     ) -> None:
         if not self.debug_metrics and not force:
             return
-        scores = variant.lens_scores
+        scores = variant.policy_scores
         score_payload = {}
         if scores is not None:
             if scores.dim() > 1:
@@ -1619,7 +1620,7 @@ class MCController:
             total += int(count) * (self.config.block_size ** int(lod))
         return total
 
-    def _build_variant_pairs(
+    def _build_preference_pairs(
         self, variants: List[WorkingContextVariant]
     ) -> List[Tuple[WorkingContextVariant, WorkingContextVariant, float]]:
         pairs: List[Tuple[WorkingContextVariant, WorkingContextVariant, float]] = []
@@ -1871,7 +1872,7 @@ class MCController:
                 source="inference",
                 lod_hint=0,
                 edits_applied=0,
-                lens_scores=None,
+                policy_scores=None,
                 allocator=state.allocator,
             ),
             tag="inference_focus",

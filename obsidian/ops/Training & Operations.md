@@ -56,7 +56,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 - **Horizon & losses**
   - Random variants + `--mc_max_counterfactuals` control how many WCs are sampled per sequence. Each variant trains directly against the next-token objective, so no separate horizon tuning is required.
   - `--mc_auto_batch` (default `1`) automatically scales `device_batch_size` and `num_iterations` based on the variant multiplier so MC runs keep a similar token budget to vanilla; set it to `0` if you want to manage batch math manually.
-  - `--mc_lens_loss_weight` scales the LensNet supervision that rides on top of the core loss.
+  - `--mc_lens_loss_weight` scales the LensNet supervision that rides on top of the core loss; `--mc_lens_temperature` controls the sharpness of the Bradley–Terry preference loss (lower = sharper, higher = smoother).
 - **Allocator**
   - `--allocator_type greedy|stochastic_greedy` toggles between deterministic focus edits and a top-|score| sampler (tunable via `--allocator_sample_top_k`, `--allocator_sample_temperature`). The other `--allocator_*` thresholds (`soft_max_length`, `recent_tokens`, expand/collapse thresholds, max replacements, iterations) shape how aggressively focus edits are applied per step.
 - **Auxiliary precision**
@@ -110,6 +110,8 @@ Before sharing a checkpoint or moving to downstream experiments:
 | MFU per GPU | 45–55 % | <40 % | Check `--device_batch_size`, accumulation steps, and host I/O stalls. |
 | `mc/token_loss` | Should trend down, ideally ≤ baseline loss | Flat or rising | Horizon eval unstable; revisit WC sampling or loss weights. |
 | `mc/variants_total` | consistent with `mc_num_random_variants` × batch size | Drops to 0 | Controller isn’t sampling WC variants; inspect `mc_batch_stats`. |
+| `mc/adv_delta_mean` / `mc/adv_delta_p95` | ≈0 (mean) / low (p95) | Mean drifts positive, p95 grows | Indicates random variants outperform baseline or LensNet isn’t improving utility; inspect `PrefDebug`. |
+| `mc/preference_corr_mean` | Negative (close to -1) | Approaches 0 or flips positive | Policy scores no longer align with ΔNLL; rerun preference debug / inspect targets. |
 | `mc/lens_loss` | →0 | >0.1 | LensNet disagreeing with ΔNLL argmin; inspect focus telemetry. |
 | WANDB heartbeat | steady | Missing for >15 min | Ensure networking available; scripts fall back to DummyWandb if `WANDB_RUN=dummy`. |
 
