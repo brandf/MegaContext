@@ -431,7 +431,6 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
     )
     controller._configure_wc_positional(wc)
     variant = WorkingContextVariant(working_context=wc, source="test_variant", lod_hint=1)
-    variant.delta_loss = 1.0
     best_map = {
         int(positions[0, 0]): 0,  # desire more detail
         int(positions[0, 1]): 3,  # desire less detail (collapse)
@@ -440,19 +439,25 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
         int(positions[0, 4]): controller.config.max_lod,  # max detail, no collapse
     }
     scores = torch.zeros(wc.length)
-    targets, mask, span_tokens = controller._build_lens_targets(variant, best_map, scores)
+    delta_vs_best = 1.0
+    targets, mask, span_tokens = controller._build_lens_targets(
+        variant,
+        best_map,
+        scores,
+        delta_vs_best,
+    )
     # Entry 0: lod=1 -> target expand
     assert mask[0]
-    assert pytest.approx(targets[0].item(), abs=1e-3) == -math.tanh(1.0)
+    assert pytest.approx(targets[0].item(), abs=1e-3) == math.tanh(1.0)
     # Entry 1: lod=2 -> collapse target (should apply to this block only)
     assert mask[1]
-    assert pytest.approx(targets[1].item(), abs=1e-3) == math.tanh(1.0)
+    assert pytest.approx(targets[1].item(), abs=1e-3) == -math.tanh(1.0)
     # Entries 2 & 3: lod=0 collapse => both entries in block receive same target
     assert mask[2]
     assert mask[3]
     collapse_target = math.tanh(1.0)
-    assert pytest.approx(targets[2].item(), abs=1e-3) == collapse_target
-    assert pytest.approx(targets[3].item(), abs=1e-3) == collapse_target
+    assert pytest.approx(targets[2].item(), abs=1e-3) == -collapse_target
+    assert pytest.approx(targets[3].item(), abs=1e-3) == -collapse_target
     # Entry 4: lod=max cannot collapse further
     assert not mask[4]
     assert targets[4].item() == 0.0

@@ -1447,7 +1447,15 @@ class MCController:
                     scores_1d = scores_live.squeeze(0)
                 else:
                     scores_1d = scores_live
-                targets, mask, span_tokens = self._build_lens_targets(variant, best_map, scores_1d)
+                if variant.token_loss_value is None:
+                    continue
+                delta_vs_best = float(variant.token_loss_value.detach() - best_loss.detach())
+                targets, mask, span_tokens = self._build_lens_targets(
+                    variant,
+                    best_map,
+                    scores_1d,
+                    delta_vs_best,
+                )
                 if not torch.any(mask):
                     continue
                 masked_scores = scores_1d[mask]
@@ -1740,6 +1748,7 @@ class MCController:
         variant: WorkingContextVariant,
         best_map: Dict[int, int],
         score_template: torch.Tensor,
+        delta_vs_best: float,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         positions = variant.working_context.get_positions()[0]
         lods = variant.working_context.get_lod_tensor()[0]
@@ -1748,11 +1757,12 @@ class MCController:
         span_tokens = torch.ones_like(score_template)
         max_lod = self.config.max_lod
         block_size = self.config.block_size
-        delta_loss = getattr(variant, "delta_loss", None)
-        if delta_loss is None:
+        if delta_vs_best == 0.0:
             return targets, mask, span_tokens
-        delta_val = float(delta_loss)
-        signed_strength = math.tanh(delta_val)
+        strength = math.tanh(abs(delta_vs_best))
+        if strength <= 0.0:
+            return targets, mask, span_tokens
+        direction = 1.0 if delta_vs_best > 0 else -1.0
         for idx, (pos, lod_tensor) in enumerate(zip(positions, lods)):
             lod = int(lod_tensor.item())
             pos_int = int(pos.item())
@@ -1761,19 +1771,18 @@ class MCController:
             if desired_lod == lod:
                 continue
             if desired_lod < lod:
-                # best wants more detail here
                 if lod <= 0:
                     continue
-                targets[idx] = -signed_strength if delta_val > 0 else signed_strength
+                target_val = direction * strength
+                targets[idx] = target_val
                 mask[idx] = True
             elif desired_lod > lod:
-                # best wants less detail here
                 if lod >= max_lod:
                     continue
                 parent_span = block_size ** (lod + 1)
                 parent_start = (pos_int // parent_span) * parent_span
                 parent_end = parent_start + parent_span
-                target_val = signed_strength if delta_val > 0 else -signed_strength
+                target_val = -direction * strength
                 for jdx, (pos_j, lod_j) in enumerate(zip(positions, lods)):
                     lod_j_val = int(lod_j.item())
                     pos_j_int = int(pos_j.item())
