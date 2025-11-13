@@ -47,6 +47,7 @@ MC_TRAIN_REPORT=0
 MC_VAL_REPORT=1
 MC_LOG_LOD_ASCII_TRAIN=0
 MC_LOG_LOD_ASCII_VAL=0
+MC_LOG_LENS_DEBUG=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -166,6 +167,11 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_log_lod_ascii_val" >&2; exit 1; }
             MC_LOG_LOD_ASCII_VAL="$1"
+            ;;
+        --mc_log_lens_debug)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_log_lens_debug" >&2; exit 1; }
+            MC_LOG_LENS_DEBUG="$1"
             ;;
         --block_size)
             shift
@@ -296,7 +302,8 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_val_report="$MC_VAL_REPORT" \
     --mc_log_timers="$MC_LOG_TIMERS" \
     --mc_log_lod_ascii_train="$MC_LOG_LOD_ASCII_TRAIN" \
-    --mc_log_lod_ascii_val="$MC_LOG_LOD_ASCII_VAL"
+    --mc_log_lod_ascii_val="$MC_LOG_LOD_ASCII_VAL" \
+    --mc_log_lens_debug="$MC_LOG_LENS_DEBUG"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

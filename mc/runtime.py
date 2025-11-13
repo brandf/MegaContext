@@ -114,12 +114,12 @@ class MCController:
     """
 
     _LOD_CHAR_MAP = {
-        0: "∵",
+        0: ".",
         1: "─",
         2: "═",
         3: "█",
     }
-    _LOD_PARTIAL_CHAR = "⋅"
+    _LOD_PARTIAL_CHAR = ","
 
     def __init__(
         self,
@@ -323,6 +323,7 @@ class MCController:
         self._emit_batch_counters(step)
         self._refresh_train_report(batch_states)
         self._log_train_lod_ascii(step, batch_states)
+        self._log_lens_debug(batch_states)
         total_variants = sum(variant_counts) if variant_counts else 0
         self.last_batch_profile = {
             "variant_counts": variant_counts,
@@ -1068,6 +1069,65 @@ class MCController:
         for idx, row in enumerate(ascii_rows):
             print(f"  seq{idx:02d}: {row} ({state.working_context.length})", flush=True)
 
+    def _log_lens_debug(self, batch_states: List[SampleContext]) -> None:
+        if not (self.config.log_lens_debug and self._is_rank0):
+            return
+        rows: List[Tuple[str, float, float, float, float, float]] = []
+        mean_scores: List[float] = []
+        delta_values: List[float] = []
+        max_scores: List[float] = []
+        min_scores: List[float] = []
+        for sample in batch_states:
+            for variant in sample.variants:
+                scores = variant.lens_scores
+                delta = getattr(variant, "delta_loss", None)
+                if scores is None or delta is None:
+                    continue
+                scores_flat = scores.float().view(-1)
+                score_mean = float(scores_flat.mean().item())
+                score_std = float(scores_flat.std(unbiased=False).item())
+                score_max = float(scores_flat.max().item())
+                score_min = float(scores_flat.min().item())
+                rows.append((variant.source, score_mean, score_std, score_max, score_min, float(delta)))
+                mean_scores.append(score_mean)
+                delta_values.append(float(delta))
+                max_scores.append(score_max)
+                min_scores.append(score_min)
+        if not rows:
+            return
+        def _corr(xs: List[float], ys: List[float]) -> Optional[float]:
+            n = len(xs)
+            if n < 2:
+                return None
+            mean_x = sum(xs) / n
+            mean_y = sum(ys) / n
+            num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+            den_x = sum((x - mean_x) ** 2 for x in xs)
+            den_y = sum((y - mean_y) ** 2 for y in ys)
+            if den_x <= 0 or den_y <= 0:
+                return None
+            return num / (den_x ** 0.5 * den_y ** 0.5)
+        corr_mean = _corr(mean_scores, delta_values)
+        corr_max = _corr(max_scores, delta_values)
+        corr_min = _corr(min_scores, delta_values)
+        print(
+            "[MegaContext][LensDebug] variants=%d corr_mean=%.3f corr_max=%.3f corr_min=%.3f"
+            % (
+                len(rows),
+                corr_mean if corr_mean is not None else float("nan"),
+                corr_max if corr_max is not None else float("nan"),
+                corr_min if corr_min is not None else float("nan"),
+            ),
+            flush=True,
+        )
+        for entry in rows[:5]:
+            source, mean_val, std_val, max_val, min_val, delta = entry
+            print(
+                f"   {source:>16} score_mean={mean_val:.3f} std={std_val:.3f} "
+                f"max={max_val:.3f} min={min_val:.3f} delta={delta:.3f}",
+                flush=True,
+            )
+
     def _ensure_wc_full_coverage(self, wc: WorkingContext, tree: MegaContextTree, tag: str) -> WorkingContext:
         expected = tree.num_tokens()
         if expected <= 0:
@@ -1179,16 +1239,21 @@ class MCController:
         delta_values: List[float] = []
         lod_buckets: Dict[int, List[float]] = {}
         for sample in batch_states:
+            for variant in sample.variants:
+                variant.delta_loss = None  # type: ignore[attr-defined]
             baseline = None
             for variant in sample.variants:
                 if variant.lod_hint == 0 and variant.token_loss_value is not None:
                     baseline = float(variant.token_loss_value.detach())
                     lod0_loss = baseline if lod0_loss is None else lod0_loss
+                    variant.delta_loss = 0.0
                     break
             for variant in sample.variants:
                 if variant.token_loss_value is None:
                     continue
                 val = float(variant.token_loss_value.detach())
+                if baseline is not None:
+                    variant.delta_loss = val - baseline
                 lod_buckets.setdefault(variant.lod_hint, []).append(val)
                 if baseline is not None and variant is not None and variant.lod_hint != 0:
                     delta_values.append(val - baseline)

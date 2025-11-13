@@ -116,6 +116,7 @@ mc_val_report = 1
 mc_log_timers = 0
 mc_log_lod_ascii_train = 0
 mc_log_lod_ascii_val = 0
+mc_log_lens_debug = 0
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -145,6 +146,7 @@ mc_val_report = _parse_bool_flag(mc_val_report)
 mc_log_timers = _parse_bool_flag(mc_log_timers)
 mc_log_lod_ascii_train = _parse_bool_flag(mc_log_lod_ascii_train)
 mc_log_lod_ascii_val = _parse_bool_flag(mc_log_lod_ascii_val)
+mc_log_lens_debug = _parse_bool_flag(mc_log_lens_debug)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
 
@@ -249,6 +251,7 @@ if mc_enabled:
         collect_debug_metrics=bool(mc_log_timers),
         log_lod_ascii_train=bool(mc_log_lod_ascii_train),
         log_lod_ascii_val=bool(mc_log_lod_ascii_val),
+        log_lens_debug=bool(mc_log_lens_debug),
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,

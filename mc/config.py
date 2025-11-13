@@ -71,6 +71,7 @@ class MCConfig:
     collect_debug_metrics: bool = False
     log_lod_ascii_train: bool = False
     log_lod_ascii_val: bool = False
+    log_lens_debug: bool = False
 
     def __post_init__(self) -> None:
         self.mc_tree_type = self.mc_tree_type.lower()
