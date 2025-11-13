@@ -117,6 +117,7 @@ mc_log_timers = 0
 mc_log_lod_ascii_train = 0
 mc_log_lod_ascii_val = 0
 mc_log_lens_debug = 0
+mc_disable_val = 0
 mc_lens_rank_weight = 0.5
 mc_lens_budget_weight = 0.1
 mc_lens_margin = 0.1
@@ -150,9 +151,11 @@ mc_log_timers = _parse_bool_flag(mc_log_timers)
 mc_log_lod_ascii_train = _parse_bool_flag(mc_log_lod_ascii_train)
 mc_log_lod_ascii_val = _parse_bool_flag(mc_log_lod_ascii_val)
 mc_log_lens_debug = _parse_bool_flag(mc_log_lens_debug)
+mc_disable_val = _parse_bool_flag(mc_disable_val)
 mc_lens_rank_weight = float(mc_lens_rank_weight)
 mc_lens_budget_weight = float(mc_lens_budget_weight)
 mc_lens_margin = float(mc_lens_margin)
+disable_validation = bool(mc_disable_val)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
 
@@ -261,6 +264,7 @@ if mc_enabled:
         lens_rank_weight=mc_lens_rank_weight,
         lens_budget_weight=mc_lens_budget_weight,
         lens_margin=mc_lens_margin,
+        disable_validation=bool(mc_disable_val),
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,
@@ -622,7 +626,7 @@ for step in range(num_iterations + 1):
     vanilla_loss_samples: list[float] = []
 
     # once in a while: evaluate the val bpb (all ranks participate)
-    if last_step or step % eval_every == 0:
+    if (not disable_validation) and (last_step or step % eval_every == 0):
         model.eval()
         val_loader = build_val_loader()
         eval_steps = eval_tokens // (eval_device_batch_size * max_seq_len * ddp_world_size)

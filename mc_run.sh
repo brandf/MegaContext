@@ -5,7 +5,7 @@ git pull
 
 if [ ! -f ".mc_env" ]; then
     echo "[mc_run] No .mc_env found; running mc_setup..."
-    bash mc_setup
+    python3 mc_setup
 fi
 
 bash run10.sh --mc \

@@ -420,8 +420,8 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
     )
     embed_dim = controller.config.embed_dim
     wc_config = controller.config.wc_config
-    positions = torch.tensor([[0, controller.config.block_size, controller.config.block_size * 2, controller.config.block_size * 3]])
-    lods = torch.tensor([[1, 2, 0, controller.config.max_lod]])
+    positions = torch.tensor([[0, controller.config.block_size, controller.config.block_size * 2, controller.config.block_size * 2 + 1, controller.config.block_size * 3]])
+    lods = torch.tensor([[1, 2, 0, 0, controller.config.max_lod]])
     embeddings = torch.randn(1, positions.shape[1], embed_dim)
     wc = WorkingContext(
         embeddings,
@@ -435,23 +435,27 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
     best_map = {
         int(positions[0, 0]): 0,  # desire more detail
         int(positions[0, 1]): 3,  # desire less detail (collapse)
-        int(positions[0, 2]): 0,  # already finest, should stay
-        int(positions[0, 3]): controller.config.max_lod,  # max detail, no collapse
+        int(positions[0, 2]): 1,  # collapse tokens into LOD1
+        int(positions[0, 3]): 1,
+        int(positions[0, 4]): controller.config.max_lod,  # max detail, no collapse
     }
     scores = torch.zeros(wc.length)
     targets, mask, span_tokens = controller._build_lens_targets(variant, best_map, scores)
     # Entry 0: lod=1 -> target expand
     assert mask[0]
     assert pytest.approx(targets[0].item(), abs=1e-3) == -math.tanh(1.0)
-    # Entry 1: lod=2 -> collapse target
+    # Entry 1: lod=2 -> collapse target (should apply to this block only)
     assert mask[1]
     assert pytest.approx(targets[1].item(), abs=1e-3) == math.tanh(1.0)
-    # Entry 2: lod=0 cannot expand
-    assert not mask[2]
-    assert targets[2].item() == 0.0
-    # Entry 3: lod=max cannot collapse further
-    assert not mask[3]
-    assert targets[3].item() == 0.0
+    # Entries 2 & 3: lod=0 collapse => both entries in block receive same target
+    assert mask[2]
+    assert mask[3]
+    collapse_target = math.tanh(1.0)
+    assert pytest.approx(targets[2].item(), abs=1e-3) == collapse_target
+    assert pytest.approx(targets[3].item(), abs=1e-3) == collapse_target
+    # Entry 4: lod=max cannot collapse further
+    assert not mask[4]
+    assert targets[4].item() == 0.0
     assert span_tokens[0].item() == float(controller.config.block_size ** 1)
     assert span_tokens[1].item() == float(controller.config.block_size ** 2)
 

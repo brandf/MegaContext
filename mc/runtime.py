@@ -1752,7 +1752,7 @@ class MCController:
         if delta_loss is None:
             return targets, mask, span_tokens
         delta_val = float(delta_loss)
-        signed_strength = float(torch.tanh(torch.tensor(delta_val)))
+        signed_strength = math.tanh(delta_val)
         for idx, (pos, lod_tensor) in enumerate(zip(positions, lods)):
             lod = int(lod_tensor.item())
             pos_int = int(pos.item())
@@ -1770,8 +1770,18 @@ class MCController:
                 # best wants less detail here
                 if lod >= max_lod:
                     continue
-                targets[idx] = signed_strength if delta_val > 0 else -signed_strength
-                mask[idx] = True
+                parent_span = block_size ** (lod + 1)
+                parent_start = (pos_int // parent_span) * parent_span
+                parent_end = parent_start + parent_span
+                target_val = signed_strength if delta_val > 0 else -signed_strength
+                for jdx, (pos_j, lod_j) in enumerate(zip(positions, lods)):
+                    lod_j_val = int(lod_j.item())
+                    pos_j_int = int(pos_j.item())
+                    if lod_j_val != lod:
+                        continue
+                    if parent_start <= pos_j_int < parent_end:
+                        targets[jdx] = target_val
+                        mask[jdx] = True
         return targets, mask, span_tokens
 
     def _force_expand_variant(
