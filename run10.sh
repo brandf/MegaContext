@@ -52,6 +52,7 @@ MC_LENS_RANK_WEIGHT=0.5
 MC_LENS_BUDGET_WEIGHT=0.1
 MC_LENS_MARGIN=0.1
 MC_DISABLE_VAL=0
+MC_LENS_COLLAPSE_WEIGHT=1.0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -197,6 +198,11 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_disable_val" >&2; exit 1; }
             MC_DISABLE_VAL="$1"
             ;;
+        --mc_lens_collapse_weight)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_collapse_weight" >&2; exit 1; }
+            MC_LENS_COLLAPSE_WEIGHT="$1"
+            ;;
         --block_size)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --block_size" >&2; exit 1; }
@@ -331,7 +337,8 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_lens_rank_weight="$MC_LENS_RANK_WEIGHT" \
     --mc_lens_budget_weight="$MC_LENS_BUDGET_WEIGHT" \
     --mc_lens_margin="$MC_LENS_MARGIN" \
-    --mc_disable_val="$MC_DISABLE_VAL"
+    --mc_disable_val="$MC_DISABLE_VAL" \
+    --mc_lens_collapse_weight="$MC_LENS_COLLAPSE_WEIGHT"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

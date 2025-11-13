@@ -101,7 +101,9 @@ summary: Assessment of the current LensNet implementation/training vs. the inten
 ## Prioritized action plan
 
 - [ ] **(P0) Fix target polarity / legality masking**
-  - (In progress) New implementation now uses the Δloss between each variant and the best variant to scale targets, but correlation is still positive because the sign mapping is inverted. Next change: align the sign so “variant worse & best wants more detail” ⇒ **positive** target (expand), while “variant worse & best wants less detail” ⇒ **negative** target (collapse). This still reuses the existing variant losses (no extra compute).
+  - Targets now take the absolute Δloss magnitude but force the sign to match the best variant’s desired action (expand → +, collapse → −). Collapse broadcasts still respect block alignment.
+- [ ] **(P1) Collapse weighting**
+  - Added `--mc_lens_collapse_weight` knob (defaults to 1.0) that scales the MSE penalty on collapse targets so we can make LensNet more collapse-sensitive if needed.
   - Mask illegal entries (LOD0 expand, LODmax collapse) during both target construction and loss.
 - [ ] **(P0) Add budget & ranking losses**
   - Implement `L_budget` and `L_rank` from the spec so LensNet learns ordering + net-zero token flow.

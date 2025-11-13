@@ -121,6 +121,7 @@ mc_disable_val = 0
 mc_lens_rank_weight = 0.5
 mc_lens_budget_weight = 0.1
 mc_lens_margin = 0.1
+mc_lens_collapse_weight = 1.0
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -155,6 +156,7 @@ mc_disable_val = _parse_bool_flag(mc_disable_val)
 mc_lens_rank_weight = float(mc_lens_rank_weight)
 mc_lens_budget_weight = float(mc_lens_budget_weight)
 mc_lens_margin = float(mc_lens_margin)
+mc_lens_collapse_weight = float(mc_lens_collapse_weight)
 disable_validation = bool(mc_disable_val)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
@@ -265,6 +267,7 @@ if mc_enabled:
         lens_budget_weight=mc_lens_budget_weight,
         lens_margin=mc_lens_margin,
         disable_validation=bool(mc_disable_val),
+        lens_collapse_weight=mc_lens_collapse_weight,
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,

@@ -76,6 +76,7 @@ class MCConfig:
     lens_budget_weight: float = 0.1
     lens_margin: float = 0.1
     disable_validation: bool = False
+    lens_collapse_weight: float = 1.0
 
     def __post_init__(self) -> None:
         self.mc_tree_type = self.mc_tree_type.lower()

@@ -1460,7 +1460,16 @@ class MCController:
                     continue
                 masked_scores = scores_1d[mask]
                 masked_targets = targets[mask]
-                reg_loss = F.mse_loss(masked_scores, masked_targets, reduction="mean")
+                collapse_weight = float(self.config.lens_collapse_weight)
+                sample_weights = torch.ones_like(masked_targets)
+                if collapse_weight != 1.0:
+                    sample_weights[masked_targets < 0] = collapse_weight
+                reg_loss = F.mse_loss(
+                    masked_scores,
+                    masked_targets,
+                    reduction="none",
+                )
+                reg_loss = (reg_loss * sample_weights).mean()
                 rank_loss = masked_scores.new_tensor(0.0)
                 budget_loss = masked_scores.new_tensor(0.0)
                 if rank_weight > 0.0:
@@ -1757,12 +1766,9 @@ class MCController:
         span_tokens = torch.ones_like(score_template)
         max_lod = self.config.max_lod
         block_size = self.config.block_size
-        if delta_vs_best == 0.0:
-            return targets, mask, span_tokens
         strength = math.tanh(abs(delta_vs_best))
         if strength <= 0.0:
             return targets, mask, span_tokens
-        direction = 1.0 if delta_vs_best > 0 else -1.0
         for idx, (pos, lod_tensor) in enumerate(zip(positions, lods)):
             lod = int(lod_tensor.item())
             pos_int = int(pos.item())
@@ -1773,8 +1779,7 @@ class MCController:
             if desired_lod < lod:
                 if lod <= 0:
                     continue
-                target_val = direction * strength
-                targets[idx] = target_val
+                targets[idx] = strength
                 mask[idx] = True
             elif desired_lod > lod:
                 if lod >= max_lod:
@@ -1782,14 +1787,14 @@ class MCController:
                 parent_span = block_size ** (lod + 1)
                 parent_start = (pos_int // parent_span) * parent_span
                 parent_end = parent_start + parent_span
-                target_val = -direction * strength
+                collapse_val = -strength
                 for jdx, (pos_j, lod_j) in enumerate(zip(positions, lods)):
                     lod_j_val = int(lod_j.item())
                     pos_j_int = int(pos_j.item())
                     if lod_j_val != lod:
                         continue
                     if parent_start <= pos_j_int < parent_end:
-                        targets[jdx] = target_val
+                        targets[jdx] = collapse_val
                         mask[jdx] = True
         return targets, mask, span_tokens
 
