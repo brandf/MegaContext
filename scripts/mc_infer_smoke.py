@@ -38,7 +38,6 @@ def main() -> None:
         max_seq_len=64,
         block_size=4,
         device=device,
-        initial_working_contexts=1,
         max_counterfactuals=1,
         allocator_recent_tokens=0,
         num_heads=1,

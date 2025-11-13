@@ -39,7 +39,6 @@ def test_variant_forward_handles_bf16_embeddings(monkeypatch):
         max_seq_len=16,
         block_size=2,
         device="cpu",
-        initial_working_contexts=1,
         max_counterfactuals=1,
         allocator_recent_tokens=0,
         num_heads=1,

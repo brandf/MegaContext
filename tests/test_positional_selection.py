@@ -33,7 +33,6 @@ def test_session_positional_prefers_lod0_baseline():
         max_seq_len=16,
         block_size=2,
         device="cpu",
-        initial_working_contexts=1,
         max_counterfactuals=1,
         allocator_recent_tokens=0,
         num_heads=1,

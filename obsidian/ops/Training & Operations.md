@@ -39,7 +39,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 
 | Scenario | Command | Notes |
 | --- | --- | --- |
-| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--block_size 8|32|128] [--gistnet_* ...] [--lensnet_* ...] [--allocator ...] [--mc_tree ram|disk] [--mc_initial_wcs N --mc_max_counterfactuals N] [--mc_lens_loss_weight 0.1] [--mc_auto_batch 1|0]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
+| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--block_size 8|32|128] [--gistnet_* ...] [--lensnet_* ...] [--allocator ...] [--mc_tree ram|disk] [--mc_num_random_variants N --mc_train_wc_length L --mc_max_counterfactuals N] [--mc_lens_loss_weight 0.1] [--mc_auto_batch 1|0]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
 | Single H100 (80 GB) | `bash run10.sh --gpu h100 [--mc] ...` | Doubles device batch size, halves iteration count for the same token budget. |
 | $100 speed tier | `bash speedrun.sh [--mc] ...` | 8×H100, depth 20 (Karpathy’s “best $100” recipe). |
 | $1000 tier | `bash run1000.sh [--mc] ...` | 8×H100, depth 32 with tuned accumulation. |
@@ -52,9 +52,9 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 
 - **Tree / WC sampling**
   - `--mc_tree ram` (disk-backed MegaContext is on the roadmap; today only the in-memory tree is wired up and the scripts will error if another value is provided).
-  - `--mc_initial_wcs` (N1) and `--mc_max_counterfactuals` (N2) define how many Working Contexts we evaluate per training sequence (initial samples + LensNet siblings). Raise them for richer ΔNLL supervision; lower to save compute.
+  - `--mc_num_random_variants` (N) + `--mc_max_counterfactuals` bound how many random WC compressions we train per sequence, while `--mc_train_wc_length` sets the target length each variant collapses toward. Raise them for richer ΔNLL supervision; lower to save compute.
 - **Horizon & losses**
-  - `--mc_initial_wcs` / `--mc_max_counterfactuals` control how many WC variants are sampled per sequence. Each variant now trains directly against the next-token objective, so no separate horizon tuning is required.
+  - Random variants + `--mc_max_counterfactuals` control how many WCs are sampled per sequence. Each variant trains directly against the next-token objective, so no separate horizon tuning is required.
   - `--mc_auto_batch` (default `1`) automatically scales `device_batch_size` and `num_iterations` based on the variant multiplier so MC runs keep a similar token budget to vanilla; set it to `0` if you want to manage batch math manually.
   - `--mc_lens_loss_weight` scales the LensNet supervision that rides on top of the core loss.
 - **Allocator**
@@ -109,7 +109,7 @@ Before sharing a checkpoint or moving to downstream experiments:
 | Residency | 90–100 % | <80 % | Allocator collapsing too aggressively; verify Lens logits and budget constraints. |
 | MFU per GPU | 45–55 % | <40 % | Check `--device_batch_size`, accumulation steps, and host I/O stalls. |
 | `mc/token_loss` | Should trend down, ideally ≤ baseline loss | Flat or rising | Horizon eval unstable; revisit WC sampling or loss weights. |
-| `mc/variants_total` | consistent with `mc_initial_wcs` × batch size | Drops to 0 | Controller isn’t sampling WC variants; inspect `mc_batch_stats`. |
+| `mc/variants_total` | consistent with `mc_num_random_variants` × batch size | Drops to 0 | Controller isn’t sampling WC variants; inspect `mc_batch_stats`. |
 | `mc/lens_loss` | →0 | >0.1 | LensNet disagreeing with ΔNLL argmin; inspect focus telemetry. |
 | WANDB heartbeat | steady | Missing for >15 min | Ensure networking available; scripts fall back to DummyWandb if `WANDB_RUN=dummy`. |
 

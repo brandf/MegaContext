@@ -42,7 +42,6 @@ def test_batched_rope_shapes_and_forward(monkeypatch):
         max_seq_len=T,
         block_size=2,
         device="cpu",
-        initial_working_contexts=1,
         max_counterfactuals=1,
         allocator_recent_tokens=0,
         num_heads=num_heads,

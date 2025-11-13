@@ -27,3 +27,4 @@ _Status: In Progress (current score: 7/10)_
 - 2025-11-12: Document created; baseline score recorded.
 - 2025-11-12: Added integration/tail/inference tests (see `tests/test_mc_components.py`).
 - 2025-11-13: Rebuilt `_create_variant` head/tail logic, added coverage auto-heal + stricter invariants, refreshed tail/random-span tests, suite green (25/25).
+- 2025-11-14: Retired legacy allocator-driven variant sampling, added deterministic random-variant + LensNet pairwise-loss tests, suite green (28/28).

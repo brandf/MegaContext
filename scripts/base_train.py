@@ -101,7 +101,6 @@ allocator_sample_top_k = 4
 allocator_sample_temperature = 1.0
 mc_aux_dtype = "auto"
 mc_tree_type = "ram"
-mc_initial_wcs = 4
 mc_max_counterfactuals = 8
 mc_lens_loss_weight = 0.1
 mc_auto_batch = 1
@@ -122,6 +121,10 @@ mc_lens_rank_weight = 0.5
 mc_lens_budget_weight = 0.1
 mc_lens_margin = 0.1
 mc_lens_collapse_weight = 1.0
+mc_train_wc_length = None
+mc_num_random_variants = 4
+mc_random_variant_iterations = 4
+mc_max_lens_pairs = 8
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -157,6 +160,10 @@ mc_lens_rank_weight = float(mc_lens_rank_weight)
 mc_lens_budget_weight = float(mc_lens_budget_weight)
 mc_lens_margin = float(mc_lens_margin)
 mc_lens_collapse_weight = float(mc_lens_collapse_weight)
+mc_train_wc_length = _parse_optional_int(mc_train_wc_length)
+mc_num_random_variants = int(mc_num_random_variants)
+mc_random_variant_iterations = int(mc_random_variant_iterations)
+mc_max_lens_pairs = int(mc_max_lens_pairs)
 disable_validation = bool(mc_disable_val)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
@@ -249,7 +256,6 @@ if mc_enabled:
         lensnet_head=lensnet_head,
         allocator_type=allocator_type,
         mc_tree_type=mc_tree_type,
-        initial_working_contexts=mc_initial_wcs,
         max_counterfactuals=mc_max_counterfactuals,
         lens_loss_weight=mc_lens_loss_weight,
         soft_max_length=allocator_soft_max,
@@ -268,6 +274,10 @@ if mc_enabled:
         lens_margin=mc_lens_margin,
         disable_validation=bool(mc_disable_val),
         lens_collapse_weight=mc_lens_collapse_weight,
+        train_wc_length=mc_train_wc_length,
+        num_random_variants=mc_num_random_variants,
+        random_variant_iterations=mc_random_variant_iterations,
+        max_lens_pairs=mc_max_lens_pairs,
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,

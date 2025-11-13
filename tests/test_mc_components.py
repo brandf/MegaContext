@@ -97,12 +97,12 @@ def _build_mc_controller(
     monkeypatch.setattr(mc_runtime, "get_report", lambda: DummyReport())
     model = DummyModel(vocab_size=vocab_size, embed_dim=embed_dim)
     max_seq_len = overrides.pop("max_seq_len", 512)
+    overrides.pop("initial_working_contexts", None)
     config = MCConfig(
         embed_dim=embed_dim,
         max_seq_len=max_seq_len,
         block_size=block_size,
         device="cpu",
-        initial_working_contexts=overrides.pop("initial_working_contexts", 1),
         max_counterfactuals=overrides.pop("max_counterfactuals", 1),
         allocator_recent_tokens=overrides.pop("allocator_recent_tokens", 0),
         random_seed=random_seed,
@@ -312,25 +312,6 @@ def test_partial_blocks_remain_lod0():
     assert 1 not in tree.levels
 
 
-def test_random_span_sampling_uses_seed(monkeypatch):
-    tokens = torch.arange(0, 128).view(1, 128)
-    controller_a = _build_mc_controller(monkeypatch, random_seed=42, max_seq_len=64)
-    embedder = nn.Embedding(128, controller_a.config.embed_dim)
-    tree = MegaContextTree.from_tokens(tokens, embedder, controller_a.config.tree_config)
-    cache = {}
-    starts_a = controller_a._sample_random_span_starts(tree, cache, count=4)
-    controller_b = _build_mc_controller(monkeypatch, random_seed=42, max_seq_len=64)
-    embedder_b = nn.Embedding(128, controller_b.config.embed_dim)
-    tree_b = MegaContextTree.from_tokens(tokens, embedder_b, controller_b.config.tree_config)
-    starts_b = controller_b._sample_random_span_starts(tree_b, {}, count=4)
-    assert starts_a == starts_b
-    controller_alt = _build_mc_controller(monkeypatch, random_seed=7, max_seq_len=64)
-    embedder_alt = nn.Embedding(128, controller_alt.config.embed_dim)
-    tree_alt = MegaContextTree.from_tokens(tokens, embedder_alt, controller_alt.config.tree_config)
-    starts_c = controller_alt._sample_random_span_starts(tree_alt, {}, count=4)
-    assert starts_c != starts_a
-
-
 def test_lod_ascii_renderer_handles_partial_tail(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
@@ -354,51 +335,101 @@ def test_mc_controller_logs_batch_counters(monkeypatch):
     assert any(event.event_type == "mc_batch_counters" for event in telemetry.events)
 
 
-def test_training_variant_set_includes_pure_lod0_and_highest_lod(monkeypatch):
+def test_random_variant_sampler_preserves_baseline_and_compresses(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        initial_working_contexts=3,
-        max_counterfactuals=6,
-        max_lod=2,
-        allocator_iterations=1,
-        allocator_max_replacements=2,
+        max_seq_len=256,
+        allocator_recent_tokens=0,
+        train_wc_length=64,
+        num_random_variants=3,
+        max_counterfactuals=4,
+        random_seed=7,
     )
-    tokens = (torch.arange(0, 128) % 32).view(1, 128)
-    _, sample_state, _, _ = controller._build_tree_sample(tokens, "train_variants")
-    lod0_variants = [v for v in sample_state.variants if v.is_baseline]
-    assert lod0_variants, "expected at least one pure LOD0 variant"
-    lod_tensor = lod0_variants[0].working_context.get_lod_tensor()
-    assert torch.all(lod_tensor == 0), "lod_0 baseline must remain all LOD0"
-    highest = controller.config.max_lod
-    highest_variants = [v for v in sample_state.variants if v.lod_hint == highest]
-    assert highest_variants, "expected variant sourced from highest LOD"
-    hv = highest_variants[0].working_context.get_lod_tensor()
-    assert torch.any(hv == highest)
+    tokens = (torch.arange(0, 256) % 32).view(1, 256)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "random_variants")
+    assert len(sample_state.variants) == 4
+    baseline = sample_state.variants[0]
+    assert baseline.is_baseline
+    assert torch.all(baseline.working_context.get_lod_tensor() == 0)
+    total_tokens = sample_state.tree.num_tokens()
+    for variant in sample_state.variants:
+        coverage = controller._wc_token_coverage(variant.working_context, sample_state.tree)
+        assert coverage == total_tokens
+    for variant in sample_state.variants[1:]:
+        assert variant.working_context.length < total_tokens
+        lods = variant.working_context.get_lod_tensor()[0]
+        assert torch.any(lods > 0), "compressed variants should contain non-zero LOD entries"
 
 
-def test_training_variants_include_mixed_lod_entries(monkeypatch):
+def test_random_variant_sampler_is_deterministic(monkeypatch):
+    overrides = dict(
+        max_seq_len=192,
+        allocator_recent_tokens=0,
+        train_wc_length=48,
+        num_random_variants=2,
+        max_counterfactuals=3,
+    )
+    controller_a = _build_mc_controller(monkeypatch, random_seed=11, **overrides)
+    controller_b = _build_mc_controller(monkeypatch, random_seed=11, **overrides)
+    controller_c = _build_mc_controller(monkeypatch, random_seed=13, **overrides)
+    tokens = (torch.arange(0, 192) % 32).view(1, 192)
+
+    def _signatures(controller):
+        _, sample_state, _, _ = controller._build_tree_sample(tokens, "rand_det")
+        sigs = []
+        for variant in sample_state.variants:
+            positions = variant.working_context.get_positions()[0].tolist()
+            lods = variant.working_context.get_lod_tensor()[0].tolist()
+            sigs.append((variant.source, positions, lods))
+        return sigs
+
+    sig_a = _signatures(controller_a)
+    sig_b = _signatures(controller_b)
+    sig_c = _signatures(controller_c)
+    assert sig_a == sig_b, "controllers with same seed should match"
+    assert sig_a != sig_c, "different seeds should change the sampled variants"
+
+
+def test_pairwise_lens_loss_backprop(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        initial_working_contexts=4,
-        max_counterfactuals=8,
-        max_lod=2,
-        allocator_iterations=1,
-        allocator_max_replacements=2,
+        max_seq_len=128,
+        allocator_recent_tokens=0,
+        train_wc_length=32,
+        num_random_variants=2,
+        max_counterfactuals=3,
+        random_seed=5,
     )
+
+    class LinearLens(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.proj = nn.Linear(1, 1)
+
+        def forward(self, working_context: WorkingContext) -> torch.Tensor:  # type: ignore[override]
+            values = working_context.to_tensor().mean(dim=-1, keepdim=True)
+            return self.proj(values)
+
+    controller.lensnet = LinearLens()
     tokens = (torch.arange(0, 128) % 32).view(1, 128)
-    _, sample_state, _, _ = controller._build_tree_sample(tokens, "train_variants_mixed")
-    mixed = [
-        v
-        for v in sample_state.variants
-        if not v.is_baseline and torch.any(v.working_context.get_lod_tensor()[0] > 0)
-    ]
-    assert mixed, "expected at least one focused variant containing higher LOD entries"
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "lens_loss")
+    assert len(sample_state.variants) >= 2
+    base_loss = 0.1
+    for idx, variant in enumerate(sample_state.variants):
+        loss_val = base_loss + 0.05 * idx
+        variant.token_loss_value = torch.tensor(loss_val, dtype=torch.float32)
+    loss = controller._compute_lens_losses([sample_state])
+    assert loss is not None
+    controller.lensnet.proj.zero_grad()
+    loss.backward()
+    grad = controller.lensnet.proj.weight.grad
+    assert grad is not None
+    assert grad.abs().sum() > 0
 
 
 def test_lod0_baseline_skips_focus_and_stays_lod0(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        initial_working_contexts=3,
         max_counterfactuals=5,
         allocator_iterations=1,
         allocator_max_replacements=2,
@@ -440,7 +471,7 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
     }
     scores = torch.zeros(wc.length)
     delta_vs_best = 1.0
-    targets, mask, span_tokens = controller._build_lens_targets(
+    targets, mask, span_tokens = controller._build_pairwise_targets(
         variant,
         best_map,
         scores,
@@ -468,7 +499,6 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
 def test_train_report_uses_non_baseline_variant(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        initial_working_contexts=3,
         max_counterfactuals=6,
         max_lod=2,
         allocator_iterations=1,
@@ -491,7 +521,6 @@ def test_train_report_uses_non_baseline_variant(monkeypatch):
 def test_variants_respect_recent_tokens_tail(monkeypatch, recent):
     controller = _build_mc_controller(
         monkeypatch,
-        initial_working_contexts=4,
         max_counterfactuals=8,
         max_lod=2,
         allocator_recent_tokens=recent,
@@ -557,7 +586,6 @@ def test_mc_controller_returns_cached_embeddings(monkeypatch):
 def test_process_batch_enforces_variant_coverage(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        initial_working_contexts=3,
         max_counterfactuals=6,
         allocator_recent_tokens=32,
         allocator_iterations=1,

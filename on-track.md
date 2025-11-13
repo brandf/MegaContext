@@ -12,8 +12,8 @@ Enforce the “full-window coverage” invariant for every WorkingContext (train
 3. **Immutable Tail & Coverage Repair** – _Done_
    - Added `_ensure_wc_full_coverage` / `_rebuild_wc_with_lod0` to auto-heal gaps after focus edits/siblings.
    - Recent tail enforcement happens after every allocator mutation.
-4. **Random Span / Seed Logic** – _Done_
-   - Replaced obsolete random-span variant assertions with deterministic start sampling checks.
+4. **Random Variant Sampler** – _Done_
+   - Covered deterministic random-variant generation + length/LOD assertions instead of the old random-span helpers.
 5. **Regression Tests** – _Done_
    - `PYTHONPATH=. pytest tests/test_mc_components.py tests/test_mc_batched_rope.py` now passes (25/25).
 6. **Docs & Tracking** – _Done_

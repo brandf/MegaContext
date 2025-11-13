@@ -31,7 +31,6 @@ def test_mc_controller_rejects_lod2d_positional():
         block_size=2,
         device="cpu",
         positional_type="gaussian_lod2d",
-        initial_working_contexts=1,
         max_counterfactuals=1,
         allocator_recent_tokens=0,
         num_heads=1,

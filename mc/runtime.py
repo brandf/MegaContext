@@ -23,7 +23,7 @@ from .focus_allocator import (
     FocusAllocatorConfig,
 )
 from .mega_context import MegaContextTree, build_mega_context
-from .working_context import WorkingContext, WorkingContextEdit
+from .working_context import WorkingContext
 from .gaussian_rope import build_positional, GaussianRoPE
 from .telemetry import TelemetryEvent, TelemetryProvider, NoOpTelemetryProvider
 
@@ -40,6 +40,7 @@ class WorkingContextVariant:
     lod1_loss_value: Optional[torch.Tensor] = None
     batch_index: int = 0
     is_baseline: bool = False
+    delta_loss: float = 0.0
 
 
 @dataclass
@@ -209,7 +210,6 @@ class MCController:
         self.current_batch_states: List[SampleContext] = []
         self.inference_state: Optional[InferenceState] = None
         self.last_timings: Dict[str, float] = {}
-        self._focus_time_accum: float = 0.0
         self.debug_metrics = config.collect_debug_metrics
         self._timing_device = torch.device(config.device)
 
@@ -248,7 +248,6 @@ class MCController:
         """
         self.last_batch_profile = None
         self.last_timings = {}
-        self._focus_time_accum = 0.0
         batch_states: List[SampleContext] = []
         total_edits = 0
         tokens_device = tokens.to(self.device)
@@ -301,7 +300,7 @@ class MCController:
                 "positional_ms": (t_pos1 - t_pos0) * 1000.0,
                 "variant_ms": 0.0,
                 "lens_ms": 0.0,
-                "focus_ms": self._focus_time_accum * 1000.0,
+                "focus_ms": 0.0,
                 "total_ms": total_ms,
             }
             return result
@@ -379,7 +378,7 @@ class MCController:
             "positional_ms": (t_pos1 - t_pos0) * 1000.0,
             "variant_ms": (t_var1 - t_var0) * 1000.0,
             "lens_ms": (t_lens1 - t_lens0) * 1000.0,
-            "focus_ms": self._focus_time_accum * 1000.0,
+            "focus_ms": 0.0,
             "total_ms": total_ms,
         }
         return result
@@ -413,12 +412,75 @@ class MCController:
     # Training helpers
     # ------------------------------------------------------------------ #
     def _build_sample_context(self, tree: MegaContextTree, session_id: str) -> SampleContext:
-        variants = self._sample_initial_wcs(tree, session_id=session_id)
-        focus_start = time.time()
-        refined = self._refine_variants(tree, variants, session_id=session_id)
-        self._focus_time_accum += time.time() - focus_start
-        limited = refined[: self.config.max_counterfactuals]
-        return SampleContext(session_id=session_id, tree=tree, variants=limited)
+        random_variants = self._build_random_variant_set(tree, session_id=session_id)
+        return SampleContext(session_id=session_id, tree=tree, variants=random_variants)
+
+    def _build_random_variant_set(self, tree: MegaContextTree, session_id: str) -> List[WorkingContextVariant]:
+        variants: List[WorkingContextVariant] = []
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+        baseline = self._build_lod0_baseline_variant(tree, level_cache)
+        if baseline is not None:
+            baseline.source = "lod_0_baseline"
+            variants.append(baseline)
+        seed = baseline
+        if seed is None:
+            return variants
+        target_len = int(self.config.train_wc_length or self.config.wc_config.max_length)
+        for idx in range(self.config.num_random_variants):
+            variant = self._build_random_variant(tree, seed, target_len, idx)
+            if variant is not None:
+                variants.append(variant)
+        limit = max(1, self.config.max_counterfactuals)
+        return variants[:limit]
+
+    def _build_random_variant(
+        self,
+        tree: MegaContextTree,
+        seed: WorkingContextVariant,
+        target_len: int,
+        index: int,
+    ) -> Optional[WorkingContextVariant]:
+        if seed.working_context.length == 0:
+            return None
+        wc = self._clone_working_context(seed.working_context)
+        allocator = self._build_allocator(
+            tree,
+            wc,
+            soft_max_length=target_len,
+        )
+        tensor_device = wc.to_tensor().device
+        generator = self._make_torch_generator(tensor_device)
+        max_iterations = max(1, int(self.config.random_variant_iterations))
+        total_edits = 0
+        for _ in range(max_iterations):
+            length = wc.length
+            if length == 0:
+                break
+            scores = torch.randn(
+                1,
+                length,
+                device=tensor_device,
+                generator=generator,
+            )
+            edits = allocator.update_focus(
+                max_replacements_per_iteration=self.config.allocator_max_replacements,
+                num_iterations=1,
+                scores=scores,
+            )
+            total_edits += edits
+            if wc.length <= target_len:
+                break
+        fixed_wc = self._ensure_wc_full_coverage(wc, tree, f"random_variant_{index}")
+        if fixed_wc is not wc:
+            wc = fixed_wc
+            allocator.working_context = wc
+        return WorkingContextVariant(
+            working_context=wc,
+            source=f"random_variant_{index}",
+            lod_hint=-1,
+            edits_applied=total_edits,
+            allocator=allocator,
+        )
 
     def _build_primary_positional(
         self, batch_states: List[SampleContext]
@@ -461,56 +523,6 @@ class MCController:
             alibi_bias = (slopes * rel.unsqueeze(1)).bfloat16()
         return cos.to(self.device), sin.to(self.device), alibi_bias
 
-    def _sample_initial_wcs(self, tree: MegaContextTree, session_id: str) -> List[WorkingContextVariant]:
-        variants: List[WorkingContextVariant] = []
-        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
-        baseline = self._build_lod0_baseline_variant(tree, level_cache)
-        if baseline is not None:
-            variants.append(baseline)
-        target = self.config.initial_working_contexts
-        for lod in range(1, self.config.max_lod + 1):
-            if len(variants) >= target:
-                break
-            variant = self._build_lod_variant(tree, lod, level_cache)
-            if variant is not None:
-                variants.append(variant)
-        self._ensure_highest_lod_coverage(tree, variants, target, level_cache)
-        needed = target - len(variants)
-        if needed > 0:
-            starts = self._sample_random_span_starts(tree, level_cache, needed)
-            for start in starts:
-                variant = self._build_span_variant(tree, start, level_cache)
-                if variant is None:
-                    continue
-                variants.append(variant)
-                if len(variants) >= target:
-                    break
-        return variants
-
-    def _ensure_highest_lod_coverage(
-        self,
-        tree: MegaContextTree,
-        variants: List[WorkingContextVariant],
-        target: int,
-        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-    ) -> None:
-        available = [
-            lod
-            for lod in tree.levels.keys()
-            if lod > 0 and tree.levels[lod].shape[1] > 0
-        ]
-        if not available:
-            return
-        highest = max(available)
-        if any(v.lod_hint == highest for v in variants):
-            return
-        variant = self._build_lod_variant(tree, highest, level_cache)
-        if variant is None:
-            return
-        if len(variants) >= target:
-            variants.pop()
-        variants.append(variant)
-
     def _build_lod0_baseline_variant(
         self,
         tree: MegaContextTree,
@@ -536,93 +548,6 @@ class MCController:
         variant.is_baseline = True
         return variant
 
-    def _build_lod_variant(
-        self,
-        tree: MegaContextTree,
-        lod: int,
-        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-    ) -> Optional[WorkingContextVariant]:
-        metadata = self._get_level_metadata_cached(tree, lod, level_cache)
-        if metadata is None:
-            return None
-        embeddings, positions = metadata
-        if embeddings.shape[1] == 0:
-            return None
-        return self._create_variant(tree, embeddings, positions, lod=lod, source=f"lod_{lod}")
-
-    def _build_random_span_variant(
-        self,
-        tree: MegaContextTree,
-        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-    ) -> Optional[WorkingContextVariant]:
-        metadata = self._get_level_metadata_cached(tree, 0, level_cache)
-        if metadata is None:
-            return None
-        embeddings, positions = metadata
-        total = embeddings.shape[1]
-        window = self.config.wc_config.max_length
-        if total <= window:
-            return None
-        start = self._rng.randint(0, max(0, total - window))
-        return self._build_span_variant_from_metadata(tree, embeddings, positions, start, window)
-
-    def _build_span_variant(
-        self,
-        tree: MegaContextTree,
-        start: int,
-        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-    ) -> Optional[WorkingContextVariant]:
-        metadata = self._get_level_metadata_cached(tree, 0, level_cache)
-        if metadata is None:
-            return None
-        embeddings, positions = metadata
-        window = self.config.wc_config.max_length
-        return self._build_span_variant_from_metadata(tree, embeddings, positions, start, window)
-
-    def _build_span_variant_from_metadata(
-        self,
-        tree: MegaContextTree,
-        embeddings: torch.Tensor,
-        positions: torch.Tensor,
-        start: int,
-        window: int,
-    ) -> Optional[WorkingContextVariant]:
-        total = embeddings.shape[1]
-        if total <= window:
-            return None
-        max_start = max(0, total - window)
-        clamped_start = max(0, min(start, max_start))
-        end = clamped_start + window
-        span_embeddings = embeddings[:, clamped_start:end]
-        span_positions = positions[:, clamped_start:end]
-        return self._create_variant(
-            tree,
-            span_embeddings,
-            span_positions,
-            lod=0,
-            source=f"random_span_{clamped_start}",
-        )
-
-    def _partition_recent_tail(
-        self,
-        tree: MegaContextTree,
-        embeddings: torch.Tensor,
-        positions: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
-        recent = int(self.config.allocator_recent_tokens)
-        if recent <= 0:
-            return embeddings, positions, None, None
-        total_tokens = tree.num_tokens()
-        if total_tokens <= 0:
-            return embeddings, positions, None, None
-        tail_start = max(0, total_tokens - recent)
-        mask = (positions[0] < tail_start)
-        head_embeddings = embeddings[:, mask, :]
-        head_positions = positions[:, mask]
-        tail_embeddings = tree.get_lod0_slice(tail_start, total_tokens)
-        tail_positions = tree.get_positions_for_lod(0)[:, tail_start:total_tokens]
-        return head_embeddings, head_positions, tail_embeddings, tail_positions
-
     def _reinforce_recent_tail(self, wc: WorkingContext, tree: MegaContextTree) -> None:
         recent = int(self.config.allocator_recent_tokens)
         if recent <= 0 or wc.length == 0:
@@ -647,30 +572,6 @@ class MCController:
             idx = torch.clamp(idx, 0, tail_len - 1)
             tensor[b, mask_b, :] = tail_embeddings[b, idx, :]
             lods[b, mask_b] = 0
-
-    def _sample_random_span_starts(
-        self,
-        tree: MegaContextTree,
-        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-        count: int,
-    ) -> List[int]:
-        metadata = self._get_level_metadata_cached(tree, 0, level_cache)
-        if metadata is None or count <= 0:
-            return []
-        embeddings, _ = metadata
-        total = embeddings.shape[1]
-        window = self.config.wc_config.max_length
-        if total <= window:
-            return []
-        max_start = max(0, total - window)
-        if max_start == 0:
-            return [0] * count
-        gen_seed = self._rng.randint(0, 2**31 - 1)
-        # Generate on CPU to avoid device syncs per .item()
-        generator = torch.Generator()
-        generator.manual_seed(gen_seed)
-        starts_cpu = torch.randint(0, max_start + 1, (count,), generator=generator, device=torch.device("cpu"))
-        return [int(s) for s in starts_cpu.tolist()]
 
     def _create_variant(
         self,
@@ -809,80 +710,6 @@ class MCController:
             self.config.wc_config.max_length,
         )
 
-    def _refine_variants(
-        self,
-        tree: MegaContextTree,
-        variants: List[WorkingContextVariant],
-        session_id: str,
-    ) -> List[WorkingContextVariant]:
-        refined: List[WorkingContextVariant] = []
-        for variant in variants:
-            if variant.is_baseline:
-                refined.append(variant)
-                self._log_wc_snapshot(session_id, variant.working_context, variant.source)
-                continue
-            allocator = self._build_allocator(tree, variant.working_context)
-            variant.allocator = allocator
-            scores = self.lensnet(variant.working_context)
-            scores_detached = scores.detach()
-            variant.lens_scores = scores_detached.clone()
-            variant.edits_applied = allocator.update_focus(
-                max_replacements_per_iteration=self.config.allocator_max_replacements,
-                num_iterations=self.config.allocator_iterations,
-                scores=scores_detached,
-            )
-            self._reinforce_recent_tail(variant.working_context, tree)
-            fixed_wc = self._ensure_wc_full_coverage(variant.working_context, tree, variant.source)
-            if fixed_wc is not variant.working_context:
-                variant.working_context = fixed_wc
-                if variant.allocator is not None:
-                    variant.allocator.working_context = fixed_wc
-            refined.append(variant)
-            self._log_wc_snapshot(session_id, variant.working_context, variant.source)
-            self._log_focus_stats(session_id, variant, f"{variant.source}_focus")
-            siblings = self._generate_sibling_variants(tree, variant, session_id)
-            for sibling in siblings:
-                self._reinforce_recent_tail(sibling.working_context, tree)
-                sibling_wc = self._ensure_wc_full_coverage(sibling.working_context, tree, sibling.source)
-                if sibling_wc is not sibling.working_context:
-                    sibling.working_context = sibling_wc
-                refined.append(sibling)
-                self._log_wc_snapshot(session_id, sibling.working_context, sibling.source)
-                self._log_focus_stats(session_id, sibling, f"{sibling.source}_focus")
-                if len(refined) >= self.config.max_counterfactuals:
-                    return refined
-        return refined
-
-    def _generate_sibling_variants(
-        self,
-        tree: MegaContextTree,
-        variant: WorkingContextVariant,
-        session_id: str,
-    ) -> List[WorkingContextVariant]:
-        if variant.lens_scores is None:
-            return []
-        siblings: List[WorkingContextVariant] = []
-        scores = variant.lens_scores
-        if scores.dim() > 1:
-            scores = scores.squeeze(0)
-        # Force an expand on the strongest positive score.
-        expand_indices = torch.argsort(scores, descending=True).tolist()
-        for idx in expand_indices:
-            sibling = self._force_expand_variant(tree, variant, idx)
-            if sibling is not None:
-                siblings.append(sibling)
-                self._increment_counter("sibling_expands")
-                break
-        # Force a collapse on the strongest negative score.
-        collapse_indices = torch.argsort(scores, descending=False).tolist()
-        for idx in collapse_indices:
-            sibling = self._force_collapse_variant(tree, variant, idx)
-            if sibling is not None:
-                siblings.append(sibling)
-                self._increment_counter("sibling_collapses")
-                break
-        return siblings
-
     def _build_allocator(
         self,
         tree: MegaContextTree,
@@ -951,6 +778,14 @@ class MCController:
             f"reserved={reserved / 1e9:.2f}GB max_alloc={max_alloc / 1e9:.2f}GB",
             flush=True,
         )
+
+    def _make_torch_generator(self, device: torch.device) -> torch.Generator:
+        target_device = device
+        if target_device.type == "meta":
+            target_device = torch.device("cpu")
+        generator = torch.Generator(device=target_device)
+        generator.manual_seed(self._rng.randint(0, 2**31 - 1))
+        return generator
 
     def _timing_sync(self) -> None:
         if self._timing_device.type == "cuda" and torch.cuda.is_available():
@@ -1084,6 +919,23 @@ class MCController:
         print(f"[MegaContext][LOD ASCII][{label}]", flush=True)
         for idx, row in enumerate(ascii_rows):
             print(f"  seq{idx:02d}: {row} ({state.working_context.length})", flush=True)
+
+    def _ensure_lens_scores_logged(
+        self,
+        variants: List[WorkingContextVariant],
+        score_cache: Optional[Dict[int, torch.Tensor]] = None,
+    ) -> None:
+        with torch.no_grad():
+            for variant in variants:
+                if variant.lens_scores is not None:
+                    continue
+                if score_cache is not None:
+                    cached = score_cache.get(id(variant))
+                    if cached is not None:
+                        variant.lens_scores = cached.detach()
+                        continue
+                preview = self.lensnet(variant.working_context)
+                variant.lens_scores = preview.detach()
 
     def _log_lens_debug(self, batch_states: List[SampleContext]) -> None:
         if not (self.config.log_lens_debug and self._is_rank0):
@@ -1430,37 +1282,51 @@ class MCController:
     def _compute_lens_losses(
         self, batch_states: List[SampleContext]
     ) -> Optional[torch.Tensor]:
+        if self.config.num_random_variants <= 0:
+            return None
         losses = []
         rank_weight = float(self.config.lens_rank_weight)
         budget_weight = float(self.config.lens_budget_weight)
         margin = float(self.config.lens_margin)
+        collapse_weight = float(self.config.lens_collapse_weight)
         for sample in batch_states:
-            best = self._select_best_variant(sample.variants)
-            if best is None or best.token_loss_value is None:
+            variant_pairs = self._build_variant_pairs(sample.variants)
+            if not variant_pairs:
+                self._ensure_lens_scores_logged(sample.variants)
                 continue
-            best_map = self._build_lod_lookup(best.working_context)
-            best_loss = best.token_loss_value
-            for variant in sample.variants:
-                # Recompute scores here to allow gradients to flow into LensNet
-                scores_live = self.lensnet(variant.working_context)
+            map_cache: Dict[int, Dict[int, int]] = {}
+            score_cache: Dict[int, torch.Tensor] = {}
+
+            def _get_scores(variant: WorkingContextVariant) -> torch.Tensor:
+                key = id(variant)
+                cached = score_cache.get(key)
+                if cached is None:
+                    cached = self.lensnet(variant.working_context)
+                    score_cache[key] = cached
+                    variant.lens_scores = cached.detach()
+                return cached
+
+            for better, worse, strength in variant_pairs:
+                scores_live = _get_scores(worse)
                 if scores_live.dim() > 1:
                     scores_1d = scores_live.squeeze(0)
                 else:
                     scores_1d = scores_live
-                if variant.token_loss_value is None:
-                    continue
-                delta_vs_best = float(variant.token_loss_value.detach() - best_loss.detach())
-                targets, mask, span_tokens = self._build_lens_targets(
-                    variant,
-                    best_map,
+                ref_key = id(better.working_context)
+                ref_map = map_cache.get(ref_key)
+                if ref_map is None:
+                    ref_map = self._build_lod_lookup(better.working_context)
+                    map_cache[ref_key] = ref_map
+                targets, mask, span_tokens = self._build_pairwise_targets(
+                    worse,
+                    ref_map,
                     scores_1d,
-                    delta_vs_best,
+                    strength,
                 )
                 if not torch.any(mask):
                     continue
                 masked_scores = scores_1d[mask]
                 masked_targets = targets[mask]
-                collapse_weight = float(self.config.lens_collapse_weight)
                 sample_weights = torch.ones_like(masked_targets)
                 if collapse_weight != 1.0:
                     sample_weights[masked_targets < 0] = collapse_weight
@@ -1487,6 +1353,7 @@ class MCController:
                     budget_loss = ((pos_mass - neg_mass) / denom) ** 2
                 total_loss = reg_loss + rank_weight * rank_loss + budget_weight * budget_loss
                 losses.append(total_loss)
+            self._ensure_lens_scores_logged(sample.variants, score_cache)
         if not losses:
             return None
         return torch.stack(losses).mean()
@@ -1752,7 +1619,35 @@ class MCController:
             total += int(count) * (self.config.block_size ** int(lod))
         return total
 
-    def _build_lens_targets(
+    def _build_variant_pairs(
+        self, variants: List[WorkingContextVariant]
+    ) -> List[Tuple[WorkingContextVariant, WorkingContextVariant, float]]:
+        pairs: List[Tuple[WorkingContextVariant, WorkingContextVariant, float]] = []
+        num_variants = len(variants)
+        if num_variants < 2:
+            return pairs
+        for i in range(num_variants):
+            loss_i = variants[i].token_loss_value
+            if loss_i is None:
+                continue
+            loss_i_val = float(loss_i.detach())
+            for j in range(i + 1, num_variants):
+                loss_j = variants[j].token_loss_value
+                if loss_j is None:
+                    continue
+                loss_j_val = float(loss_j.detach())
+                delta = abs(loss_i_val - loss_j_val)
+                if delta <= 1e-6:
+                    continue
+                if loss_i_val <= loss_j_val:
+                    better, worse = variants[i], variants[j]
+                else:
+                    better, worse = variants[j], variants[i]
+                pairs.append((better, worse, delta))
+        self._rng.shuffle(pairs)
+        return pairs[: max(1, self.config.max_lens_pairs)]
+
+    def _build_pairwise_targets(
         self,
         variant: WorkingContextVariant,
         best_map: Dict[int, int],
@@ -1797,94 +1692,6 @@ class MCController:
                         targets[jdx] = collapse_val
                         mask[jdx] = True
         return targets, mask, span_tokens
-
-    def _force_expand_variant(
-        self,
-        tree: MegaContextTree,
-        variant: WorkingContextVariant,
-        idx: int,
-    ) -> Optional[WorkingContextVariant]:
-        wc = variant.working_context
-        lods = wc.get_lod_tensor()[0]
-        if idx >= lods.shape[0]:
-            return None
-        lod = int(lods[idx].item())
-        if lod <= 0:
-            return None
-        positions = wc.get_positions()[0]
-        global_pos = int(positions[idx].item())
-        try:
-            children = tree.get_children_embeddings(lod, global_pos)
-        except ValueError:
-            return None
-        if children.shape[1] == 0:
-            return None
-        edit = WorkingContextEdit(
-            wc_start=idx,
-            replacements=children,
-            lod=lod - 1,
-            mc_start_position=global_pos,
-            stride=tree.tokens_per_entry(lod - 1),
-            old_count=1,
-        )
-        sibling_wc = self._clone_working_context(wc)
-        sibling_wc.replace(edit)
-        return WorkingContextVariant(
-            working_context=sibling_wc,
-            source=f"{variant.source}+expand",
-            lod_hint=lod - 1,
-        )
-
-    def _force_collapse_variant(
-        self,
-        tree: MegaContextTree,
-        variant: WorkingContextVariant,
-        idx: int,
-    ) -> Optional[WorkingContextVariant]:
-        wc = variant.working_context
-        tensor = wc.to_tensor()
-        length = tensor.shape[1]
-        block = self.config.block_size
-        if idx + block > length:
-            return None
-        lods = wc.get_lod_tensor()[0]
-        positions = wc.get_positions()[0]
-        lod = int(lods[idx].item())
-        if lod >= self.config.max_lod:
-            return None
-        block_lods = lods[idx : idx + block]
-        if torch.any(block_lods != lod):
-            return None
-        stride = tree.tokens_per_entry(lod)
-        global_pos = int(positions[idx].item())
-        expected = torch.arange(
-            global_pos,
-            global_pos + stride * block,
-            stride,
-            device=positions.device,
-            dtype=positions.dtype,
-        )
-        if torch.any(positions[idx : idx + block] != expected):
-            return None
-        try:
-            parent = tree.get_parent_embedding(lod, global_pos)
-        except ValueError:
-            return None
-        edit = WorkingContextEdit(
-            wc_start=idx,
-            replacements=parent,
-            lod=lod + 1,
-            mc_start_position=global_pos,
-            stride=tree.tokens_per_entry(lod + 1),
-            old_count=block,
-        )
-        sibling_wc = self._clone_working_context(wc)
-        sibling_wc.replace(edit)
-        return WorkingContextVariant(
-            working_context=sibling_wc,
-            source=f"{variant.source}+collapse",
-            lod_hint=lod + 1,
-        )
 
     # ------------------------------------------------------------------ #
     # Inference facade

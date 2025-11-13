@@ -53,6 +53,10 @@ MC_LENS_BUDGET_WEIGHT=0.1
 MC_LENS_MARGIN=0.1
 MC_DISABLE_VAL=0
 MC_LENS_COLLAPSE_WEIGHT=1.0
+MC_TRAIN_WC_LENGTH=""
+MC_NUM_RANDOM_VARIANTS=4
+MC_RANDOM_VARIANT_ITERATIONS=4
+MC_MAX_LENS_PAIRS=8
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -203,6 +207,26 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_collapse_weight" >&2; exit 1; }
             MC_LENS_COLLAPSE_WEIGHT="$1"
             ;;
+        --mc_train_wc_length)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_train_wc_length" >&2; exit 1; }
+            MC_TRAIN_WC_LENGTH="$1"
+            ;;
+        --mc_num_random_variants)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_num_random_variants" >&2; exit 1; }
+            MC_NUM_RANDOM_VARIANTS="$1"
+            ;;
+        --mc_random_variant_iterations)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_random_variant_iterations" >&2; exit 1; }
+            MC_RANDOM_VARIANT_ITERATIONS="$1"
+            ;;
+        --mc_max_lens_pairs)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_max_lens_pairs" >&2; exit 1; }
+            MC_MAX_LENS_PAIRS="$1"
+            ;;
         --block_size)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --block_size" >&2; exit 1; }
@@ -338,7 +362,11 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_lens_budget_weight="$MC_LENS_BUDGET_WEIGHT" \
     --mc_lens_margin="$MC_LENS_MARGIN" \
     --mc_disable_val="$MC_DISABLE_VAL" \
-    --mc_lens_collapse_weight="$MC_LENS_COLLAPSE_WEIGHT"
+    --mc_lens_collapse_weight="$MC_LENS_COLLAPSE_WEIGHT" \
+    --mc_train_wc_length="$MC_TRAIN_WC_LENGTH" \
+    --mc_num_random_variants="$MC_NUM_RANDOM_VARIANTS" \
+    --mc_random_variant_iterations="$MC_RANDOM_VARIANT_ITERATIONS" \
+    --mc_max_lens_pairs="$MC_MAX_LENS_PAIRS"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"
