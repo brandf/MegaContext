@@ -66,3 +66,48 @@ Where it differs:
 | “Pairwise targets” | “Contrastive policy targets” | Signals that we only care about pairwise ordering. |
 
 Adopting this vocabulary clarifies to readers that LensNet is trained with **preference-based, contrastive supervision**: we treat WC edits as actions, next-token losses as rewards, and learn a policy (LensNet) that ranks higher-reward edits above lower-reward ones.
+
+## Which Paradigm Fits Best?
+
+From an implementation standpoint we are **closer to preference-based RL**:
+
+- The supervision signal is a *relative reward* (ΔNLL) collected from variants of the same underlying state.
+- LensNet acts as a *policy* whose logits should increase or decrease the probability of editing particular spans.
+- We can reuse RLHF terminology (policy, reward, advantage, preference pair) without distortion.
+
+However, the *mechanics* of our loss—pairwise comparisons over different “views” of the same sequence—feel contrastive. We can borrow the temperature/margin ideas from contrastive learning to control how sharply we separate positives/negatives, even while describing alignment in RL language.
+
+**Recommendation:** use RL-centric vocabulary (policy, rollout, reward, preference pair, advantage) when discussing LensNet training, and draw contrastive analogies when explaining the loss geometry.
+
+## Learning from RL / Contrastive Research
+
+| Inspiration | Technique | Applicability to LensNet |
+| --- | --- | --- |
+| Preference-based RL (e.g., RLHF) | Bradley–Terry or logistic preference loss; advantage normalization; reward-model regularization | Replace our MSE targets with logistic preference losses, track running statistics for Δloss to stabilize gradients, optionally introduce per-span baselines. |
+| Off-policy policy gradients | Importance sampling, KL regularization, trust regions | Weight pairings by how far the sampled variant distribution drifts from the current LensNet policy; add KL penalties between “old” and “new” focus scores to avoid thrashing. |
+| Contrastive learning (InfoNCE, SimCLR) | Temperature scaling, hard negative mining, multi-positive batches | Treat large Δloss pairs as “hard negatives,” schedule a temperature parameter that sharpens targets when Δloss is big, and group pairs across the batch to improve sample efficiency. |
+| Curriculum / self-play | Progressive difficulty, adversarial perturbations | Start with mild compressions (small train_wc_length drop) and gradually introduce harsher edits so LensNet learns a spectrum of focus decisions. |
+
+### Proposed Roadmap
+
+1. **Terminology alignment**
+   - Update docs + metrics to use RLHF-style names (`preference_pairs`, `policy_scores`, `adv_delta`).
+   - Add WandB charts mirroring RLHF dashboards (reward mean, advantage histogram).
+
+2. **Loss upgrades**
+   - Replace the per-entry MSE with a logistic/Bradley–Terry preference loss using ΔNLL as the logit difference.
+   - Introduce a temperature (contrastive-style) hyperparameter; sweep to match LensDebug correlations.
+
+3. **Stability enhancements**
+   - Track running mean/variance of ΔNLL to normalize advantages before feeding them into the loss (akin to advantage normalization in PPO).
+   - Add optional KL regularization between consecutive LensNet policies (`KL(old_scores || new_scores)`) to keep updates smooth.
+
+4. **Curriculum + hard-negative mining**
+   - Bucket variant pairs by Δloss magnitude; oversample “hard” comparisons to accelerate learning, similar to contrastive hard-negative mining.
+   - Gradually shrink `train_wc_length` or increase `num_random_variants` during training to expose LensNet to more challenging edits over time.
+
+5. **Evaluation + ablations**
+   - Extend LensDebug to log reward-model style metrics (agreement rate, normalized advantage) and contrastive ones (temperature-scaled loss, InfoNCE analog).
+   - Run controlled ablations to measure the impact of each addition on `mc/lens_corr_mean`, swap rate, and downstream validation loss.
+
+Executing this roadmap lets us systematically inject proven RLHF/contrastive tricks into LensNet while keeping the mental model firmly rooted in preference-based policy learning.
