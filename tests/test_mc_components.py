@@ -442,10 +442,10 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
     targets, mask, span_tokens = controller._build_lens_targets(variant, best_map, scores)
     # Entry 0: lod=1 -> target expand
     assert mask[0]
-    assert targets[0].item() == -1.0
+    assert pytest.approx(targets[0].item(), abs=1e-3) == -math.tanh(1.0)
     # Entry 1: lod=2 -> collapse target
     assert mask[1]
-    assert targets[1].item() == 1.0
+    assert pytest.approx(targets[1].item(), abs=1e-3) == math.tanh(1.0)
     # Entry 2: lod=0 cannot expand
     assert not mask[2]
     assert targets[2].item() == 0.0

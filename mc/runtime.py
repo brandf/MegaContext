@@ -328,6 +328,13 @@ class MCController:
             result.lens_corr_mean = self._last_lens_corr.get("lens_corr_mean")
             result.lens_corr_max = self._last_lens_corr.get("lens_corr_max")
             result.lens_corr_min = self._last_lens_corr.get("lens_corr_min")
+            if result.lens_corr_mean is not None:
+                print(
+                    f"[MegaContext][LensSummary] corr_mean={result.lens_corr_mean:.3f} "
+                    f"corr_max={result.lens_corr_max if result.lens_corr_max is not None else float('nan'):.3f} "
+                    f"corr_min={result.lens_corr_min if result.lens_corr_min is not None else float('nan'):.3f}",
+                    flush=True,
+                )
         self.current_batch_states = []
         self._emit_batch_counters(step)
         self._refresh_train_report(batch_states)
@@ -1745,6 +1752,7 @@ class MCController:
         if delta_loss is None:
             return targets, mask, span_tokens
         delta_val = float(delta_loss)
+        signed_strength = float(torch.tanh(torch.tensor(delta_val)))
         for idx, (pos, lod_tensor) in enumerate(zip(positions, lods)):
             lod = int(lod_tensor.item())
             pos_int = int(pos.item())
@@ -1756,13 +1764,13 @@ class MCController:
                 # best wants more detail here
                 if lod <= 0:
                     continue
-                targets[idx] = -1.0 if delta_val > 0 else 1.0
+                targets[idx] = -signed_strength if delta_val > 0 else signed_strength
                 mask[idx] = True
             elif desired_lod > lod:
                 # best wants less detail here
                 if lod >= max_lod:
                     continue
-                targets[idx] = 1.0 if delta_val > 0 else -1.0
+                targets[idx] = signed_strength if delta_val > 0 else -signed_strength
                 mask[idx] = True
         return targets, mask, span_tokens
 
