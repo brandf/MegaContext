@@ -48,6 +48,9 @@ MC_VAL_REPORT=1
 MC_LOG_LOD_ASCII_TRAIN=0
 MC_LOG_LOD_ASCII_VAL=0
 MC_LOG_LENS_DEBUG=0
+MC_LENS_RANK_WEIGHT=0.5
+MC_LENS_BUDGET_WEIGHT=0.1
+MC_LENS_MARGIN=0.1
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -172,6 +175,21 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_log_lens_debug" >&2; exit 1; }
             MC_LOG_LENS_DEBUG="$1"
+            ;;
+        --mc_lens_rank_weight)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_rank_weight" >&2; exit 1; }
+            MC_LENS_RANK_WEIGHT="$1"
+            ;;
+        --mc_lens_budget_weight)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_budget_weight" >&2; exit 1; }
+            MC_LENS_BUDGET_WEIGHT="$1"
+            ;;
+        --mc_lens_margin)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_margin" >&2; exit 1; }
+            MC_LENS_MARGIN="$1"
             ;;
         --block_size)
             shift
@@ -303,7 +321,10 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_log_timers="$MC_LOG_TIMERS" \
     --mc_log_lod_ascii_train="$MC_LOG_LOD_ASCII_TRAIN" \
     --mc_log_lod_ascii_val="$MC_LOG_LOD_ASCII_VAL" \
-    --mc_log_lens_debug="$MC_LOG_LENS_DEBUG"
+    --mc_log_lens_debug="$MC_LOG_LENS_DEBUG" \
+    --mc_lens_rank_weight="$MC_LENS_RANK_WEIGHT" \
+    --mc_lens_budget_weight="$MC_LENS_BUDGET_WEIGHT" \
+    --mc_lens_margin="$MC_LENS_MARGIN"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

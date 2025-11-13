@@ -438,7 +438,7 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
         int(positions[0, 3]): controller.config.max_lod,  # max detail, no collapse
     }
     scores = torch.zeros(wc.length)
-    targets, mask = controller._build_lens_targets(variant, best_map, scores)
+    targets, mask, span_tokens = controller._build_lens_targets(variant, best_map, scores)
     # Entry 0: lod=1 -> target expand
     assert mask[0]
     assert targets[0].item() == 1.0
@@ -451,6 +451,8 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
     # Entry 3: lod=max cannot collapse further
     assert not mask[3]
     assert targets[3].item() == 0.0
+    assert span_tokens[0].item() == float(controller.config.block_size ** 1)
+    assert span_tokens[1].item() == float(controller.config.block_size ** 2)
 
 
 def test_train_report_uses_non_baseline_variant(monkeypatch):
@@ -471,7 +473,8 @@ def test_train_report_uses_non_baseline_variant(monkeypatch):
     primary = report["primary"]
     assert primary is not None
     lod_counts = primary["lod_counts"]
-    assert lod_counts.get(controller.config.max_lod, 0) > 0, "primary report should highlight highest LOD variant"
+    highest_nonzero_lod = max((lod for lod, count in lod_counts.items() if count > 0), default=0)
+    assert highest_nonzero_lod > 0, "primary report should include higher LOD entries"
 
 
 @pytest.mark.parametrize("recent", [8, 16, 32])

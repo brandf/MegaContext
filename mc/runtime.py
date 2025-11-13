@@ -1410,6 +1410,9 @@ class MCController:
         self, batch_states: List[SampleContext]
     ) -> Optional[torch.Tensor]:
         losses = []
+        rank_weight = float(self.config.lens_rank_weight)
+        budget_weight = float(self.config.lens_budget_weight)
+        margin = float(self.config.lens_margin)
         for sample in batch_states:
             best = self._select_best_variant(sample.variants)
             if best is None or best.token_loss_value is None:
@@ -1423,13 +1426,29 @@ class MCController:
                     scores_1d = scores_live.squeeze(0)
                 else:
                     scores_1d = scores_live
-                targets, mask = self._build_lens_targets(variant, best_map, scores_1d)
+                targets, mask, span_tokens = self._build_lens_targets(variant, best_map, scores_1d)
                 if not torch.any(mask):
                     continue
                 masked_scores = scores_1d[mask]
                 masked_targets = targets[mask]
-                base_loss = F.mse_loss(masked_scores, masked_targets, reduction="mean")
-                losses.append(base_loss)
+                reg_loss = F.mse_loss(masked_scores, masked_targets, reduction="mean")
+                rank_loss = masked_scores.new_tensor(0.0)
+                budget_loss = masked_scores.new_tensor(0.0)
+                if rank_weight > 0.0:
+                    pos_mask = masked_targets > 0
+                    neg_mask = masked_targets < 0
+                    if torch.any(pos_mask) and torch.any(neg_mask):
+                        pos_mean = masked_scores[pos_mask].mean()
+                        neg_mean = masked_scores[neg_mask].mean()
+                        rank_loss = F.relu(margin - (pos_mean - neg_mean))
+                if budget_weight > 0.0:
+                    span_vals = span_tokens[mask].to(masked_scores.dtype)
+                    pos_mass = (span_vals * torch.relu(masked_scores)).sum()
+                    neg_mass = (span_vals * torch.relu(-masked_scores)).sum()
+                    denom = pos_mass + neg_mass + 1e-6
+                    budget_loss = ((pos_mass - neg_mass) / denom) ** 2
+                total_loss = reg_loss + rank_weight * rank_loss + budget_weight * budget_loss
+                losses.append(total_loss)
         if not losses:
             return None
         return torch.stack(losses).mean()
@@ -1700,16 +1719,19 @@ class MCController:
         variant: WorkingContextVariant,
         best_map: Dict[int, int],
         score_template: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         positions = variant.working_context.get_positions()[0]
         lods = variant.working_context.get_lod_tensor()[0]
         targets = torch.zeros_like(score_template)
         mask = torch.zeros_like(score_template, dtype=torch.bool)
+        span_tokens = torch.ones_like(score_template)
         max_lod = self.config.max_lod
+        block_size = self.config.block_size
         for idx, (pos, lod_tensor) in enumerate(zip(positions, lods)):
             lod = int(lod_tensor.item())
             pos_int = int(pos.item())
             desired_lod = best_map.get(pos_int, lod)
+            span_tokens[idx] = float(block_size ** max(lod, 0))
             if desired_lod < lod:
                 # Need to expand (more detail)
                 if lod <= 0:
@@ -1722,7 +1744,7 @@ class MCController:
                     continue  # cannot collapse further
                 targets[idx] = -1.0
                 mask[idx] = True
-        return targets, mask
+        return targets, mask, span_tokens
 
     def _force_expand_variant(
         self,

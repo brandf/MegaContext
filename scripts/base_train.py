@@ -117,6 +117,9 @@ mc_log_timers = 0
 mc_log_lod_ascii_train = 0
 mc_log_lod_ascii_val = 0
 mc_log_lens_debug = 0
+mc_lens_rank_weight = 0.5
+mc_lens_budget_weight = 0.1
+mc_lens_margin = 0.1
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -147,6 +150,9 @@ mc_log_timers = _parse_bool_flag(mc_log_timers)
 mc_log_lod_ascii_train = _parse_bool_flag(mc_log_lod_ascii_train)
 mc_log_lod_ascii_val = _parse_bool_flag(mc_log_lod_ascii_val)
 mc_log_lens_debug = _parse_bool_flag(mc_log_lens_debug)
+mc_lens_rank_weight = float(mc_lens_rank_weight)
+mc_lens_budget_weight = float(mc_lens_budget_weight)
+mc_lens_margin = float(mc_lens_margin)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
 
@@ -252,6 +258,9 @@ if mc_enabled:
         log_lod_ascii_train=bool(mc_log_lod_ascii_train),
         log_lod_ascii_val=bool(mc_log_lod_ascii_val),
         log_lens_debug=bool(mc_log_lens_debug),
+        lens_rank_weight=mc_lens_rank_weight,
+        lens_budget_weight=mc_lens_budget_weight,
+        lens_margin=mc_lens_margin,
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,
