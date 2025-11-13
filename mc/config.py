@@ -77,6 +77,10 @@ class MCConfig:
     disable_validation: bool = False
     lens_collapse_weight: float = 1.0
     lens_temperature: float = 1.0
+    lens_adv_norm_beta: float = 0.9
+    lens_kl_weight: float = 0.0
+    lens_budget_smooth_weight: float = 0.0
+    lens_budget_smooth_beta: float = 0.9
     train_wc_length: Optional[int] = None
     num_random_variants: int = 4
     random_variant_iterations: int = 4
@@ -113,3 +117,7 @@ class MCConfig:
         self.max_lens_pairs = max(1, int(self.max_lens_pairs))
         if self.lens_temperature <= 0:
             raise ValueError("lens_temperature must be > 0")
+        if not (0.0 < self.lens_adv_norm_beta < 1.0):
+            raise ValueError("lens_adv_norm_beta must be in (0, 1)")
+        if not (0.0 < self.lens_budget_smooth_beta < 1.0):
+            raise ValueError("lens_budget_smooth_beta must be in (0, 1)")

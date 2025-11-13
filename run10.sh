@@ -58,6 +58,10 @@ MC_TRAIN_WC_LENGTH=""
 MC_NUM_RANDOM_VARIANTS=4
 MC_RANDOM_VARIANT_ITERATIONS=4
 MC_MAX_LENS_PAIRS=8
+MC_LENS_KL_WEIGHT=0
+MC_LENS_ADV_NORM_BETA=0.9
+MC_LENS_BUDGET_SMOOTH_WEIGHT=0
+MC_LENS_BUDGET_SMOOTH_BETA=0.9
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -233,6 +237,26 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_max_lens_pairs" >&2; exit 1; }
             MC_MAX_LENS_PAIRS="$1"
             ;;
+        --mc_lens_kl_weight)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_kl_weight" >&2; exit 1; }
+            MC_LENS_KL_WEIGHT="$1"
+            ;;
+        --mc_lens_adv_norm_beta)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_adv_norm_beta" >&2; exit 1; }
+            MC_LENS_ADV_NORM_BETA="$1"
+            ;;
+        --mc_lens_budget_smooth_weight)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_budget_smooth_weight" >&2; exit 1; }
+            MC_LENS_BUDGET_SMOOTH_WEIGHT="$1"
+            ;;
+        --mc_lens_budget_smooth_beta)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_budget_smooth_beta" >&2; exit 1; }
+            MC_LENS_BUDGET_SMOOTH_BETA="$1"
+            ;;
         --block_size)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --block_size" >&2; exit 1; }
@@ -373,7 +397,11 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_train_wc_length="$MC_TRAIN_WC_LENGTH" \
     --mc_num_random_variants="$MC_NUM_RANDOM_VARIANTS" \
     --mc_random_variant_iterations="$MC_RANDOM_VARIANT_ITERATIONS" \
-    --mc_max_lens_pairs="$MC_MAX_LENS_PAIRS"
+    --mc_max_lens_pairs="$MC_MAX_LENS_PAIRS" \
+    --mc_lens_kl_weight="$MC_LENS_KL_WEIGHT" \
+    --mc_lens_adv_norm_beta="$MC_LENS_ADV_NORM_BETA" \
+    --mc_lens_budget_smooth_weight="$MC_LENS_BUDGET_SMOOTH_WEIGHT" \
+    --mc_lens_budget_smooth_beta="$MC_LENS_BUDGET_SMOOTH_BETA"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

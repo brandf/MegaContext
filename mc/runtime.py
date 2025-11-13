@@ -41,6 +41,7 @@ class WorkingContextVariant:
     batch_index: int = 0
     is_baseline: bool = False
     adv_delta: float = 0.0
+    norm_adv_delta: float = 0.0
 
 
 @dataclass
@@ -192,6 +193,11 @@ class MCController:
         self.last_inference_report: Optional[Dict[str, Any]] = None
         self.last_train_report: Optional[Dict[str, Any]] = None
         self._last_preference_corr: Dict[str, float] = {}
+        self._policy_history: Dict[int, torch.Tensor] = {}
+        self._adv_norm_mean: float = 0.0
+        self._adv_norm_var: float = 1.0
+        self._adv_norm_initialized: bool = False
+        self._budget_mass_ema: float = 0.0
         if config.positional_type:
             if config.positional_type in {"gaussian_lod2d", "gaussian_lod2d_alibi"}:
                 raise ValueError(
@@ -1110,6 +1116,7 @@ class MCController:
         loss_tensor = torch.stack(losses)
         lod0_loss = None
         adv_values: List[float] = []
+        all_advantages: List[float] = []
         lod_buckets: Dict[int, List[float]] = {}
         for sample in batch_states:
             for variant in sample.variants:
@@ -1130,6 +1137,8 @@ class MCController:
                 lod_buckets.setdefault(variant.lod_hint, []).append(val)
                 if baseline is not None and variant is not None and variant.lod_hint != 0:
                     adv_values.append(val - baseline)
+                if variant.adv_delta is not None:
+                    all_advantages.append(variant.adv_delta)
         adv_delta_mean = float(torch.tensor(adv_values).mean().item()) if adv_values else None
         adv_delta_p95 = (
             float(torch.quantile(torch.tensor(adv_values), 0.95).item())
@@ -1142,6 +1151,27 @@ class MCController:
             if vals
         }
         lod_counts = {lod: len(vals) for lod, vals in lod_buckets.items()}
+
+        if all_advantages:
+            adv_tensor = torch.tensor(all_advantages, dtype=torch.float32)
+            batch_mean = float(adv_tensor.mean().item())
+            batch_var = float(adv_tensor.var(unbiased=False).item()) if adv_tensor.numel() > 1 else 0.0
+            if not self._adv_norm_initialized:
+                self._adv_norm_mean = batch_mean
+                self._adv_norm_var = max(batch_var, 1e-6)
+                self._adv_norm_initialized = True
+            else:
+                beta = float(self.config.lens_adv_norm_beta)
+                self._adv_norm_mean = beta * self._adv_norm_mean + (1.0 - beta) * batch_mean
+                self._adv_norm_var = beta * self._adv_norm_var + (1.0 - beta) * max(batch_var, 1e-6)
+            std = math.sqrt(max(self._adv_norm_var, 1e-6))
+            mean = self._adv_norm_mean
+            for sample in batch_states:
+                for variant in sample.variants:
+                    if variant.adv_delta is None:
+                        continue
+                    variant.norm_adv_delta = (variant.adv_delta - mean) / std
+
         return loss_tensor.mean(), lod0_loss, adv_delta_mean, adv_delta_p95, lod_metrics, lod_counts
 
     def _prepare_variant_entries(
@@ -1290,6 +1320,10 @@ class MCController:
         margin = float(self.config.lens_margin)
         collapse_weight = float(self.config.lens_collapse_weight)
         temperature = max(1e-6, float(self.config.lens_temperature))
+        temperature = float(self.config.lens_temperature)
+        kl_weight = float(self.config.lens_kl_weight)
+        budget_smooth_weight = float(self.config.lens_budget_smooth_weight)
+        budget_smooth_beta = float(self.config.lens_budget_smooth_beta)
         for sample in batch_states:
             preference_pairs = self._build_preference_pairs(sample.variants)
             if not preference_pairs:
@@ -1352,7 +1386,33 @@ class MCController:
                     neg_mass = (span_vals * torch.relu(-masked_scores)).sum()
                     denom = pos_mass + neg_mass + 1e-6
                     budget_loss = ((pos_mass - neg_mass) / denom) ** 2
-                total_loss = pref_loss + rank_weight * rank_loss + budget_weight * budget_loss
+                smooth_loss = masked_scores.new_tensor(0.0)
+                if budget_smooth_weight > 0.0:
+                    current_diff = ((pos_mass - neg_mass) / (pos_mass + neg_mass + 1e-6))
+                    self._budget_mass_ema = budget_smooth_beta * self._budget_mass_ema + (1.0 - budget_smooth_beta) * float(current_diff.detach())
+                    target = current_diff - self._budget_mass_ema
+                    smooth_loss = target * target
+
+                kl_loss = masked_scores.new_tensor(0.0)
+                history_key = id(worse.working_context)
+                if kl_weight > 0.0:
+                    prev_scores = self._policy_history.get(history_key)
+                    if prev_scores is not None and prev_scores.shape == scores_1d.shape:
+                        prev = prev_scores.to(scores_1d.device)
+                        p_curr = torch.sigmoid(scores_1d / temperature).clamp(1e-6, 1 - 1e-6)
+                        p_prev = torch.sigmoid(prev / temperature).clamp(1e-6, 1 - 1e-6)
+                        kl_forward = F.kl_div(p_curr.log(), p_prev, reduction="batchmean")
+                        kl_backward = F.kl_div(p_prev.log(), p_curr, reduction="batchmean")
+                        kl_loss = 0.5 * (kl_forward + kl_backward)
+                self._policy_history[history_key] = scores_1d.detach().to("cpu")
+
+                total_loss = (
+                    pref_loss
+                    + rank_weight * rank_loss
+                    + budget_weight * budget_loss
+                    + budget_smooth_weight * smooth_loss
+                    + kl_weight * kl_loss
+                )
                 losses.append(total_loss)
             self._ensure_policy_scores_logged(sample.variants, score_cache)
         if not losses:
@@ -1640,11 +1700,19 @@ class MCController:
                 delta = abs(loss_i_val - loss_j_val)
                 if delta <= 1e-6:
                     continue
+                norm_i = getattr(variants[i], "norm_adv_delta", 0.0)
+                norm_j = getattr(variants[j], "norm_adv_delta", 0.0)
                 if loss_i_val <= loss_j_val:
                     better, worse = variants[i], variants[j]
                 else:
                     better, worse = variants[j], variants[i]
-                pairs.append((better, worse, delta))
+                if self._adv_norm_initialized:
+                    strength = abs(norm_i - norm_j)
+                else:
+                    strength = delta
+                if strength <= 1e-6:
+                    strength = delta
+                pairs.append((better, worse, strength))
         self._rng.shuffle(pairs)
         return pairs[: max(1, self.config.max_lens_pairs)]
 

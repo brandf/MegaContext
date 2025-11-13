@@ -106,9 +106,18 @@ However, the *mechanics* of our loss—pairwise comparisons over different “vi
    - Replaced the per-entry MSE with a Bradley–Terry (logistic) preference loss scaled by ΔNLL magnitude and a tunable temperature.
    - Added `mc_lens_temperature` CLI/config knob so we can sweep how sharp the preference comparisons are.
 
-3. [ ] **Stability enhancements**
-   - Track running mean/variance of ΔNLL to normalize advantages before feeding them into the loss (akin to advantage normalization in PPO).
-   - Add optional KL regularization between consecutive LensNet policies (`KL(old_scores || new_scores)`) to keep updates smooth.
+3. [x] **Stability enhancements**
+   - **Advantage normalization:** track an EMA of `adv_delta` mean/variance (`lens_adv_norm_beta`) and z-score deltas before feeding them into the Bradley–Terry loss so noisy batches don’t explode gradients. Falls back to raw Δloss if the EMA hasn’t been initialized.
+   - **Policy KL regularization:** keep a cache of the previous policy scores per variant and add a symmetric KL penalty (`lens_kl_weight`) so LensNet can’t thrash its logits between iterations.
+   - **Budget smoothing:** maintain an EMA of expand-minus-collapse mass (`lens_budget_smooth_beta`) and penalize deviations (`lens_budget_smooth_weight`) so random variants don’t skew the controller toward reckless expansion or collapse.
+
+### Stability Enhancements in Practice
+
+| Technique | Why | How |
+| --- | --- | --- |
+| Advantage normalization | ΔNLL magnitudes can vary wildly between samples, producing unstable gradients. | Maintain an EMA (`lens_adv_norm_beta`) of the mean/variance of `adv_delta`, compute normalized advantages per variant, and derive preference strength from that z-score. |
+| Policy KL regularization | Prevents LensNet from flipping sign every batch, which destabilizes the allocator. | Cache the previous policy scores per WC and add a symmetric KL term (`lens_kl_weight`) when computing `_compute_lens_losses`. |
+| Budget smoothing | Random variants sometimes bias a batch toward expand-only or collapse-only plans. | Track an EMA of net expand mass (`lens_budget_smooth_beta`) and penalize deviations via `lens_budget_smooth_weight`. |
 
 4. [ ] **Curriculum + hard-negative mining**
    - Bucket variant pairs by Δloss magnitude; oversample “hard” comparisons to accelerate learning, similar to contrastive hard-negative mining.

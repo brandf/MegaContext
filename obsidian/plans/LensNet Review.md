@@ -35,6 +35,7 @@ summary: Assessment of the current LensNet implementation/training vs. the inten
 | Legality masking | At inference the allocator clamps illegal actions, but training targets include every WC entry regardless of LOD. | LensNet is penalized for not collapsing the root (LOD2) even though collapse is illegal, confusing gradients. |
 | ΔNLL usage | We only use ΔNLL to pick the “best variant”. No per-span ΔNLL is logged. | The doc’s “counterfactual utilities” are unimplemented—hence the dangling TODO references in `obsidian/architecture/components/LensNet Training.md`. |
 | Telemetry | Prior to this review the only signals were `mc/lens_loss`, `mc/adv_delta_mean/p95`. | New `--mc_log_lens_debug` instrumentation now surfaces score stats + correlations, revealing the polarity bug (scores anti-correlate with ΔNLL). |
+| Stability | None (scores could thrash between steps, budgets drifted). | Phase 1 adds advantage normalization (EMA), symmetric policy KL, and budget smoothing EMAs; all optional knobs in MCConfig. |
 | Tests | Unit tests rely on dummy `ZeroLensNet` to avoid running the real model. No coverage for target generation, legality, or loss weighting. | Means regressions (like flipped sign) go unnoticed. |
 
 ## Likely issues + proposed fixes

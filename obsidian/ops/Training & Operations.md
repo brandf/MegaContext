@@ -57,6 +57,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
   - Random variants + `--mc_max_counterfactuals` control how many WCs are sampled per sequence. Each variant trains directly against the next-token objective, so no separate horizon tuning is required.
   - `--mc_auto_batch` (default `1`) automatically scales `device_batch_size` and `num_iterations` based on the variant multiplier so MC runs keep a similar token budget to vanilla; set it to `0` if you want to manage batch math manually.
   - `--mc_lens_loss_weight` scales the LensNet supervision that rides on top of the core loss; `--mc_lens_temperature` controls the sharpness of the Bradley–Terry preference loss (lower = sharper, higher = smoother).
+  - `--mc_lens_adv_norm_beta`, `--mc_lens_kl_weight`, `--mc_lens_budget_smooth_weight`, `--mc_lens_budget_smooth_beta` configure the stability helpers (advantage normalization EMA, policy KL regularizer, and budget smoothing EMA).
 - **Allocator**
   - `--allocator_type greedy|stochastic_greedy` toggles between deterministic focus edits and a top-|score| sampler (tunable via `--allocator_sample_top_k`, `--allocator_sample_temperature`). The other `--allocator_*` thresholds (`soft_max_length`, `recent_tokens`, expand/collapse thresholds, max replacements, iterations) shape how aggressively focus edits are applied per step.
 - **Auxiliary precision**

@@ -84,6 +84,16 @@ We log the following metrics to W&B (`scripts/base_train.py`):
 
 `--mc_log_lens_debug` prints per-variant stats (“PrefDebug”) so we can inspect score distributions and correlations during training.
 
+## Stability Tricks
+
+| Mechanism | Knobs | Purpose |
+| --- | --- | --- |
+| Advantage normalization | `lens_adv_norm_beta` | Maintain an EMA of `adv_delta` mean/variance so normalized advantages (`norm_adv_delta`) drive the preference strength. |
+| Policy KL regularization | `lens_kl_weight` | Keeps LensNet from thrashing by penalizing divergence from the previous policy scores per working context. |
+| Budget smoothing | `lens_budget_smooth_weight`, `lens_budget_smooth_beta` | Tracks an EMA of net expand/collapse mass and penalizes deviations to keep scores budget-neutral despite random variants. |
+
+All three reuse the WC variants already generated for base LLM + GistNet training; no extra model passes are required.
+
 ## Future Work (Phase 2 Ideas)
 
 - Reintroduce tail-gist cross conditioning once preference training is stable.

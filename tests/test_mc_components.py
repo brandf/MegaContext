@@ -399,6 +399,10 @@ def test_pairwise_lens_loss_backprop(monkeypatch):
         num_random_variants=2,
         max_counterfactuals=3,
         random_seed=5,
+        lens_kl_weight=0.05,
+        lens_budget_smooth_weight=0.05,
+        lens_budget_smooth_beta=0.6,
+        lens_adv_norm_beta=0.8,
     )
 
     class LinearLens(nn.Module):
@@ -425,6 +429,30 @@ def test_pairwise_lens_loss_backprop(monkeypatch):
     grad = controller.lensnet.proj.weight.grad
     assert grad is not None
     assert grad.abs().sum() > 0
+
+
+def test_preference_loss_stability_terms(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        max_seq_len=192,
+        allocator_recent_tokens=0,
+        train_wc_length=64,
+        num_random_variants=2,
+        max_counterfactuals=3,
+        random_seed=17,
+        lens_kl_weight=0.1,
+        lens_budget_smooth_weight=0.1,
+        lens_budget_smooth_beta=0.5,
+        lens_adv_norm_beta=0.7,
+    )
+    tokens = (torch.arange(0, 192) % 32).view(1, 192)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "stability_terms")
+    controller._compute_variant_losses([sample_state], tokens)
+    first = controller._compute_lens_losses([sample_state])
+    controller._compute_variant_losses([sample_state], tokens)
+    second = controller._compute_lens_losses([sample_state])
+    assert first is not None
+    assert second is not None
 
 
 def test_lod0_baseline_skips_focus_and_stays_lod0(monkeypatch):

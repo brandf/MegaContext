@@ -53,6 +53,7 @@ These scripts run tokenizer → base → mid → chat SFT end-to-end, drop check
 > - `--mc_auto_batch 1` (default) automatically shrinks `device_batch_size` and increases `num_iterations` based on the variant multiplier so flipping `--mc` on doesn’t unexpectedly OOM; set it to `0` if you want to control batch math yourself.
 > - `--mc_eval_soft_max_length`, `--mc_infer_allocator_*`, `--mc_infer_refocus_interval` let you tune the validation/inference WC size and refocus cadence independently from training so reported `val/bpb` matches runtime behavior.
 > - `--mc_lens_loss_weight` adjusts how strongly LensNet supervision contributes alongside the core next-token objective; `--mc_lens_temperature` controls the sharpness of the pairwise preference (Bradley–Terry) loss.
+> - `--mc_lens_kl_weight`, `--mc_lens_adv_norm_beta`, `--mc_lens_budget_smooth_weight`, `--mc_lens_budget_smooth_beta` tune the new stability tricks (policy KL regularization, advantage normalization EMA, and budget smoothing).
 > - `--mc_aux_dtype auto|fp32|bf16` controls the precision used for GistNet/LensNet. `auto` picks bf16 on GPUs that support it (H100/A100) and falls back to fp32 elsewhere.
 > LensNet scores are tanh-clamped floats (positive ⇒ expand, negative ⇒ collapse). When `--mc` is active we also build Gaussian RoPE positional caches using MegaContext global positions/LOD metadata. The flagless path continues to match upstream nanochat.
 
