@@ -75,6 +75,7 @@ class MCConfig:
     lens_rank_weight: float = 0.5
     lens_budget_weight: float = 0.1
     lens_margin: float = 0.1
+    disable_validation: bool = False
 
     def __post_init__(self) -> None:
         self.mc_tree_type = self.mc_tree_type.lower()
