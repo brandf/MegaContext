@@ -101,7 +101,7 @@ summary: Assessment of the current LensNet implementation/training vs. the inten
 ## Prioritized action plan
 
 - [ ] **(P0) Fix target polarity / legality masking**
-  - Rebuild `_build_lens_targets` so it copies the “best variant” map but only over *actionable entries*, and flips the sign so expand (more detail) ⇒ negative ΔNLL. Weight loss by improvement (`best_loss - variant_loss`), not penalty.
+  - Rebuild `_build_lens_targets` so it uses the Δloss between each variant and the best variant to assign signed targets: entries that differ from the best map and make loss worse become negative, entries that make loss better become positive. This stays compute efficient because we already compute each variant’s token loss when training GistNet.
   - Mask illegal entries (LOD0 expand, LODmax collapse) during both target construction and loss.
 - [ ] **(P0) Add budget & ranking losses**
   - Implement `L_budget` and `L_rank` from the spec so LensNet learns ordering + net-zero token flow.

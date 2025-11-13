@@ -1727,22 +1727,28 @@ class MCController:
         span_tokens = torch.ones_like(score_template)
         max_lod = self.config.max_lod
         block_size = self.config.block_size
+        delta_loss = getattr(variant, "delta_loss", None)
+        if delta_loss is None:
+            return targets, mask, span_tokens
+        delta_val = float(delta_loss)
         for idx, (pos, lod_tensor) in enumerate(zip(positions, lods)):
             lod = int(lod_tensor.item())
             pos_int = int(pos.item())
             desired_lod = best_map.get(pos_int, lod)
             span_tokens[idx] = float(block_size ** max(lod, 0))
+            if desired_lod == lod:
+                continue
             if desired_lod < lod:
-                # Need to expand (more detail)
+                # best wants more detail here
                 if lod <= 0:
-                    continue  # already at finest detail
-                targets[idx] = 1.0
+                    continue
+                targets[idx] = -1.0 if delta_val > 0 else 1.0
                 mask[idx] = True
             elif desired_lod > lod:
-                # Need to collapse (less detail)
+                # best wants less detail here
                 if lod >= max_lod:
-                    continue  # cannot collapse further
-                targets[idx] = -1.0
+                    continue
+                targets[idx] = 1.0 if delta_val > 0 else -1.0
                 mask[idx] = True
         return targets, mask, span_tokens
 
