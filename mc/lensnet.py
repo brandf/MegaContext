@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 
@@ -19,6 +21,7 @@ class TransformerLensNet(nn.Module):
         self,
         embed_dim: int,
         max_length: int,
+        block_size: int,
         layers: int = 2,
         num_heads: int = 4,
         head: str = "mlp",
@@ -26,6 +29,8 @@ class TransformerLensNet(nn.Module):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
         self.num_heads = num_heads
+        self.block_size = block_size
+        self._log_block = math.log(max(block_size, 1)) if block_size > 1 else 0.0
         config = GPTConfig(
             sequence_len=max_length,
             vocab_size=1,
@@ -35,7 +40,18 @@ class TransformerLensNet(nn.Module):
             n_embd=embed_dim,
         )
         self.blocks = nn.ModuleList([Block(config, layer_idx=i) for i in range(layers)])
-        self.scorer = self._build_head(embed_dim, head)
+        self.level_embed = nn.Embedding(4, embed_dim)
+        self.span_mlp = nn.Sequential(
+            nn.Linear(1, embed_dim),
+            nn.SiLU(),
+            nn.Linear(embed_dim, embed_dim),
+        )
+        self.dist_mlp = nn.Sequential(
+            nn.Linear(1, embed_dim),
+            nn.SiLU(),
+            nn.Linear(embed_dim, embed_dim),
+        )
+        self.scorer = self._build_head(embed_dim * 2, head)
 
     def _build_head(self, embed_dim: int, head: str) -> nn.Module:
         if head == "linear":
@@ -63,7 +79,18 @@ class TransformerLensNet(nn.Module):
         cos_sin = (cos, sin)
         for block in self.blocks:
             x = block(x, cos_sin, kv_cache=None, alibi=None)
-        scores = self.scorer(x).squeeze(-1)
+        levels = working_context.get_lod_tensor().to(x.device)
+        positions = working_context.get_positions().to(x.device)
+        span_width = torch.exp(levels.float() * self._log_block).unsqueeze(-1)
+        cursor_norm = positions.float()
+        denom = max(cursor_norm.max().item(), 1.0)
+        cursor_norm = cursor_norm / denom
+        level_feat = self.level_embed(levels.long())
+        span_feat = self.span_mlp(span_width)
+        dist_feat = self.dist_mlp(cursor_norm.unsqueeze(-1))
+        features = level_feat + span_feat + dist_feat
+        cat_feat = torch.cat([x, features], dim=-1)
+        scores = self.scorer(cat_feat).squeeze(-1)
         return torch.tanh(scores)
 
 
@@ -71,6 +98,7 @@ def build_lensnet(
     kind: str,
     embed_dim: int,
     max_length: int,
+    block_size: int,
     num_heads: int,
     layers: int,
     head: str,
@@ -80,6 +108,7 @@ def build_lensnet(
     return TransformerLensNet(
         embed_dim=embed_dim,
         max_length=max_length,
+        block_size=block_size,
         layers=layers,
         num_heads=num_heads,
         head=head,

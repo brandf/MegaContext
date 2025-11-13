@@ -944,6 +944,12 @@ for step in range(num_iterations + 1):
         if mc_result is not None and mc_result.lod_metrics:
             for lod, val in mc_result.lod_metrics.items():
                 log_data[f"mc/lod_loss/{lod}"] = val
+        if mc_result is not None and mc_result.lens_corr_mean is not None:
+            log_data["mc/lens_corr_mean"] = mc_result.lens_corr_mean
+            if mc_result.lens_corr_max is not None:
+                log_data["mc/lens_corr_max"] = mc_result.lens_corr_max
+            if mc_result.lens_corr_min is not None:
+                log_data["mc/lens_corr_min"] = mc_result.lens_corr_min
         if mc_result is not None and mc_result.lod_counts:
             for lod, count in mc_result.lod_counts.items():
                 log_data[f"mc/lod_count/{lod}"] = count

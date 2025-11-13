@@ -83,6 +83,9 @@ class MCBatchResult:
     delta_p95: Optional[float] = None
     lod_metrics: Dict[int, float] = field(default_factory=dict)
     lod_counts: Dict[int, int] = field(default_factory=dict)
+    lens_corr_mean: Optional[float] = None
+    lens_corr_max: Optional[float] = None
+    lens_corr_min: Optional[float] = None
 
 
 class MCTelemetry:
@@ -167,6 +170,7 @@ class MCController:
             config.lensnet_type,
             embed_dim,
             max_length=config.wc_config.max_length,
+            block_size=config.block_size,
             num_heads=config.num_heads,
             layers=config.lensnet_layers,
             head=config.lensnet_head,
@@ -186,6 +190,7 @@ class MCController:
         )
         self.last_inference_report: Optional[Dict[str, Any]] = None
         self.last_train_report: Optional[Dict[str, Any]] = None
+        self._last_lens_corr: Dict[str, float] = {}
         if config.positional_type:
             if config.positional_type in {"gaussian_lod2d", "gaussian_lod2d_alibi"}:
                 raise ValueError(
@@ -319,6 +324,10 @@ class MCController:
             lod_metrics=lod_metrics,
             lod_counts=lod_counts,
         )
+        if getattr(self, "_last_lens_corr", None):
+            result.lens_corr_mean = self._last_lens_corr.get("lens_corr_mean")
+            result.lens_corr_max = self._last_lens_corr.get("lens_corr_max")
+            result.lens_corr_min = self._last_lens_corr.get("lens_corr_min")
         self.current_batch_states = []
         self._emit_batch_counters(step)
         self._refresh_train_report(batch_states)
@@ -1110,6 +1119,11 @@ class MCController:
         corr_mean = _corr(mean_scores, delta_values)
         corr_max = _corr(max_scores, delta_values)
         corr_min = _corr(min_scores, delta_values)
+        self._last_lens_corr = {
+            "lens_corr_mean": corr_mean if corr_mean is not None else float("nan"),
+            "lens_corr_max": corr_max if corr_max is not None else float("nan"),
+            "lens_corr_min": corr_min if corr_min is not None else float("nan"),
+        }
         print(
             "[MegaContext][LensDebug] variants=%d corr_mean=%.3f corr_max=%.3f corr_min=%.3f"
             % (
