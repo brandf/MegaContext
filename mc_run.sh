@@ -11,4 +11,5 @@ fi
 bash run10.sh --mc \
     --mc_train_report 1 \
     --mc_log_timers 1 \
-    --mc_log_lod_ascii_train 1
+    --mc_log_lod_ascii_train 1 \
+    --mc_log_lens_debug 1
