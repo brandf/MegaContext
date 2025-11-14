@@ -476,6 +476,8 @@ class MCController:
         seed = baseline
         if seed is None:
             return variants
+        if tree.num_tokens() <= target_len:
+            return variants[: limit]
         target_len = baseline.working_context.length
         limit = max(1, self.config.max_counterfactuals)
         seed_len = seed.working_context.length
