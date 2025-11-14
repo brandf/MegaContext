@@ -569,7 +569,10 @@ def test_baseline_is_pure_lod0(monkeypatch):
     baselines = [v for v in sample_state.variants if v.is_baseline]
     assert len(baselines) == 1
     lods = baselines[0].working_context.get_lod_tensor()[0]
-    assert torch.all(lods == 0)
+    positions = baselines[0].working_context.get_positions()[0]
+    tail_start = max(0, int(positions.max().item()) + 1 - controller.config.allocator_recent_tokens)
+    tail_mask = positions >= tail_start
+    assert torch.all(lods[tail_mask] == 0)
 
 
 def test_lod_metrics_weighted_by_histogram(monkeypatch):

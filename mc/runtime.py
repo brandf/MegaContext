@@ -623,31 +623,78 @@ class MCController:
         total_tokens = tree.num_tokens()
         if total_tokens <= 0:
             return None
-        max_len = min(self.config.wc_config.max_length, total_tokens)
-        if max_len <= 0:
-            return None
-        start = max(0, total_tokens - max_len)
-        embeddings = tree.get_lod0_slice(start, start + max_len)
-        positions = tree.get_positions_for_lod(0)[:, start : start + max_len]
-        lod_tensor = torch.zeros(
-            (embeddings.shape[0], embeddings.shape[1]),
-            dtype=torch.long,
-            device=embeddings.device,
-        )
-        wc = WorkingContext(
-            embeddings,
-            positions,
-            self.config.wc_config,
-            lod_tensor=lod_tensor,
-            recent_tokens=self.config.allocator_recent_tokens,
-        )
-        self._configure_wc_positional(wc)
-        return WorkingContextVariant(
-            working_context=wc,
+        target_len = max(1, self._current_target_wc_length())
+        tail_tokens = min(total_tokens, int(self.config.allocator_recent_tokens))
+        tail_tokens = min(tail_tokens, target_len)
+        if tail_tokens <= 0 and target_len > 0:
+            tail_tokens = min(target_len, self.config.block_size)
+        tail_tokens = min(tail_tokens, total_tokens)
+
+        head_tokens = max(0, total_tokens - tail_tokens)
+        head_budget = max(0, target_len - tail_tokens)
+
+        segments_embeddings: List[torch.Tensor] = []
+        segments_positions: List[torch.Tensor] = []
+        segments_lods: List[torch.Tensor] = []
+
+        def append_segment(tensor: torch.Tensor, positions: torch.Tensor, lod: int) -> None:
+            segments_embeddings.append(tensor)
+            segments_positions.append(positions.long())
+            lod_tensor = torch.full(
+                (tensor.shape[0], tensor.shape[1]),
+                lod,
+                dtype=torch.long,
+                device=tensor.device,
+            )
+            segments_lods.append(lod_tensor)
+
+        def append_lod_range(start: int, end: int, lod: int) -> None:
+            if end <= start:
+                return
+            if lod == 0:
+                slice_embeddings = tree.get_lod0_slice(start, end)
+                slice_positions = tree.get_positions_for_lod(0)[:, start:end]
+            else:
+                metadata = self._get_level_metadata_cached(tree, lod, level_cache)
+                if metadata is None or metadata[0].shape[1] == 0:
+                    return
+                slice_embeddings, slice_positions = metadata
+                stride = max(1, tree.tokens_per_entry(lod))
+                max_entries = math.ceil((end - start) / stride)
+                slice_embeddings = slice_embeddings[:, :max_entries, :]
+                slice_positions = slice_positions[:, :max_entries]
+            append_segment(slice_embeddings, slice_positions, lod)
+
+        if head_tokens > 0 and head_budget > 0:
+            # Mix high LOD head with LOD0 to fill the budget deterministically.
+            lod = self.config.max_lod
+            while head_budget > 0 and lod > 0:
+                append_lod_range(0, min(head_tokens, head_budget * tree.tokens_per_entry(lod)), lod)
+                head_budget -= tree.tokens_per_entry(lod) * segments_embeddings[-1].shape[1]
+                lod -= 1
+            if head_budget > 0:
+                append_lod_range(0, head_tokens, 0)
+
+        if tail_tokens > 0:
+            tail_start = max(0, total_tokens - tail_tokens)
+            append_lod_range(tail_start, total_tokens, 0)
+
+        if not segments_embeddings:
+            append_lod_range(0, total_tokens, 0)
+
+        head_embeddings = torch.cat(segments_embeddings, dim=1)
+        head_positions = torch.cat(segments_positions, dim=1)
+        head_lods = torch.cat(segments_lods, dim=1)
+        variant = self._create_variant(
+            tree,
+            head_embeddings,
+            head_positions,
+            lod=0,
             source="lod_0_baseline",
-            lod_hint=0,
-            is_baseline=True,
+            tail_tokens_override=tail_tokens,
         )
+        variant.is_baseline = True
+        return variant
 
     def _build_inference_recency_variant(
         self,
@@ -1369,6 +1416,9 @@ class MCController:
     ) -> List[Dict[str, Any]]:
         entries: List[Dict[str, Any]] = []
         target_len = min(self.config.wc_config.max_length, original_tokens.shape[1])
+        if self.config.train_wc_length is not None:
+            target_len = min(target_len, int(self.config.train_wc_length))
+        target_len = max(1, target_len)
         for sample in batch_states:
             for variant in sample.variants:
                 wc = variant.working_context
