@@ -558,6 +558,20 @@ def test_random_variants_are_unique(monkeypatch):
     assert len(signatures) == len(sample_state.variants)
 
 
+def test_baseline_is_pure_lod0(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        train_wc_length=256,
+        allocator_recent_tokens=128,
+    )
+    tokens = (torch.arange(0, 320) % 32).view(1, 320)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "baseline_lod0")
+    baselines = [v for v in sample_state.variants if v.is_baseline]
+    assert len(baselines) == 1
+    lods = baselines[0].working_context.get_lod_tensor()[0]
+    assert torch.all(lods == 0)
+
+
 def test_lod_metrics_weighted_by_histogram(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,

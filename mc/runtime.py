@@ -543,10 +543,6 @@ class MCController:
             total_edits += edits
             if wc.length <= target_len:
                 break
-        fixed_wc = self._ensure_wc_full_coverage(wc, tree, f"random_variant_{index}")
-        if fixed_wc is not wc:
-            wc = fixed_wc
-            allocator.working_context = wc
         lod_hint = self._infer_variant_lod_hint(wc)
         return WorkingContextVariant(
             working_context=wc,
@@ -624,59 +620,29 @@ class MCController:
         if total_tokens <= 0:
             return None
         target_len = max(1, self._current_target_wc_length())
-        tail_tokens = min(total_tokens, int(self.config.allocator_recent_tokens))
-        tail_tokens = min(tail_tokens, target_len)
-        if tail_tokens <= 0 and target_len > 0:
-            tail_tokens = min(target_len, self.config.block_size)
-        tail_tokens = min(tail_tokens, total_tokens)
-
-        def _select_lod(current_tail: int) -> Tuple[Optional[int], int, int]:
-            head_tokens = max(0, total_tokens - current_tail)
-            head_budget = max(0, target_len - current_tail)
-            if head_tokens == 0:
-                return 0, head_tokens, head_budget
-            if head_budget <= 0:
-                return None, head_tokens, head_budget
-            for lod in range(self.config.max_lod, -1, -1):
-                metadata = self._get_level_metadata_cached(tree, lod, level_cache)
-                if metadata is None or metadata[0].shape[1] == 0:
-                    continue
-                coverage = max(1, tree.tokens_per_entry(lod))
-                needed = math.ceil(head_tokens / coverage)
-                if needed <= head_budget:
-                    return lod, head_tokens, head_budget
-            return None, head_tokens, head_budget
-
-        lod_choice, head_tokens, head_budget = _select_lod(tail_tokens)
-        while lod_choice is None and tail_tokens > 0:
-            tail_tokens = max(0, tail_tokens - self.config.block_size)
-            lod_choice, head_tokens, head_budget = _select_lod(tail_tokens)
-
-        if lod_choice is None:
-            lod_choice = 0
-
-        metadata = self._get_level_metadata_cached(tree, lod_choice, level_cache)
-        if metadata is None:
-            metadata = self._get_level_metadata_cached(tree, 0, level_cache)
-            if metadata is None:
-                return None
-            lod_choice = 0
-        embeddings, positions = metadata
-        coverage = max(1, tree.tokens_per_entry(lod_choice))
-        needed = math.ceil(head_tokens / coverage) if head_tokens > 0 else 0
-        needed = min(needed, embeddings.shape[1])
-        head_embeddings = embeddings[:, :needed, :]
-        head_positions = positions[:, :needed]
-        variant = self._create_variant(
-            tree,
-            head_embeddings,
-            head_positions,
-            lod=lod_choice,
-            source="lod_0_baseline",
-            tail_tokens_override=tail_tokens,
+        window = min(target_len, total_tokens)
+        start = max(0, total_tokens - window)
+        embeddings = tree.get_lod0_slice(start, total_tokens)
+        positions = tree.get_positions_for_lod(0)[:, start:total_tokens]
+        lod_tensor = torch.zeros(
+            (embeddings.shape[0], embeddings.shape[1]),
+            dtype=torch.long,
+            device=embeddings.device,
         )
-        variant.is_baseline = True
-        return variant
+        wc = WorkingContext(
+            embeddings,
+            positions,
+            self.config.wc_config,
+            lod_tensor=lod_tensor,
+            recent_tokens=self.config.allocator_recent_tokens,
+        )
+        self._configure_wc_positional(wc)
+        return WorkingContextVariant(
+            working_context=wc,
+            source="lod_0_baseline",
+            lod_hint=0,
+            is_baseline=True,
+        )
 
     def _build_inference_recency_variant(
         self,
