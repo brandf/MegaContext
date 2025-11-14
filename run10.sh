@@ -63,6 +63,7 @@ MC_LENS_ADV_NORM_BETA=0.9
 MC_LENS_BUDGET_SMOOTH_WEIGHT=0.0
 MC_LENS_BUDGET_SMOOTH_BETA=0.9
 MC_LENS_HARD_NEGATIVE_RATIO=1.0
+MC_MAX_COUNTERFACTUALS=8
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -152,6 +153,11 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_infer_refocus_interval" >&2; exit 1; }
             MC_INFER_REFOCUS_INTERVAL="$1"
+            ;;
+        --mc_max_counterfactuals)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_max_counterfactuals" >&2; exit 1; }
+            MC_MAX_COUNTERFACTUALS="$1"
             ;;
         --allocator_soft_max)
             shift
@@ -286,12 +292,22 @@ MAX_SEQ_LEN=2048
 
 case "$GPU_PROFILE" in
     5090)
-        DEVICE_BATCH_SIZE=20
+        DEVICE_BATCH_SIZE=12
         NUM_ITERATIONS=75500
+        MC_NUM_RANDOM_VARIANTS=3
+        MC_RANDOM_VARIANT_ITERATIONS=3
+        MC_MAX_COUNTERFACTUALS=5
+        MC_TRAIN_WC_LENGTH=1536
+        MC_LENS_HARD_NEGATIVE_RATIO=0.75
         ;;
     h100)
         DEVICE_BATCH_SIZE=40
         NUM_ITERATIONS=37750
+        MC_NUM_RANDOM_VARIANTS=4
+        MC_RANDOM_VARIANT_ITERATIONS=4
+        MC_MAX_COUNTERFACTUALS=8
+        MC_TRAIN_WC_LENGTH=""
+        MC_LENS_HARD_NEGATIVE_RATIO=1.0
         ;;
     *)
         echo "Unsupported GPU profile: $GPU_PROFILE (expected 5090 or h100)" >&2
@@ -314,6 +330,9 @@ echo "Depth: $DEPTH  |  Seq len: $MAX_SEQ_LEN"
 echo "Device batch: $DEVICE_BATCH_SIZE  |  Total batch: $TOTAL_BATCH_SIZE tokens"
 echo "Iterations: $NUM_ITERATIONS"
 echo "MegaContext enabled: $MC_ENABLED"
+if [ "$GPU_PROFILE" = "5090" ]; then
+    echo "5090 profile: train_wc_length=${MC_TRAIN_WC_LENGTH:-auto}, max_counterfactuals=$MC_MAX_COUNTERFACTUALS, random_variants=$MC_NUM_RANDOM_VARIANTS"
+fi
 
 # -----------------------------------------------------------------------------
 # Environment + dependencies
@@ -384,6 +403,7 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_aux_dtype="$MC_AUX_DTYPE" \
     --allocator_soft_max="$ALLOCATOR_SOFT_MAX" \
     --mc_auto_batch="$MC_AUTO_BATCH" \
+    --mc_max_counterfactuals="$MC_MAX_COUNTERFACTUALS" \
     --mc_eval_soft_max_length="$MC_EVAL_SOFT_MAX_LENGTH" \
     --mc_infer_allocator_max_replacements="$MC_INFER_ALLOCATOR_MAX_REPLACEMENTS" \
     --mc_infer_allocator_iterations="$MC_INFER_ALLOCATOR_ITERATIONS" \
