@@ -292,7 +292,7 @@ MAX_SEQ_LEN=2048
 
 case "$GPU_PROFILE" in
     5090)
-        DEVICE_BATCH_SIZE=12
+        DEVICE_BATCH_SIZE=20
         NUM_ITERATIONS=75500
         ;;
     h100)
