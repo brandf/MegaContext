@@ -120,6 +120,7 @@ class FocusAllocatorBase:
             if self._residency.numel() > 0:
                 self._residency += 1
             policy_scores = scores
+            custom_scores = policy_scores is not None
             if policy_scores is None:
                 policy_scores = self.lensnet(self.working_context)
             policy_scores = policy_scores.detach()
@@ -129,20 +130,21 @@ class FocusAllocatorBase:
             else:
                 scores_1d = policy_scores.squeeze(0)
             prefer_collapse = self.working_context.length > self.cfg.soft_max_length
-            edits = self._select_edits(scores_1d, max_replacements_per_iteration, prefer_collapse)
+            edits = self._select_edits(
+                scores_1d,
+                max_replacements_per_iteration,
+                prefer_collapse,
+                custom_scores,
+            )
             if not edits:
                 break
+            # Apply edits from highest index to lowest so earlier replacements
+            # are not affected by shifts from later ones.
+            edits.sort(key=lambda e: int(getattr(e, "wc_start", 0)), reverse=True)
             for edit in edits:
                 self.working_context.replace(edit)
                 # Update residency ages across replaced span
-                old_count = edit.old_count
-                if old_count <= 0:
-                    if getattr(edit, "action", "") == "expand":
-                        old_count = 1
-                    elif getattr(edit, "action", "") == "collapse":
-                        old_count = self.cfg.block_size
-                    else:
-                        old_count = edit.replacements.shape[1]
+                old_count = self._infer_old_count(edit)
                 new_count = edit.replacements.shape[1]
                 start = int(edit.wc_start)
                 start = max(0, min(start, int(self._residency.numel())))
@@ -173,8 +175,20 @@ class FocusAllocatorBase:
         scores: torch.Tensor,
         max_replacements: int,
         prefer_collapse: bool,
+        force_collapse: bool,
     ) -> List[WorkingContextEdit]:
         raise NotImplementedError
+
+    def _infer_old_count(self, edit: WorkingContextEdit) -> int:
+        old_count = int(getattr(edit, "old_count", 0))
+        if old_count > 0:
+            return old_count
+        action = getattr(edit, "action", "")
+        if action == "expand":
+            return 1
+        if action == "collapse":
+            return self.cfg.block_size
+        return int(edit.replacements.shape[1])
 
     # ------------------------------------------------------------------ #
     # Edit selection helpers
@@ -190,15 +204,18 @@ class GreedyFocusAllocator(FocusAllocatorBase):
         scores: torch.Tensor,
         max_replacements: int,
         prefer_collapse: bool,
+        force_collapse: bool,
     ) -> List[WorkingContextEdit]:
         edits: List[WorkingContextEdit] = []
         lods = self.working_context.get_lod_tensor()[0]
         positions = self.working_context.get_positions()[0]
         length = scores.numel()
-        allow_expand = self.working_context.length < self.cfg.soft_max_length
-        allow_collapse = self.working_context.length > self.cfg.soft_max_length
-        protected_start = max(0, length - self.cfg.recent_tokens)
+        allow_expand = self.working_context.length < self.cfg.soft_max_length or not prefer_collapse
+        allow_collapse = force_collapse or self.working_context.length > self.cfg.soft_max_length
+        protected_tokens = min(self.cfg.recent_tokens, max(0, length - self.cfg.block_size))
+        protected_start = max(0, length - protected_tokens)
         order = torch.argsort(torch.abs(scores), descending=True)
+        occupied_ranges: List[Tuple[int, int]] = []
         for idx_tensor in order:
             idx = int(idx_tensor.item())
             if idx >= length or len(edits) >= max_replacements:
@@ -214,6 +231,13 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             elif score <= -self.cfg.collapse_threshold and lod < self.cfg.max_lod and allow_collapse:
                 edit = self._build_collapse_edit(idx, lod, global_pos)
             if edit is not None:
+                span = self._infer_old_count(edit)
+                start = int(edit.wc_start)
+                end = start + span
+                overlap = any(not (end <= rng_start or start >= rng_end) for rng_start, rng_end in occupied_ranges)
+                if overlap:
+                    continue
+                occupied_ranges.append((start, end))
                 edits.append(edit)
         return edits
 
@@ -475,12 +499,16 @@ class StochasticGreedyFocusAllocator(GreedyFocusAllocator):
         scores: torch.Tensor,
         max_replacements: int,
         prefer_collapse: bool,
+        force_collapse: bool,
     ) -> List[WorkingContextEdit]:
         edits: List[WorkingContextEdit] = []
         lods = self.working_context.get_lod_tensor()[0]
         positions = self.working_context.get_positions()[0]
         length = scores.numel()
-        protected_start = max(0, length - self.cfg.recent_tokens)
+        allow_expand = self.working_context.length < self.cfg.soft_max_length or not prefer_collapse
+        allow_collapse = force_collapse or self.working_context.length > self.cfg.soft_max_length
+        protected_tokens = min(self.cfg.recent_tokens, max(0, length - self.cfg.block_size))
+        protected_start = max(0, length - protected_tokens)
         # Candidate indices sorted by |score|
         order = torch.argsort(torch.abs(scores), descending=True)
         pool: List[int] = [int(i.item()) for i in order if int(i.item()) < protected_start]
@@ -500,9 +528,9 @@ class StochasticGreedyFocusAllocator(GreedyFocusAllocator):
             global_pos = int(positions[idx].item())
             edit: Optional[WorkingContextEdit] = None
             # Match greedy thresholds; when over soft length, favor collapse by disabling expand
-            if score >= self.cfg.expand_threshold and lod > 0 and not prefer_collapse:
+            if score >= self.cfg.expand_threshold and lod > 0 and allow_expand and not prefer_collapse:
                 edit = self._build_expand_edit(idx, lod, global_pos)
-            elif score <= -self.cfg.collapse_threshold and lod < self.cfg.max_lod:
+            elif score <= -self.cfg.collapse_threshold and lod < self.cfg.max_lod and allow_collapse:
                 edit = self._build_collapse_edit(idx, lod, global_pos)
             if edit is not None:
                 edits.append(edit)
