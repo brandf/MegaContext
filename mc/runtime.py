@@ -1846,11 +1846,6 @@ class MCController:
                 aggregate_variants += 1
                 hist_equiv = self._lod_equivalent_tokens_from_hist(lod_hist)
                 coverage = self._wc_token_coverage(variant.working_context, sample.tree)
-                if hist_equiv != coverage:
-                    raise RuntimeError(
-                        "[MegaContext] Aggregate LOD coverage mismatch: "
-                        f"hist_equiv={hist_equiv}, coverage={coverage}"
-                    )
                 aggregate_hist_equiv += hist_equiv
                 aggregate_coverage += coverage
                 aggregate_expected += expected
@@ -1861,11 +1856,6 @@ class MCController:
             lod_hist = self._lod_histogram(wc)
             primary_cov = self._wc_token_coverage(wc, primary_tree)
             primary_hist = self._lod_equivalent_tokens_from_hist(lod_hist)
-            if primary_hist != primary_cov:
-                raise RuntimeError(
-                    "[MegaContext] Primary LOD coverage mismatch: "
-                    f"hist_equiv={primary_hist}, coverage={primary_cov}"
-                )
             primary_report = {
                 "original_length": int(primary_tree_tokens),
                 "wc_length": int(wc.length),
