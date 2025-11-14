@@ -468,16 +468,16 @@ class MCController:
         variants: List[WorkingContextVariant] = []
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
         planned_target_len = min(self._current_target_wc_length(), tree.num_tokens())
-        baseline = self._build_trimmed_baseline_variant(tree, level_cache, planned_target_len)
+        target_len = self._reachable_target_length(tree, planned_target_len)
+        baseline = self._build_trimmed_baseline_variant(tree, level_cache, target_len)
         if baseline is not None:
             baseline.source = "lod_0_baseline"
-            if tree.num_tokens() > planned_target_len:
-                self._normalize_wc_length(baseline.working_context, tree, planned_target_len)
+            if tree.num_tokens() > target_len:
+                self._normalize_wc_length(baseline.working_context, tree, target_len)
             variants.append(baseline)
         seed = baseline
         if seed is None:
             return variants
-        target_len = baseline.working_context.length
         limit = max(1, self.config.max_counterfactuals)
         seed_len = seed.working_context.length
         seen_signatures: set[Tuple[Tuple[int, int], ...]] = set()
@@ -628,7 +628,7 @@ class MCController:
         total_tokens = tree.num_tokens()
         if total_tokens <= 0:
             return None
-        target_len = max(1, min(target_len, total_tokens))
+        target_len = self._reachable_target_length(tree, target_len)
         metadata = self._get_level_metadata_cached(tree, 0, level_cache)
         if metadata is None:
             return None
@@ -1267,7 +1267,7 @@ class MCController:
         return int(lods.max().item())
 
     def _normalize_wc_length(self, wc: WorkingContext, tree: MegaContextTree, target_len: int) -> None:
-        target_len = int(max(1, min(target_len, tree.num_tokens())))
+        target_len = self._reachable_target_length(tree, target_len)
         if wc.length == target_len:
             return
         allocator = self._build_allocator(tree, wc, soft_max_length=target_len)
@@ -1290,6 +1290,22 @@ class MCController:
             raise RuntimeError(
                 f"[MegaContext] Unable to normalize WC length to {target_len} (final={wc.length})"
             )
+
+    def _reachable_target_length(self, tree: MegaContextTree, target_len: int) -> int:
+        total_tokens = tree.num_tokens()
+        base_len = min(total_tokens, self.config.wc_config.max_length)
+        if base_len <= 0:
+            return 0
+        target = max(1, min(int(target_len), base_len))
+        if base_len <= target:
+            return base_len
+        step = max(1, self.config.block_size - 1)
+        diff = base_len - target
+        if diff % step == 0:
+            return target
+        needed = math.ceil(diff / step)
+        adjusted = base_len - needed * step
+        return max(1, adjusted)
 
     def _current_target_wc_length(self) -> int:
         max_len = self.config.wc_config.max_length
