@@ -64,7 +64,7 @@ All CLI knobs surface through `run10.sh` and `MCConfig`:
 | Flag | Description |
 | --- | --- |
 | `--mc_num_random_variants` | Number of random WCs per sequence. |
-| `--mc_train_wc_length` | Target length for random variants. |
+| `--mc_train_wc_length` | Target length for random variants (defaults to 0.75 × `max_seq_len`, e.g., 1,536 when `max_seq_len=2048`). |
 | `--mc_max_lens_pairs` | Upper bound on `(better, worse)` pairs per sample. |
 | `--mc_lens_temperature` | Bradley–Terry temperature (default 1.0). |
 | `--mc_lens_rank_weight`, `--mc_lens_budget_weight`, `--mc_lens_margin`, `--mc_lens_collapse_weight` | Legacy regularizer knobs that still work. |

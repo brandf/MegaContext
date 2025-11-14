@@ -111,7 +111,8 @@ class MCConfig:
             self.eval_soft_max_length = self.wc_config.max_length
         self.infer_refocus_interval = max(1, int(self.infer_refocus_interval))
         if self.train_wc_length is None:
-            self.train_wc_length = max(1, self.wc_config.max_length // 2)
+            default_len = int(self.wc_config.max_length * 0.75)
+            self.train_wc_length = max(1, min(self.wc_config.max_length, default_len))
         self.num_random_variants = max(0, int(self.num_random_variants))
         self.random_variant_iterations = max(1, int(self.random_variant_iterations))
         self.max_lens_pairs = max(1, int(self.max_lens_pairs))
