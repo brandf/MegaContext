@@ -1077,7 +1077,7 @@ class MCController:
 
     def _lod_char_for_block(self, lod: int, is_last: bool, remainder: int) -> str:
         if lod < 0:
-            return "?"
+            return "X"
         capped = min(lod, 3)
         if capped == 0 and is_last and remainder > 0:
             return self._LOD_PARTIAL_CHAR
@@ -1115,6 +1115,15 @@ class MCController:
                 for idx, level in enumerate(block_levels)
             ]
             self._highlight_high_lod_segments(chars, block_levels)
+            recent_tokens = int(self.config.allocator_recent_tokens)
+            if recent_tokens > 0:
+                tail_tokens = min(total_tokens, recent_tokens)
+                tail_start = max(0, total_tokens - tail_tokens)
+                for idx in range(num_blocks):
+                    block_start = idx * block_size
+                    block_end = min(total_tokens, block_start + block_size)
+                    if block_end > tail_start:
+                        chars[idx] = "⊙"
             rows.append("".join(chars))
         return rows
 
