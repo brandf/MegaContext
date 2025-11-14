@@ -10,7 +10,7 @@ summary: Relating the LensNet random-variant training recipe to reinforcement le
 ## Setup Recap
 During MC training we now:
 
-1. Build a *baseline* working context (pure LOD0 tail-preserving window).
+1. Build a *baseline* working context (pure LOD0 tail-preserving window) trimmed to the current curriculum target length so it is directly comparable to every random variant.
 2. Sample `N` *random variants* by stochastically collapsing/expanding the baseline down to a fixed `train_wc_length`.
 3. Run next-token loss for every variant, producing per-variant NLLs and the natural “preference” ordering between them.
 4. Supervise LensNet by comparing variant pairs (our `preference_pairs`): the lower-loss WC is the “better” policy action, and we regress LensNet’s per-entry focus scores so that it prefers the edits that differentiate better vs. worse variants.
@@ -49,9 +49,11 @@ The pairwise supervision also maps cleanly to contrastive objectives:
 To mirror RLHF dashboards we now emit:
 
 - `mc/adv_delta_mean` / `mc/adv_delta_p95` — running statistics of the per-variant advantage (ΔNLL relative to the baseline WC).
-- `mc/preference_corr_{mean,max,min}` — correlation between policy scores and the observed advantages.
+- `mc/preference_corr_{mean,max,min}` — correlation between policy scores and the observed advantages (now reported as `n/a` instead of `NaN` when variance is zero).
+- `mc/preference_agreement` — share of preference pairs where LensNet’s signed scores pick the same winner as the measured Δloss.
+- `mc/policy_score_abs_mean`, `mc/policy_score_std_mean` — how much of the tanh range LensNet is actually using.
 
-These WandB traces serve as the “reward model agreement” + “advantage histogram” analogs from standard RLHF setups.
+These WandB traces serve as the “reward model agreement” + “advantage histogram” analogs from standard RLHF setups, with additional visibility into policy calibration.
 
 Contrastive parallels:
 
@@ -120,11 +122,10 @@ However, the *mechanics* of our loss—pairwise comparisons over different “vi
 | Budget smoothing | Random variants sometimes bias a batch toward expand-only or collapse-only plans. | Track an EMA of net expand mass (`lens_budget_smooth_beta`) and penalize deviations via `lens_budget_smooth_weight`. |
 
 4. [x] **Curriculum + hard-negative mining**
-   - Random variant target lengths now anneal linearly from 80 % of `max_seq_len` down to `mc_train_wc_length` (default 20 %), so LensNet sees easy compressions first and grows into harder ones.
-   - We sort `preference_pairs` by normalized advantage and keep only the top `mc_lens_hard_negative_ratio` fraction before shuffling, so the Bradley–Terry loss focuses on the most informative comparisons.
+   - Random variant target lengths now anneal linearly from 80 % of `max_seq_len` down to `mc_train_wc_length` (default `0.75 × max_seq_len`), keeping the trimmed baseline and every variant at the same length for fair comparisons.
+   - Every non-baseline WC is paired with the best-performing variant before we sort remaining pairs by raw Δloss and keep the top `mc_lens_hard_negative_ratio` fraction, guaranteeing that each supervision example includes a “real” hard negative.
 
 5. [ ] **Evaluation + ablations**
-   - Extend LensDebug to log reward-model style metrics (agreement rate, normalized advantage) and contrastive ones (temperature-scaled loss, InfoNCE analog).
-   - Run controlled ablations to measure the impact of each addition on `mc/preference_corr_mean`, swap rate, and downstream validation loss.
+   - LensDebug + WandB now expose `mc/preference_agreement` and policy-score range metrics; remaining work is to script ablations that sweep the stability knobs and report their impact on `mc/preference_corr_mean`, swap rate, and downstream validation loss.
 
 Executing this roadmap lets us systematically inject proven RLHF/contrastive tricks into LensNet while keeping the mental model firmly rooted in preference-based policy learning.

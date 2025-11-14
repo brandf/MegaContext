@@ -10,11 +10,11 @@ LensNet is a shallow transformer (2/4/8 layers) that operates directly on the [[
 ## High-Level Loop
 
 1. **Build variants.** For each training sequence we construct:
-   - `lod_0_baseline`: pure LOD0 window that preserves the recent tail.
+   - `lod_0_baseline`: pure LOD0 window that preserves the recent tail and is trimmed to the current curriculum target length so it is directly comparable to every random variant.
    - `num_random_variants` stochastic compressions sampled by running the focus allocator with random scores (see `_build_random_variant_set`).
 2. **Score variants.** Run the base model on every variant to obtain next-token losses.
 3. **Compute advantages.** For each variant compute `adv_delta = loss_variant − loss_baseline`. Negative numbers mean “better than baseline”.
-4. **Form preference pairs.** For every `(better, worse)` pair (based on `adv_delta`) emit a tuple `(better, worse, strength)` where `strength = |adv_delta_better − adv_delta_worse|`.
+4. **Form preference pairs.** Pair every non-baseline WC with the best (lowest-loss) variant, then add the highest-Δloss comparisons among the remaining variants. Each tuple stores `(better, worse, strength)` where `strength = |Δloss|`.
 5. **Optimize LensNet.** Feed the *worse* WC through LensNet to obtain policy scores and apply the Bradley–Terry loss + optional rank/budget penalties.
 
 This replaces the legacy “best WC LOD map” regression and trace-log replay buffer. All supervision is local to the current batch and amortizes the base-model forward pass we already perform for GistNet training.
@@ -30,7 +30,7 @@ This replaces the legacy “best WC LOD map” regression and trace-log replay b
 
 Notes:
 - Variants always respect coverage + tail invariants before entering the loss.
-- `strength` is `tanh(|Δloss|)` in code to squash outliers before weighting the loss.
+- `strength` stores the raw `|Δloss|`; `_build_pairwise_targets` later applies `tanh(strength)` when turning it into per-entry targets so outliers stay bounded.
 
 ## Preference Loss
 
@@ -47,6 +47,7 @@ Implementation detail (`mc/runtime.py::_compute_lens_losses`):
 - `t_j > 0` ⇒ pushing scores positive (expand).
 - `t_j < 0` ⇒ pushing scores negative (collapse).
 - `collapse_weight` optionally reweights collapse targets to balance expand-heavy batches.
+- Larger `strength` values shrink the effective temperature (`s_j` is multiplied by `max(1, strength) / τ`) so undeniable preferences push the logits harder than ambiguous ones.
 
 ### Rank & Budget Penalties (Optional)
 
@@ -64,7 +65,7 @@ All CLI knobs surface through `run10.sh` and `MCConfig`:
 | Flag | Description |
 | --- | --- |
 | `--mc_num_random_variants` | Number of random WCs per sequence. |
-| `--mc_train_wc_length` | Target length for random variants at the *end* of training (we anneal linearly from 0.8 × `max_seq_len` down to this value; default end = 0.2 × `max_seq_len`). |
+| `--mc_train_wc_length` | Target length for random variants at the *end* of training (we anneal linearly from 0.8 × `max_seq_len` down to this value; default end = `0.75 × max_seq_len`). |
 | `--mc_max_lens_pairs` | Upper bound on `(better, worse)` pairs per sample. |
 | `--mc_lens_temperature` | Bradley–Terry temperature (default 1.0). |
 | `--mc_lens_rank_weight`, `--mc_lens_budget_weight`, `--mc_lens_margin`, `--mc_lens_collapse_weight` | Legacy regularizer knobs that still work. |
@@ -79,16 +80,18 @@ We log the following metrics to W&B (`scripts/base_train.py`):
 | Metric | Meaning |
 | --- | --- |
 | `mc/adv_delta_mean`, `mc/adv_delta_p95` | Average/p95 Δloss relative to baseline (want ≤ 0). |
-| `mc/preference_corr_mean` | Correlation between policy scores and `adv_delta` (want negative). |
+| `mc/preference_corr_mean` | Correlation between policy scores and `adv_delta` (want negative; logged as `n/a` when variance is zero). |
+| `mc/preference_agreement` | Fraction of preference pairs where LensNet’s signed scores pick the same winner as the measured Δloss. |
 | `mc/lens_loss` | Mean preference loss value. |
 | `mc/variants_total`, `mc/variants_mean` | How many WCs were evaluated per batch. |
+| `mc/policy_score_abs_mean`, `mc/policy_score_std_mean` | How much of the tanh range LensNet is actively using across variants. |
 
 `--mc_log_lens_debug` prints per-variant stats (“PrefDebug”) so we can inspect score distributions and correlations during training.
 
 ## Curriculum & Hard-Negative Mining
 
-- **Curriculum:** The random-variant target length anneals linearly from 80 % of `max_seq_len` at the beginning of training down to `mc_train_wc_length` (default 20 %). This gives LensNet easy compressions first, then progressively harder focus plans.
-- **Hard negatives:** After building `preference_pairs` we sort them by normalized advantage and keep the top `mc_lens_hard_negative_ratio` fraction (default 1.0 = keep all). Lowering the ratio focuses the Bradley–Terry loss on the “spiciest” comparisons.
+- **Curriculum:** The random-variant target length anneals linearly from 80 % of `max_seq_len` at the beginning of training down to `mc_train_wc_length` (default `0.75 × max_seq_len`). Because the baseline WC is trimmed to the same length, every comparison is length-fair.
+- **Hard negatives:** Every non-baseline variant is paired with the current best WC before we sort the remaining pairs by raw Δloss and keep the top `mc_lens_hard_negative_ratio` fraction (default 1.0). This guarantees a “real” hard negative for every variant while still allowing us to focus on the most informative extra comparisons.
 
 ## Stability Tricks
 

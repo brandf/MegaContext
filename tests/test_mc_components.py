@@ -346,11 +346,18 @@ def test_random_variant_sampler_preserves_baseline_and_compresses(monkeypatch):
         random_seed=7,
     )
     tokens = (torch.arange(0, 256) % 32).view(1, 256)
-    _, sample_state, _, _ = controller._build_tree_sample(tokens, "random_variants")
+    tree, sample_state, _, _ = controller._build_tree_sample(tokens, "random_variants")
     assert len(sample_state.variants) == 4
     baseline = sample_state.variants[0]
     assert baseline.is_baseline
-    assert torch.all(baseline.working_context.get_lod_tensor() == 0)
+    lods = baseline.working_context.get_lod_tensor()[0]
+    positions = baseline.working_context.get_positions()[0]
+    tail_start = max(0, tree.num_tokens() - controller.config.allocator_recent_tokens)
+    tail_mask = positions >= tail_start
+    if torch.any(tail_mask):
+        assert torch.all(lods[tail_mask] == 0)
+    if torch.any(~tail_mask):
+        assert torch.any(lods[~tail_mask] > 0)
     total_tokens = sample_state.tree.num_tokens()
     for variant in sample_state.variants:
         coverage = controller._wc_token_coverage(variant.working_context, sample_state.tree)
@@ -463,13 +470,75 @@ def test_lod0_baseline_skips_focus_and_stays_lod0(monkeypatch):
         allocator_max_replacements=2,
     )
     tokens = (torch.arange(0, 64) % 32).view(1, 64)
-    _, sample_state, _, _ = controller._build_tree_sample(tokens, "baseline_focus")
+    tree, sample_state, _, _ = controller._build_tree_sample(tokens, "baseline_focus")
     baselines = [v for v in sample_state.variants if v.is_baseline]
     assert len(baselines) == 1
     baseline = baselines[0]
     assert baseline.allocator is None
     assert baseline.edits_applied == 0
-    assert torch.all(baseline.working_context.get_lod_tensor() == 0)
+    lods = baseline.working_context.get_lod_tensor()[0]
+    positions = baseline.working_context.get_positions()[0]
+    tail_start = max(0, tree.num_tokens() - controller.config.allocator_recent_tokens)
+    tail_mask = positions >= tail_start
+    if torch.any(tail_mask):
+        assert torch.all(lods[tail_mask] == 0)
+
+
+def test_random_variant_lod_hint_reflects_highest_lod(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        max_counterfactuals=5,
+        allocator_iterations=1,
+        allocator_max_replacements=2,
+        num_random_variants=2,
+    )
+    tokens = (torch.arange(0, 96) % 32).view(1, 96)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "lod_hint_sync")
+    random_variants = [v for v in sample_state.variants if v.source.startswith("random_variant_")]
+    assert random_variants, "expected random variants to be generated"
+    for variant in random_variants:
+        hist = controller._lod_histogram(variant.working_context)
+        highest = max(hist.keys()) if hist else 0
+        assert variant.lod_hint == highest
+
+
+def test_preference_pairs_always_include_best_variant(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        num_random_variants=3,
+        random_variant_iterations=2,
+        train_wc_length=64,
+        max_counterfactuals=5,
+        max_lens_pairs=12,
+    )
+    tokens = (torch.arange(0, 192) % 32).view(1, 192)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "pair_best")
+    controller._compute_variant_losses([sample_state], tokens)
+    variants = [v for v in sample_state.variants if v.token_loss_value is not None]
+    assert len(variants) >= 2
+    best = min(variants, key=lambda v: float(v.token_loss_value))  # type: ignore[arg-type]
+    pairs = controller._build_preference_pairs(sample_state.variants)
+    for variant in variants:
+        if variant is best:
+            continue
+        assert any(better is best and worse is variant for better, worse, _ in pairs)
+
+
+def test_preference_agreement_metric_available(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        num_random_variants=2,
+        random_variant_iterations=2,
+        train_wc_length=64,
+        max_counterfactuals=4,
+    )
+    tokens = (torch.arange(0, 192) % 32).view(1, 192)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "agreement_metric")
+    controller._compute_variant_losses([sample_state], tokens)
+    lens_loss = controller._compute_lens_losses([sample_state])
+    assert lens_loss is not None
+    assert controller._last_preference_agreement is not None
+    assert 0.0 <= controller._last_preference_agreement <= 1.0
 
 
 def test_lens_targets_mask_respects_legality(monkeypatch):

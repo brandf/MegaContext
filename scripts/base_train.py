@@ -986,9 +986,15 @@ for step in range(num_iterations + 1):
                 log_data["mc/preference_corr_max"] = mc_result.preference_corr_max
             if mc_result.preference_corr_min is not None:
                 log_data["mc/preference_corr_min"] = mc_result.preference_corr_min
+        if mc_result is not None and mc_result.preference_agreement is not None:
+            log_data["mc/preference_agreement"] = mc_result.preference_agreement
         if mc_result is not None and mc_result.lod_counts:
             for lod, count in mc_result.lod_counts.items():
                 log_data[f"mc/lod_count/{lod}"] = count
+        if mc_result is not None and mc_result.policy_score_abs_mean is not None:
+            log_data["mc/policy_score_abs_mean"] = mc_result.policy_score_abs_mean
+        if mc_result is not None and mc_result.policy_score_std_mean is not None:
+            log_data["mc/policy_score_std_mean"] = mc_result.policy_score_std_mean
         if vanilla_loss_val is not None:
             log_data["train/loss_lod0"] = vanilla_loss_val
         if mc_lens_loss_val is not None:
