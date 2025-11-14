@@ -1068,7 +1068,9 @@ class MCController:
         adv_values: List[float] = []
         max_scores: List[float] = []
         min_scores: List[float] = []
+        total_variants = 0
         for sample in batch_states:
+            total_variants += len(sample.variants)
             for variant in sample.variants:
                 scores = variant.policy_scores
                 adv = getattr(variant, "adv_delta", None)
@@ -1085,6 +1087,12 @@ class MCController:
                 max_scores.append(score_max)
                 min_scores.append(score_min)
         if not rows:
+            print(
+                "[MegaContext][PrefDebug] no preference data (variants=%d) — Δloss probably zero or LensNet disabled"
+                % total_variants,
+                flush=True,
+            )
+            self._last_preference_corr = {}
             return
         def _corr(xs: List[float], ys: List[float]) -> Optional[float]:
             n = len(xs)
