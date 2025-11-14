@@ -768,10 +768,10 @@ class MCController:
         tree_tokens = tree.num_tokens()
         if tree_tokens <= 0:
             raise RuntimeError("[MegaContext] Cannot build working context with zero tree tokens")
-        if lod == 0 and tree_tokens > config.max_length:
+        if lod == 0 and embeddings.shape[1] > config.max_length:
             raise RuntimeError(
                 "[MegaContext] Pure LOD0 variant exceeds working-context capacity: "
-                f"tree_tokens={tree_tokens}, max_length={config.max_length}"
+                f"variant_len={embeddings.shape[1]}, max_length={config.max_length}"
             )
         block = max(1, self.config.block_size)
         tail_tokens = min(tree_tokens, int(self.config.allocator_recent_tokens))
