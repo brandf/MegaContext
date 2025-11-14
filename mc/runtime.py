@@ -543,6 +543,10 @@ class MCController:
             total_edits += edits
             if wc.length <= target_len:
                 break
+        fixed_wc = self._ensure_wc_full_coverage(wc, tree, f"random_variant_{index}")
+        if fixed_wc is not wc:
+            wc = fixed_wc
+            allocator.working_context = wc
         lod_hint = self._infer_variant_lod_hint(wc)
         return WorkingContextVariant(
             working_context=wc,
@@ -619,11 +623,12 @@ class MCController:
         total_tokens = tree.num_tokens()
         if total_tokens <= 0:
             return None
-        target_len = max(1, self._current_target_wc_length())
-        window = min(target_len, total_tokens)
-        start = max(0, total_tokens - window)
-        embeddings = tree.get_lod0_slice(start, total_tokens)
-        positions = tree.get_positions_for_lod(0)[:, start:total_tokens]
+        max_len = min(self.config.wc_config.max_length, total_tokens)
+        if max_len <= 0:
+            return None
+        start = max(0, total_tokens - max_len)
+        embeddings = tree.get_lod0_slice(start, start + max_len)
+        positions = tree.get_positions_for_lod(0)[:, start : start + max_len]
         lod_tensor = torch.zeros(
             (embeddings.shape[0], embeddings.shape[1]),
             dtype=torch.long,
@@ -1363,6 +1368,7 @@ class MCController:
         original_tokens: torch.Tensor,
     ) -> List[Dict[str, Any]]:
         entries: List[Dict[str, Any]] = []
+        target_len = min(self.config.wc_config.max_length, original_tokens.shape[1])
         for sample in batch_states:
             for variant in sample.variants:
                 wc = variant.working_context
@@ -1376,6 +1382,7 @@ class MCController:
                     "sin": self._to_model_dtype(sin),
                     "alibi": self._to_model_dtype(alibi),
                     "seq_len": seq_len,
+                    "target_len": target_len,
                     "batch_idx": getattr(variant, "batch_index", 0),
                     "original_tokens": original_tokens,
                 }
@@ -1389,7 +1396,8 @@ class MCController:
         if not entries:
             return []
         batch_size = len(entries)
-        max_len = max(entry["seq_len"] for entry in entries)
+        target_len = min(self.config.wc_config.max_length, entries[0]["target_len"] if entries else self.config.wc_config.max_length)
+        max_len = target_len
         embed_dim = entries[0]["embeddings"].shape[-1]
         embeddings = torch.zeros((batch_size, max_len, embed_dim), dtype=self._target_dtype, device=self.device)
 
@@ -1414,30 +1422,42 @@ class MCController:
         token_batch = torch.full((batch_size, max_len), -1, dtype=torch.long, device=self.device)
         for idx, entry in enumerate(entries):
             seq_len = int(entry["seq_len"])
-            start = max_len - seq_len
             embed_slice = entry["embeddings"]
             if embed_slice.dim() == 3:
                 embed_slice = embed_slice.squeeze(0)
+            if seq_len >= max_len:
+                start_idx = seq_len - max_len
+                embed_slice = embed_slice[start_idx:, :]
+                seq_len = max_len
+                start = 0
+            else:
+                start = max_len - seq_len
             embeddings[idx, start:, :] = embed_slice
             if cos_tensor is not None and entry["cos"] is not None:
-                cos_slice = entry["cos"]
-                cos_slice = cos_slice.squeeze(0)
+                cos_slice = entry["cos"].squeeze(0)
+                if cos_slice.shape[0] >= max_len:
+                    cos_slice = cos_slice[-max_len:, ...]
                 cos_tensor[idx, start:, ...] = cos_slice
             if sin_tensor is not None and entry["sin"] is not None:
-                sin_slice = entry["sin"]
-                sin_slice = sin_slice.squeeze(0)
+                sin_slice = entry["sin"].squeeze(0)
+                if sin_slice.shape[0] >= max_len:
+                    sin_slice = sin_slice[-max_len:, ...]
                 sin_tensor[idx, start:, ...] = sin_slice
-            if alibi_tensor is not None:
-                if entry["alibi"] is not None:
-                    alibi_slice = entry["alibi"]
-                    if alibi_slice.dim() == 4:
-                        alibi_slice = alibi_slice.squeeze(0)
-                    alibi_tensor[idx, :, start:, start:] = alibi_slice
+            if alibi_tensor is not None and entry["alibi"] is not None:
+                alibi_slice = entry["alibi"]
+                if alibi_slice.dim() == 4:
+                    alibi_slice = alibi_slice.squeeze(0)
+                if alibi_slice.shape[-1] > max_len:
+                    alibi_slice = alibi_slice[:, :, -max_len:, -max_len:]
+                alibi_tensor[idx, :, start:, start:] = alibi_slice
             token_slice = self._align_tokens_to_embeddings(
                 entry["original_tokens"][entry["batch_idx"] : entry["batch_idx"] + 1].to(torch.long),
                 seq_len,
             )
             token_batch[idx, start:] = token_slice[0]
+
+        assert embeddings.shape[1] == max_len, "Embeddings must align to shared sequence length"
+        assert token_batch.shape[1] == max_len, "Token batch must align to shared sequence length"
 
         dummy_idx = torch.zeros((batch_size, max_len), dtype=torch.long, device=self.device)
         cos = cos_tensor
@@ -1846,6 +1866,11 @@ class MCController:
                 aggregate_variants += 1
                 hist_equiv = self._lod_equivalent_tokens_from_hist(lod_hist)
                 coverage = self._wc_token_coverage(variant.working_context, sample.tree)
+                if hist_equiv != coverage:
+                    raise RuntimeError(
+                        "[MegaContext] Aggregate LOD coverage mismatch: "
+                        f"hist_equiv={hist_equiv}, coverage={coverage}"
+                    )
                 aggregate_hist_equiv += hist_equiv
                 aggregate_coverage += coverage
                 aggregate_expected += expected
@@ -1856,6 +1881,11 @@ class MCController:
             lod_hist = self._lod_histogram(wc)
             primary_cov = self._wc_token_coverage(wc, primary_tree)
             primary_hist = self._lod_equivalent_tokens_from_hist(lod_hist)
+            if primary_hist != primary_cov:
+                raise RuntimeError(
+                    "[MegaContext] Primary LOD coverage mismatch: "
+                    f"hist_equiv={primary_hist}, coverage={primary_cov}"
+                )
             primary_report = {
                 "original_length": int(primary_tree_tokens),
                 "wc_length": int(wc.length),
