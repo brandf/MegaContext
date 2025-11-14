@@ -202,6 +202,33 @@ def test_focus_allocator_expand_and_collapse():
     assert edits_collapse == 1
 
 
+def test_baseline_variant_is_pure_lod0_tail(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        max_counterfactuals=2,
+        allocator_recent_tokens=16,
+        max_seq_len=128,
+        train_wc_length=32,
+        num_random_variants=0,
+    )
+    controller._train_progress = 1.0
+    tokens = (torch.arange(0, 96) % 32).view(1, 96)
+    tree, sample_state, _, _ = controller._build_tree_sample(tokens, "baseline_tail")
+    baseline = next(variant for variant in sample_state.variants if variant.source == "lod_0_baseline")
+    assert baseline.working_context.length == 32
+    lods = baseline.working_context.get_lod_tensor()[0]
+    assert torch.equal(lods, torch.zeros_like(lods))
+    positions = baseline.working_context.get_positions()[0]
+    expected_start = tree.num_tokens() - baseline.working_context.length
+    expected_positions = torch.arange(
+        expected_start,
+        tree.num_tokens(),
+        dtype=positions.dtype,
+        device=positions.device,
+    )
+    assert torch.equal(positions, expected_positions)
+
+
 def test_focus_allocator_respects_supplied_scores():
     tree_config = MegaContextConfig(embed_dim=4, block_size=2, max_lod=1, device="cpu")
     embedder = nn.Embedding(16, tree_config.embed_dim)
@@ -352,16 +379,22 @@ def test_random_variant_sampler_preserves_baseline_and_compresses(monkeypatch):
     assert baseline.is_baseline
     lods = baseline.working_context.get_lod_tensor()[0]
     positions = baseline.working_context.get_positions()[0]
-    tail_start = max(0, tree.num_tokens() - controller.config.allocator_recent_tokens)
-    tail_mask = positions >= tail_start
-    if torch.any(tail_mask):
-        assert torch.all(lods[tail_mask] == 0)
-    if torch.any(~tail_mask):
-        assert torch.any(lods[~tail_mask] > 0)
+    assert torch.all(lods == 0)
+    expected_start = tree.num_tokens() - baseline.working_context.length
+    expected_positions = torch.arange(
+        expected_start,
+        tree.num_tokens(),
+        dtype=positions.dtype,
+        device=positions.device,
+    )
+    assert torch.equal(positions, expected_positions)
     total_tokens = sample_state.tree.num_tokens()
     for variant in sample_state.variants:
         coverage = controller._wc_token_coverage(variant.working_context, sample_state.tree)
-        assert coverage == total_tokens
+        if variant.is_baseline:
+            assert coverage == baseline.working_context.length
+        else:
+            assert coverage == total_tokens
     for variant in sample_state.variants[1:]:
         assert variant.working_context.length < total_tokens
         lods = variant.working_context.get_lod_tensor()[0]
@@ -699,7 +732,7 @@ def test_variants_respect_recent_tokens_tail(monkeypatch, recent):
         coverage = controller._wc_token_coverage(wc, tree)
         hist_equiv = controller._lod_equivalent_tokens_from_hist(hist)
         assert hist_equiv == coverage
-        expected = tree.num_tokens()
+        expected = tree.num_tokens() if not variant.is_baseline else wc.length
         assert coverage == expected
 
 

@@ -475,13 +475,17 @@ class MCController:
             if tree.num_tokens() > target_len:
                 self._normalize_wc_length(baseline.working_context, tree, target_len)
             variants.append(baseline)
-        seed = baseline
+        seen_signatures: set[Tuple[Tuple[int, int], ...]] = set()
+        if variants:
+            seen_signatures.add(self._variant_signature(variants[0].working_context))
+        if self.config.num_random_variants <= 0:
+            return variants
+        seed = self._build_variant_seed(tree, level_cache, target_len)
         if seed is None:
             return variants
+        seen_signatures.add(self._variant_signature(seed.working_context))
         limit = max(1, self.config.max_counterfactuals)
         seed_len = seed.working_context.length
-        seen_signatures: set[Tuple[Tuple[int, int], ...]] = set()
-        seen_signatures.add(self._variant_signature(seed.working_context))
         need_length_match = tree.num_tokens() > target_len
         for idx in range(self.config.num_random_variants):
             variant_target = self._sample_variant_target_length(seed_len, target_len)
@@ -633,23 +637,128 @@ class MCController:
         if metadata is None:
             return None
         embeddings, positions = metadata
+        trim_len = max(1, min(target_len, embeddings.shape[1]))
+        if embeddings.shape[1] > trim_len:
+            embeddings = embeddings[:, -trim_len:, :]
+            positions = positions[:, -trim_len:]
         wc_config = WorkingContextConfig(
             embed_dim=self.config.embed_dim,
-            max_length=max(total_tokens, self.config.wc_config.max_length),
+            max_length=max(trim_len, self.config.wc_config.max_length),
+            device=self.config.device,
+        )
+        lod_tensor = torch.zeros(
+            (embeddings.shape[0], embeddings.shape[1]),
+            dtype=torch.long,
+            device=embeddings.device,
+        )
+        wc = WorkingContext(
+            embeddings,
+            positions.long(),
+            wc_config,
+            lod_tensor=lod_tensor,
+            recent_tokens=self.config.allocator_recent_tokens,
+        )
+        self._configure_wc_positional(wc)
+        self._assert_baseline_tail(wc, tree)
+        variant = WorkingContextVariant(
+            working_context=wc,
+            source="lod_0_baseline",
+            lod_hint=0,
+            is_baseline=True,
+        )
+        return variant
+
+    def _build_variant_seed(
+        self,
+        tree: MegaContextTree,
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+        target_len: int,
+    ) -> Optional[WorkingContextVariant]:
+        total_tokens = tree.num_tokens()
+        if total_tokens <= 0:
+            return None
+        target_len = self._reachable_target_length(tree, target_len)
+        tail_tokens = min(total_tokens, int(self.config.allocator_recent_tokens))
+        tail_tokens = min(tail_tokens, target_len)
+        if tail_tokens <= 0 and target_len > 0:
+            tail_tokens = min(target_len, self.config.block_size)
+        tail_tokens = min(tail_tokens, total_tokens)
+
+        head_tokens = max(0, total_tokens - tail_tokens)
+        head_budget = max(0, target_len - tail_tokens)
+
+        segments_embeddings: List[torch.Tensor] = []
+        segments_positions: List[torch.Tensor] = []
+        segments_lods: List[torch.Tensor] = []
+
+        def append_segment(tensor: torch.Tensor, positions: torch.Tensor, lod: int) -> None:
+            segments_embeddings.append(tensor)
+            segments_positions.append(positions.long())
+            lod_tensor = torch.full(
+                (tensor.shape[0], tensor.shape[1]),
+                lod,
+                dtype=torch.long,
+                device=tensor.device,
+            )
+            segments_lods.append(lod_tensor)
+
+        def append_lod_range(start: int, end: int, lod: int) -> None:
+            if end <= start:
+                return
+            if lod == 0:
+                slice_embeddings = tree.get_lod0_slice(start, end)
+                slice_positions = tree.get_positions_for_lod(0)[:, start:end]
+            else:
+                metadata = self._get_level_metadata_cached(tree, lod, level_cache)
+                if metadata is None or metadata[0].shape[1] == 0:
+                    return
+                slice_embeddings, slice_positions = metadata
+                stride = max(1, tree.tokens_per_entry(lod))
+                max_entries = math.ceil((end - start) / stride)
+                slice_embeddings = slice_embeddings[:, :max_entries, :]
+                slice_positions = slice_positions[:, :max_entries]
+            append_segment(slice_embeddings, slice_positions, lod)
+
+        if head_tokens > 0 and head_budget > 0:
+            lod = self.config.max_lod
+            while head_budget > 0 and lod > 0:
+                before = len(segments_embeddings)
+                append_lod_range(0, min(head_tokens, head_budget * tree.tokens_per_entry(lod)), lod)
+                if len(segments_embeddings) == before:
+                    lod -= 1
+                    continue
+                head_budget -= tree.tokens_per_entry(lod) * segments_embeddings[-1].shape[1]
+                lod -= 1
+            if head_budget > 0:
+                append_lod_range(0, head_tokens, 0)
+
+        if tail_tokens > 0:
+            tail_start = max(0, total_tokens - tail_tokens)
+            append_lod_range(tail_start, total_tokens, 0)
+
+        if not segments_embeddings:
+            append_lod_range(0, total_tokens, 0)
+
+        embeddings = torch.cat(segments_embeddings, dim=1)
+        positions = torch.cat(segments_positions, dim=1)
+        lods = torch.cat(segments_lods, dim=1)
+        wc_config = WorkingContextConfig(
+            embed_dim=self.config.embed_dim,
+            max_length=max(target_len, self.config.wc_config.max_length),
             device=self.config.device,
         )
         variant = self._create_variant(
             tree,
             embeddings,
             positions,
-            lod=0,
-            source="lod_0_baseline",
+            lod=int(lods.max().item()),
+            source="variant_seed",
             wc_config=wc_config,
+            tail_tokens_override=tail_tokens,
         )
         if total_tokens > target_len:
             self._normalize_wc_length(variant.working_context, tree, target_len)
             self._reinforce_recent_tail(variant.working_context, tree)
-        variant.is_baseline = True
         return variant
 
     def _build_inference_recency_variant(
@@ -947,6 +1056,24 @@ class MCController:
                 "[MegaContext] Recent tokens must remain LOD0 "
                 f"(context={tag}). Observed LODs: {offending.tolist()}"
             )
+
+    def _assert_baseline_tail(self, wc: WorkingContext, tree: MegaContextTree) -> None:
+        if wc.length == 0:
+            raise RuntimeError("[MegaContext] Baseline working context is empty")
+        lods = wc.get_lod_tensor()
+        if torch.any(lods != 0):
+            raise RuntimeError("[MegaContext] Baseline variant must remain pure LOD0")
+        total_tokens = tree.num_tokens()
+        expected_start = max(0, total_tokens - wc.length)
+        positions = wc.get_positions()
+        expected_positions = torch.arange(
+            expected_start,
+            expected_start + wc.length,
+            device=positions.device,
+            dtype=positions.dtype,
+        )
+        if not torch.equal(positions[0], expected_positions):
+            raise RuntimeError("[MegaContext] Baseline variant must be a contiguous tail slice")
 
     def _lod_char_for_block(self, lod: int, is_last: bool, remainder: int) -> str:
         if lod < 0:
@@ -1920,7 +2047,8 @@ class MCController:
                     )
                 aggregate_hist_equiv += hist_equiv
                 aggregate_coverage += coverage
-                aggregate_expected += expected
+                variant_expected = expected if not variant.is_baseline else variant.working_context.length
+                aggregate_expected += variant_expected
         primary_report = None
         if primary_variant is not None and primary_tree is not None:
             wc = primary_variant.working_context
