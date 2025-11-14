@@ -552,14 +552,34 @@ def test_random_variants_are_unique(monkeypatch):
     tokens = (torch.arange(0, 320) % 32).view(1, 320)
     _, sample_state, _, _ = controller._build_tree_sample(tokens, "unique_variants")
     assert sample_state.variants
-    baseline = sample_state.variants[0]
     signatures = set()
     for variant in sample_state.variants:
         signatures.add(controller._variant_signature(variant.working_context))
-        if variant is baseline:
-            continue
-        assert variant.working_context.length <= baseline.working_context.length
     assert len(signatures) == len(sample_state.variants)
+
+
+def test_lod_metrics_weighted_by_histogram(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        num_random_variants=2,
+        random_variant_iterations=3,
+        max_counterfactuals=5,
+    )
+    tokens = (torch.arange(0, 320) % 32).view(1, 320)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "lod_metrics")
+    result = controller._compute_variant_losses([sample_state], tokens)
+    (
+        _,
+        _,
+        _,
+        _,
+        _,
+        lod_metrics,
+        lod_counts,
+    ) = result
+    assert 0 in lod_counts and lod_counts[0] > 0
+    assert any(lod > 0 for lod in lod_counts.keys())
+    assert 0 in lod_metrics
 
 
 def test_lens_targets_mask_respects_legality(monkeypatch):

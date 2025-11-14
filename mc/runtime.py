@@ -88,6 +88,11 @@ class MCBatchResult:
     preference_corr_mean: Optional[float] = None
     preference_corr_max: Optional[float] = None
     preference_corr_min: Optional[float] = None
+    preference_corr_mean_valid: bool = False
+    preference_corr_max_valid: bool = False
+    preference_corr_min_valid: bool = False
+    preference_pair_count: int = 0
+    adv_delta_std: Optional[float] = None
     preference_agreement: Optional[float] = None
     policy_score_abs_mean: Optional[float] = None
     policy_score_std_mean: Optional[float] = None
@@ -196,6 +201,8 @@ class MCController:
         self.last_inference_report: Optional[Dict[str, Any]] = None
         self.last_train_report: Optional[Dict[str, Any]] = None
         self._last_preference_corr: Dict[str, float] = {}
+        self._last_preference_corr_valid: Dict[str, bool] = {}
+        self._last_preference_pair_count: int = 0
         self._last_policy_stats: Dict[str, float] = {}
         self._last_preference_agreement: Optional[float] = None
         self._policy_history: Dict[int, torch.Tensor] = {}
@@ -319,7 +326,15 @@ class MCController:
             }
             return result
         t_var0 = time.time()
-        variant_loss, lod0_loss, adv_delta_mean, adv_delta_p95, lod_metrics, lod_counts = self._compute_variant_losses(batch_states, tokens_device)
+        (
+            variant_loss,
+            lod0_loss,
+            adv_delta_mean,
+            adv_delta_p95,
+            adv_delta_std,
+            lod_metrics,
+            lod_counts,
+        ) = self._compute_variant_losses(batch_states, tokens_device)
         t_var1 = time.time()
         t_lens0 = time.time()
         lens_loss = self._compute_lens_losses(batch_states)
@@ -334,6 +349,7 @@ class MCController:
             variants=train_variants,
             adv_delta_mean=adv_delta_mean,
             adv_delta_p95=adv_delta_p95,
+            adv_delta_std=adv_delta_std,
             lod_metrics=lod_metrics,
             lod_counts=lod_counts,
         )
@@ -341,19 +357,28 @@ class MCController:
             result.preference_corr_mean = self._last_preference_corr.get("preference_corr_mean")
             result.preference_corr_max = self._last_preference_corr.get("preference_corr_max")
             result.preference_corr_min = self._last_preference_corr.get("preference_corr_min")
-            if result.preference_corr_mean is not None or result.preference_corr_max is not None or result.preference_corr_min is not None:
-                def _fmt_corr(val: Optional[float]) -> str:
-                    return f"{val:.3f}" if val is not None else "n/a"
+            valid_map = getattr(self, "_last_preference_corr_valid", {})
+            result.preference_corr_mean_valid = bool(valid_map.get("preference_corr_mean_valid", False))
+            result.preference_corr_max_valid = bool(valid_map.get("preference_corr_max_valid", False))
+            result.preference_corr_min_valid = bool(valid_map.get("preference_corr_min_valid", False))
+            result.preference_pair_count = int(getattr(self, "_last_preference_pair_count", 0))
+            def _fmt_corr(val: Optional[float], valid: bool) -> str:
+                if not valid:
+                    return "n/a"
+                return f"{val:.3f}" if val is not None else "n/a"
 
-                print(
-                    "[MegaContext][PreferenceSummary] corr_mean=%s corr_max=%s corr_min=%s"
-                    % (
-                        _fmt_corr(result.preference_corr_mean),
-                        _fmt_corr(result.preference_corr_max),
-                        _fmt_corr(result.preference_corr_min),
-                    ),
-                    flush=True,
-                )
+            print(
+                "[MegaContext][PreferenceSummary] pairs=%d corr_mean=%s corr_max=%s corr_min=%s"
+                % (
+                    result.preference_pair_count,
+                    _fmt_corr(result.preference_corr_mean, result.preference_corr_mean_valid),
+                    _fmt_corr(result.preference_corr_max, result.preference_corr_max_valid),
+                    _fmt_corr(result.preference_corr_min, result.preference_corr_min_valid),
+                ),
+                flush=True,
+            )
+        else:
+            result.preference_pair_count = int(getattr(self, "_last_preference_pair_count", 0))
         result.preference_agreement = self._last_preference_agreement
         if getattr(self, "_last_policy_stats", None):
             result.policy_score_abs_mean = self._last_policy_stats.get("score_abs_mean")
@@ -450,6 +475,7 @@ class MCController:
         if seed is None:
             return variants
         target_len = self._current_target_wc_length()
+        limit = max(1, self.config.max_counterfactuals)
         seed_len = seed.working_context.length
         seen_signatures: set[Tuple[Tuple[int, int], ...]] = set()
         seen_signatures.add(self._variant_signature(seed.working_context))
@@ -463,7 +489,21 @@ class MCController:
                 continue
             seen_signatures.add(signature)
             variants.append(variant)
-        limit = max(1, self.config.max_counterfactuals)
+            if len(variants) >= limit:
+                break
+        if len(variants) < limit and self.config.num_random_variants > 0:
+            aggressive_target = max(self.config.block_size, target_len // 2)
+            extra_variant = self._build_random_variant(
+                tree,
+                seed,
+                aggressive_target,
+                self.config.num_random_variants,
+            )
+            if extra_variant is not None:
+                signature = self._variant_signature(extra_variant.working_context)
+                if signature not in seen_signatures:
+                    seen_signatures.add(signature)
+                    variants.append(extra_variant)
         return variants[:limit]
 
     def _build_random_variant(
@@ -522,8 +562,8 @@ class MCController:
         upper_bound = min(seed_len - self.config.block_size, curriculum_target)
         if upper_bound <= self.config.block_size:
             return max(self.config.block_size, upper_bound)
-        min_ratio = 0.35
-        max_ratio = 0.95
+        min_ratio = 0.25
+        max_ratio = 0.9
         frac = self._rng.uniform(min_ratio, max_ratio)
         sampled = int(max(self.config.block_size, seed_len * frac))
         sampled = min(sampled, upper_bound)
@@ -1093,6 +1133,8 @@ class MCController:
                 flush=True,
             )
             self._last_preference_corr = {}
+            self._last_preference_corr_valid = {}
+            self._last_preference_pair_count = 0
             return
         def _corr(xs: List[float], ys: List[float]) -> Optional[float]:
             n = len(xs)
@@ -1109,11 +1151,23 @@ class MCController:
         corr_mean = _corr(mean_scores, adv_values)
         corr_max = _corr(max_scores, adv_values)
         corr_min = _corr(min_scores, adv_values)
+        corr_mean_valid = corr_mean is not None
+        corr_max_valid = corr_max is not None
+        corr_min_valid = corr_min is not None
+        corr_mean_val = float(corr_mean) if corr_mean is not None else 0.0
+        corr_max_val = float(corr_max) if corr_max is not None else 0.0
+        corr_min_val = float(corr_min) if corr_min is not None else 0.0
         self._last_preference_corr = {
-            "preference_corr_mean": corr_mean,
-            "preference_corr_max": corr_max,
-            "preference_corr_min": corr_min,
+            "preference_corr_mean": corr_mean_val,
+            "preference_corr_max": corr_max_val,
+            "preference_corr_min": corr_min_val,
         }
+        self._last_preference_corr_valid = {
+            "preference_corr_mean_valid": corr_mean_valid,
+            "preference_corr_max_valid": corr_max_valid,
+            "preference_corr_min_valid": corr_min_valid,
+        }
+        self._last_preference_pair_count = len(rows)
 
         def _fmt(val: Optional[float]) -> str:
             return f"{val:.3f}" if val is not None else "n/a"
@@ -1124,9 +1178,9 @@ class MCController:
             "[MegaContext][PrefDebug] pairs=%d corr_mean=%s corr_max=%s corr_min=%s agreement=%s"
             % (
                 len(rows),
-                _fmt(corr_mean),
-                _fmt(corr_max),
-                _fmt(corr_min),
+                _fmt(corr_mean if corr_mean_valid else None),
+                _fmt(corr_max if corr_max_valid else None),
+                _fmt(corr_min if corr_min_valid else None),
                 agreement_str,
             ),
             flush=True,
@@ -1250,19 +1304,29 @@ class MCController:
         self,
         batch_states: List[SampleContext],
         original_tokens: torch.Tensor,
-    ) -> Tuple[Optional[torch.Tensor], Optional[float], Optional[float], Optional[float], Dict[int, float], Dict[int, int]]:
+    ) -> Tuple[
+        Optional[torch.Tensor],
+        Optional[float],
+        Optional[float],
+        Optional[float],
+        Optional[float],
+        Dict[int, float],
+        Dict[int, int],
+    ]:
         entries = self._prepare_variant_entries(batch_states, original_tokens)
         if not entries:
-            return None, None, None, None, {}, {}
+            return None, None, None, None, None, {}, {}
         losses = []
         losses.extend(self._run_variant_batch(entries))
         if not losses:
-            return None, None, None, None, {}, {}
+            return None, None, None, None, None, {}, {}
         loss_tensor = torch.stack(losses)
         lod0_loss = None
         adv_values: List[float] = []
         all_advantages: List[float] = []
-        lod_buckets: Dict[int, List[float]] = {}
+        lod_sums: Dict[int, float] = {}
+        lod_weights: Dict[int, float] = {}
+        lod_token_counts: Dict[int, int] = {}
         for sample in batch_states:
             for variant in sample.variants:
                 variant.adv_delta = None  # type: ignore[attr-defined]
@@ -1279,7 +1343,13 @@ class MCController:
                 val = float(variant.token_loss_value.detach())
                 if baseline is not None:
                     variant.adv_delta = val - baseline
-                lod_buckets.setdefault(variant.lod_hint, []).append(val)
+                hist = self._lod_histogram(variant.working_context)
+                total_bucket_tokens = sum(hist.values()) or 1
+                for lod, count in hist.items():
+                    weight = count / total_bucket_tokens
+                    lod_sums[lod] = lod_sums.get(lod, 0.0) + val * weight
+                    lod_weights[lod] = lod_weights.get(lod, 0.0) + weight
+                    lod_token_counts[lod] = lod_token_counts.get(lod, 0) + int(count)
                 if baseline is not None and variant is not None and variant.lod_hint != 0:
                     adv_values.append(val - baseline)
                 if variant.adv_delta is not None:
@@ -1290,12 +1360,14 @@ class MCController:
             if adv_values
             else None
         )
+        adv_delta_std = float(torch.tensor(adv_values).std(unbiased=False).item()) if adv_values else None
+
         lod_metrics = {
-            lod: float(torch.tensor(vals).mean().item())
-            for lod, vals in lod_buckets.items()
-            if vals
+            lod: (lod_sums[lod] / max(lod_weights[lod], 1e-6))
+            for lod in lod_sums.keys()
+            if lod_weights.get(lod)
         }
-        lod_counts = {lod: len(vals) for lod, vals in lod_buckets.items()}
+        lod_counts = lod_token_counts
 
         if all_advantages:
             adv_tensor = torch.tensor(all_advantages, dtype=torch.float32)
@@ -1317,7 +1389,7 @@ class MCController:
                         continue
                     variant.norm_adv_delta = (variant.adv_delta - mean) / std
 
-        return loss_tensor.mean(), lod0_loss, adv_delta_mean, adv_delta_p95, lod_metrics, lod_counts
+        return loss_tensor.mean(), lod0_loss, adv_delta_mean, adv_delta_p95, adv_delta_std, lod_metrics, lod_counts
 
     def _prepare_variant_entries(
         self,

@@ -31,6 +31,7 @@ This replaces the legacy “best WC LOD map” regression and trace-log replay b
 Notes:
 - Variants always respect coverage + tail invariants before entering the loss.
 - `strength` stores the raw `|Δloss|`; `_build_pairwise_targets` later applies `tanh(strength)` when turning it into per-entry targets so outliers stay bounded.
+- If stochastic allocator steps happen to produce near-identical WCs, we inject an additional “aggressive compression” variant (≈½ the target length) so every batch contains at least one obviously different WC.
 
 ## Preference Loss
 
@@ -79,12 +80,13 @@ We log the following metrics to W&B (`scripts/base_train.py`):
 
 | Metric | Meaning |
 | --- | --- |
-| `mc/adv_delta_mean`, `mc/adv_delta_p95` | Average/p95 Δloss relative to baseline (want ≤ 0). |
-| `mc/preference_corr_mean` | Correlation between policy scores and `adv_delta` (want negative; logged as `n/a` when variance is zero). |
-| `mc/preference_agreement` | Fraction of preference pairs where LensNet’s signed scores pick the same winner as the measured Δloss. |
+| `mc/adv_delta_mean`, `mc/adv_delta_p95`, `mc/adv_delta_std` | Statistics of Δloss relative to the baseline (want ≤ 0). |
+| `mc/preference_corr_mean` | Correlation between policy scores and `adv_delta` (want negative). Check `mc/preference_corr_mean_valid` to know if the value is meaningful. |
+| `mc/preference_agreement`, `mc/preference_pair_count` | Fraction / count of preference pairs where LensNet’s signed scores pick the same winner as the measured Δloss. |
 | `mc/lens_loss` | Mean preference loss value. |
 | `mc/variants_total`, `mc/variants_mean` | How many WCs were evaluated per batch. |
 | `mc/policy_score_abs_mean`, `mc/policy_score_std_mean` | How much of the tanh range LensNet is actively using across variants. |
+| `mc/lod_loss/{0,1,2}` | LOD-specific losses weighted by each variant’s coverage histogram so every active LOD level is represented. |
 
 `--mc_log_lens_debug` prints per-variant stats (“PrefDebug”) so we can inspect score distributions and correlations during training.
 

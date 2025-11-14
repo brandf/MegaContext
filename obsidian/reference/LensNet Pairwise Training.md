@@ -48,10 +48,11 @@ The pairwise supervision also maps cleanly to contrastive objectives:
 **Instrumentation**  
 To mirror RLHF dashboards we now emit:
 
-- `mc/adv_delta_mean` / `mc/adv_delta_p95` — running statistics of the per-variant advantage (ΔNLL relative to the baseline WC).
-- `mc/preference_corr_{mean,max,min}` — correlation between policy scores and the observed advantages (now reported as `n/a` instead of `NaN` when variance is zero).
-- `mc/preference_agreement` — share of preference pairs where LensNet’s signed scores pick the same winner as the measured Δloss.
+- `mc/adv_delta_mean` / `mc/adv_delta_p95` / `mc/adv_delta_std` — running statistics of the per-variant advantage (ΔNLL relative to the baseline WC).
+- `mc/preference_corr_{mean,max,min}` — correlation between policy scores and the observed advantages (now always logged; see `mc/preference_corr_*_valid` to know if the value is meaningful).
+- `mc/preference_agreement` & `mc/preference_pair_count` — share and count of preference pairs where LensNet’s signed scores pick the same winner as the measured Δloss.
 - `mc/policy_score_abs_mean`, `mc/policy_score_std_mean` — how much of the tanh range LensNet is actually using.
+- `mc/lod_loss/{0,1,2}` — weighted by each variant’s LOD histogram (token coverage) so every active LOD shows up even when a single WC mixes detail levels.
 
 These WandB traces serve as the “reward model agreement” + “advantage histogram” analogs from standard RLHF setups, with additional visibility into policy calibration.
 
@@ -123,7 +124,7 @@ However, the *mechanics* of our loss—pairwise comparisons over different “vi
 
 4. [x] **Curriculum + hard-negative mining**
    - Random variant target lengths now anneal linearly from 80 % of `max_seq_len` down to `mc_train_wc_length` (default `0.75 × max_seq_len`), keeping the trimmed baseline and every variant at the same length for fair comparisons.
-   - Every non-baseline WC is paired with the best-performing variant before we sort remaining pairs by raw Δloss and keep the top `mc_lens_hard_negative_ratio` fraction, guaranteeing that each supervision example includes a “real” hard negative.
+   - Every non-baseline WC is paired with the best-performing variant before we sort remaining pairs by raw Δloss and keep the top `mc_lens_hard_negative_ratio` fraction, guaranteeing that each supervision example includes a “real” hard negative. When the sampled variants are still too similar we inject an **aggressive compression** fallback (≈½ the target length) so LensNet always sees at least one challenging WC per sequence.
 
 5. [ ] **Evaluation + ablations**
    - LensDebug + WandB now expose `mc/preference_agreement` and policy-score range metrics; remaining work is to script ablations that sweep the stability knobs and report their impact on `mc/preference_corr_mean`, swap rate, and downstream validation loss.

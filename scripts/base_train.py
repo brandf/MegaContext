@@ -977,15 +977,22 @@ for step in range(num_iterations + 1):
             log_data["mc/adv_delta_mean"] = mc_result.adv_delta_mean
         if mc_result is not None and mc_result.adv_delta_p95 is not None:
             log_data["mc/adv_delta_p95"] = mc_result.adv_delta_p95
+        if mc_result is not None and mc_result.adv_delta_std is not None:
+            log_data["mc/adv_delta_std"] = mc_result.adv_delta_std
         if mc_result is not None and mc_result.lod_metrics:
             for lod, val in mc_result.lod_metrics.items():
                 log_data[f"mc/lod_loss/{lod}"] = val
-        if mc_result is not None and mc_result.preference_corr_mean is not None:
-            log_data["mc/preference_corr_mean"] = mc_result.preference_corr_mean
+        if mc_result is not None:
+            if mc_result.preference_corr_mean is not None:
+                log_data["mc/preference_corr_mean"] = mc_result.preference_corr_mean
             if mc_result.preference_corr_max is not None:
                 log_data["mc/preference_corr_max"] = mc_result.preference_corr_max
             if mc_result.preference_corr_min is not None:
                 log_data["mc/preference_corr_min"] = mc_result.preference_corr_min
+            log_data["mc/preference_corr_mean_valid"] = 1.0 if mc_result.preference_corr_mean_valid else 0.0
+            log_data["mc/preference_corr_max_valid"] = 1.0 if mc_result.preference_corr_max_valid else 0.0
+            log_data["mc/preference_corr_min_valid"] = 1.0 if mc_result.preference_corr_min_valid else 0.0
+            log_data["mc/preference_pair_count"] = mc_result.preference_pair_count
         if mc_result is not None and mc_result.preference_agreement is not None:
             log_data["mc/preference_agreement"] = mc_result.preference_agreement
         if mc_result is not None and mc_result.lod_counts:
