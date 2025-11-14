@@ -126,6 +126,7 @@ mc_lens_kl_weight = 0.0
 mc_lens_adv_norm_beta = 0.9
 mc_lens_budget_smooth_weight = 0.0
 mc_lens_budget_smooth_beta = 0.9
+mc_lens_hard_negative_ratio = 1.0
 mc_train_wc_length = None
 mc_num_random_variants = 4
 mc_random_variant_iterations = 4
@@ -170,6 +171,7 @@ mc_lens_kl_weight = float(mc_lens_kl_weight)
 mc_lens_adv_norm_beta = float(mc_lens_adv_norm_beta)
 mc_lens_budget_smooth_weight = float(mc_lens_budget_smooth_weight)
 mc_lens_budget_smooth_beta = float(mc_lens_budget_smooth_beta)
+mc_lens_hard_negative_ratio = float(mc_lens_hard_negative_ratio)
 mc_train_wc_length = _parse_optional_int(mc_train_wc_length)
 mc_num_random_variants = int(mc_num_random_variants)
 mc_random_variant_iterations = int(mc_random_variant_iterations)
@@ -289,6 +291,7 @@ if mc_enabled:
         lens_adv_norm_beta=mc_lens_adv_norm_beta,
         lens_budget_smooth_weight=mc_lens_budget_smooth_weight,
         lens_budget_smooth_beta=mc_lens_budget_smooth_beta,
+        lens_hard_negative_ratio=mc_lens_hard_negative_ratio,
         train_wc_length=mc_train_wc_length,
         num_random_variants=mc_num_random_variants,
         random_variant_iterations=mc_random_variant_iterations,
@@ -303,6 +306,7 @@ if mc_enabled:
         num_heads=num_heads,
         positional_type=positional_type,
         auxiliary_dtype=mc_aux_dtype,
+        total_train_steps=num_iterations,
         )
     otel_endpoint = os.getenv("MC_OTEL_ENDPOINT")
     otel_insecure = os.getenv("MC_OTEL_INSECURE", "0") == "1"

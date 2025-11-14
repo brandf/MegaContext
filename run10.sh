@@ -62,6 +62,7 @@ MC_LENS_KL_WEIGHT=0
 MC_LENS_ADV_NORM_BETA=0.9
 MC_LENS_BUDGET_SMOOTH_WEIGHT=0
 MC_LENS_BUDGET_SMOOTH_BETA=0.9
+MC_LENS_HARD_NEGATIVE_RATIO=1.0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -257,6 +258,11 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_budget_smooth_beta" >&2; exit 1; }
             MC_LENS_BUDGET_SMOOTH_BETA="$1"
             ;;
+        --mc_lens_hard_negative_ratio)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_hard_negative_ratio" >&2; exit 1; }
+            MC_LENS_HARD_NEGATIVE_RATIO="$1"
+            ;;
         --block_size)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --block_size" >&2; exit 1; }
@@ -401,7 +407,8 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_lens_kl_weight="$MC_LENS_KL_WEIGHT" \
     --mc_lens_adv_norm_beta="$MC_LENS_ADV_NORM_BETA" \
     --mc_lens_budget_smooth_weight="$MC_LENS_BUDGET_SMOOTH_WEIGHT" \
-    --mc_lens_budget_smooth_beta="$MC_LENS_BUDGET_SMOOTH_BETA"
+    --mc_lens_budget_smooth_beta="$MC_LENS_BUDGET_SMOOTH_BETA" \
+    --mc_lens_hard_negative_ratio="$MC_LENS_HARD_NEGATIVE_RATIO"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
     --device_batch_size="$DEVICE_BATCH_SIZE"

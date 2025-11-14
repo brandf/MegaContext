@@ -64,10 +64,11 @@ All CLI knobs surface through `run10.sh` and `MCConfig`:
 | Flag | Description |
 | --- | --- |
 | `--mc_num_random_variants` | Number of random WCs per sequence. |
-| `--mc_train_wc_length` | Target length for random variants (defaults to 0.75 × `max_seq_len`, e.g., 1,536 when `max_seq_len=2048`). |
+| `--mc_train_wc_length` | Target length for random variants at the *end* of training (we anneal linearly from 0.8 × `max_seq_len` down to this value; default end = 0.2 × `max_seq_len`). |
 | `--mc_max_lens_pairs` | Upper bound on `(better, worse)` pairs per sample. |
 | `--mc_lens_temperature` | Bradley–Terry temperature (default 1.0). |
 | `--mc_lens_rank_weight`, `--mc_lens_budget_weight`, `--mc_lens_margin`, `--mc_lens_collapse_weight` | Legacy regularizer knobs that still work. |
+| `--mc_lens_hard_negative_ratio` | Fraction of preference pairs to keep after sorting by advantage (default 1.0 = keep all). |
 
 Lowering the temperature sharpens comparisons (steeper gradients for a given Δloss). Raising it smooths updates when the random variants are noisy.
 
@@ -83,6 +84,11 @@ We log the following metrics to W&B (`scripts/base_train.py`):
 | `mc/variants_total`, `mc/variants_mean` | How many WCs were evaluated per batch. |
 
 `--mc_log_lens_debug` prints per-variant stats (“PrefDebug”) so we can inspect score distributions and correlations during training.
+
+## Curriculum & Hard-Negative Mining
+
+- **Curriculum:** The random-variant target length anneals linearly from 80 % of `max_seq_len` at the beginning of training down to `mc_train_wc_length` (default 20 %). This gives LensNet easy compressions first, then progressively harder focus plans.
+- **Hard negatives:** After building `preference_pairs` we sort them by normalized advantage and keep the top `mc_lens_hard_negative_ratio` fraction (default 1.0 = keep all). Lowering the ratio focuses the Bradley–Terry loss on the “spiciest” comparisons.
 
 ## Stability Tricks
 

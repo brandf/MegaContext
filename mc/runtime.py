@@ -218,6 +218,8 @@ class MCController:
         self.last_timings: Dict[str, float] = {}
         self.debug_metrics = config.collect_debug_metrics
         self._timing_device = torch.device(config.device)
+        self.total_train_steps = max(1, int(config.total_train_steps))
+        self._train_progress = 0.0
 
     @staticmethod
     def _resolve_embedding_layer(model: torch.nn.Module):
@@ -252,6 +254,7 @@ class MCController:
         Returns:
             Batch result containing positional cache and auxiliary losses.
         """
+        self._update_train_progress(step, context)
         self.last_batch_profile = None
         self.last_timings = {}
         batch_states: List[SampleContext] = []
@@ -431,7 +434,7 @@ class MCController:
         seed = baseline
         if seed is None:
             return variants
-        target_len = int(self.config.train_wc_length or self.config.wc_config.max_length)
+        target_len = self._current_target_wc_length()
         for idx in range(self.config.num_random_variants):
             variant = self._build_random_variant(tree, seed, target_len, idx)
             if variant is not None:
@@ -761,6 +764,12 @@ class MCController:
     def _reset_batch_counters(self) -> None:
         for key in self._batch_counters:
             self._batch_counters[key] = 0
+
+    def _update_train_progress(self, step: int, context: str) -> None:
+        if context != "train":
+            return
+        denom = max(1, self.total_train_steps - 1)
+        self._train_progress = min(1.0, max(0.0, step / denom))
 
     def _increment_counter(self, name: str, value: int = 1) -> None:
         self._batch_counters[name] = self._batch_counters.get(name, 0) + int(value)
@@ -1100,6 +1109,14 @@ class MCController:
         self._configure_wc_positional(clone)
         return clone
 
+    def _current_target_wc_length(self) -> int:
+        max_len = self.config.wc_config.max_length
+        start_len = int(0.8 * max_len)
+        end_len = int(min(max_len, self.config.train_wc_length or max_len))
+        progress = self._train_progress
+        target = int(round(start_len + (end_len - start_len) * progress))
+        return max(1, min(max_len, target))
+
     def _compute_variant_losses(
         self,
         batch_states: List[SampleContext],
@@ -1109,8 +1126,7 @@ class MCController:
         if not entries:
             return None, None, None, None, {}, {}
         losses = []
-        for seq_len, group in entries.items():
-            losses.extend(self._run_variant_batch(group, seq_len))
+        losses.extend(self._run_variant_batch(entries))
         if not losses:
             return None, None, None, None, {}, {}
         loss_tensor = torch.stack(losses)
@@ -1178,13 +1194,13 @@ class MCController:
         self,
         batch_states: List[SampleContext],
         original_tokens: torch.Tensor,
-    ) -> Dict[int, List[Dict[str, Any]]]:
-        groups: Dict[int, List[Dict[str, Any]]] = {}
+    ) -> List[Dict[str, Any]]:
+        entries: List[Dict[str, Any]] = []
         for sample in batch_states:
             for variant in sample.variants:
                 wc = variant.working_context
                 embeddings = self._to_model_dtype(wc.to_tensor())
-                seq_len = embeddings.shape[1]
+                seq_len = int(embeddings.shape[1])
                 cos, sin, alibi = wc.get_positional_encodings()
                 entry = {
                     "variant": variant,
@@ -1196,42 +1212,70 @@ class MCController:
                     "batch_idx": getattr(variant, "batch_index", 0),
                     "original_tokens": original_tokens,
                 }
-                groups.setdefault(seq_len, []).append(entry)
-        return groups
+                entries.append(entry)
+        return entries
 
     def _run_variant_batch(
         self,
-        group: List[Dict[str, Any]],
-        seq_len: int,
+        entries: List[Dict[str, Any]],
     ) -> List[torch.Tensor]:
-        batch_size = len(group)
-        embeddings = torch.cat([entry["embeddings"] for entry in group], dim=0)
-        cos = None
-        sin = None
-        alibi = None
-        if all(entry["cos"] is not None for entry in group):
-            cos = torch.cat([entry["cos"] for entry in group], dim=0)
-        if all(entry["sin"] is not None for entry in group):
-            sin = torch.cat([entry["sin"] for entry in group], dim=0)
-        if any(entry["alibi"] is not None for entry in group):
-            alibi_list = [
-                entry["alibi"]
-                if entry["alibi"] is not None
-                else torch.zeros((1, self.config.num_heads, seq_len, seq_len), dtype=self._target_dtype, device=self.device)
-                for entry in group
-            ]
-            alibi = torch.cat(alibi_list, dim=0)
-        token_batch = torch.cat(
-            [
-                self._align_tokens_to_embeddings(
-                    entry["original_tokens"][entry["batch_idx"] : entry["batch_idx"] + 1].to(torch.long),
-                    seq_len,
-                )
-                for entry in group
-            ],
-            dim=0,
-        )
-        dummy_idx = torch.zeros((batch_size, seq_len), dtype=torch.long, device=self.device)
+        if not entries:
+            return []
+        batch_size = len(entries)
+        max_len = max(entry["seq_len"] for entry in entries)
+        embed_dim = entries[0]["embeddings"].shape[-1]
+        embeddings = torch.zeros((batch_size, max_len, embed_dim), dtype=self._target_dtype, device=self.device)
+
+        cos_tensor: Optional[torch.Tensor] = None
+        sin_tensor: Optional[torch.Tensor] = None
+        if all(entry["cos"] is not None for entry in entries):
+            extra_shape = entries[0]["cos"].shape[2:]
+            cos_tensor = torch.zeros((batch_size, max_len) + extra_shape, dtype=self._target_dtype, device=self.device)
+        if all(entry["sin"] is not None for entry in entries):
+            extra_shape = entries[0]["sin"].shape[2:]
+            sin_tensor = torch.zeros((batch_size, max_len) + extra_shape, dtype=self._target_dtype, device=self.device)
+
+        need_alibi = any(entry["alibi"] is not None for entry in entries)
+        alibi_tensor: Optional[torch.Tensor] = None
+        if need_alibi:
+            alibi_tensor = torch.zeros(
+                (batch_size, self.config.num_heads, max_len, max_len),
+                dtype=self._target_dtype,
+                device=self.device,
+            )
+
+        token_batch = torch.full((batch_size, max_len), -1, dtype=torch.long, device=self.device)
+        for idx, entry in enumerate(entries):
+            seq_len = int(entry["seq_len"])
+            start = max_len - seq_len
+            embed_slice = entry["embeddings"]
+            if embed_slice.dim() == 3:
+                embed_slice = embed_slice.squeeze(0)
+            embeddings[idx, start:, :] = embed_slice
+            if cos_tensor is not None and entry["cos"] is not None:
+                cos_slice = entry["cos"]
+                cos_slice = cos_slice.squeeze(0)
+                cos_tensor[idx, start:, ...] = cos_slice
+            if sin_tensor is not None and entry["sin"] is not None:
+                sin_slice = entry["sin"]
+                sin_slice = sin_slice.squeeze(0)
+                sin_tensor[idx, start:, ...] = sin_slice
+            if alibi_tensor is not None:
+                if entry["alibi"] is not None:
+                    alibi_slice = entry["alibi"]
+                    if alibi_slice.dim() == 4:
+                        alibi_slice = alibi_slice.squeeze(0)
+                    alibi_tensor[idx, :, start:, start:] = alibi_slice
+            token_slice = self._align_tokens_to_embeddings(
+                entry["original_tokens"][entry["batch_idx"] : entry["batch_idx"] + 1].to(torch.long),
+                seq_len,
+            )
+            token_batch[idx, start:] = token_slice[0]
+
+        dummy_idx = torch.zeros((batch_size, max_len), dtype=torch.long, device=self.device)
+        cos = cos_tensor
+        sin = sin_tensor
+        alibi = alibi_tensor
         autocast_ctx = nullcontext()
         if self.device.type == "cuda" and self._target_dtype in (torch.bfloat16, torch.float16):
             autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=self._target_dtype)
@@ -1246,21 +1290,21 @@ class MCController:
             )
         if loss2d.dim() > 2:
             logits = loss2d
-            logits = logits.view(batch_size, seq_len, -1)
-            tokens_flat = token_batch.view(batch_size, seq_len)
+            logits = logits.view(batch_size, max_len, -1)
+            tokens_flat = token_batch.view(batch_size, max_len)
             loss_flat = F.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 tokens_flat.view(-1),
                 ignore_index=-1,
                 reduction="none",
             )
-            loss2d = loss_flat.view(batch_size, seq_len)
+            loss2d = loss_flat.view(batch_size, max_len)
         else:
             loss2d = loss2d.view(batch_size, -1)
         valid = (token_batch.view(batch_size, -1) >= 0).to(loss2d.dtype)
         sample_losses = (loss2d * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)
         outputs = []
-        for entry, loss in zip(group, sample_losses):
+        for entry, loss in zip(entries, sample_losses):
             entry["variant"].token_loss_value = loss.detach()
             outputs.append(loss)
         return outputs
@@ -1714,6 +1758,12 @@ class MCController:
                     strength = delta
                 pairs.append((better, worse, strength))
         self._rng.shuffle(pairs)
+        ratio = float(self.config.lens_hard_negative_ratio)
+        if pairs and ratio < 1.0:
+            keep = max(1, int(math.ceil(len(pairs) * ratio)))
+            pairs.sort(key=lambda item: item[2], reverse=True)
+            pairs = pairs[:keep]
+            self._rng.shuffle(pairs)
         return pairs[: max(1, self.config.max_lens_pairs)]
 
     def _build_pairwise_targets(

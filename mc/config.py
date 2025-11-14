@@ -81,6 +81,8 @@ class MCConfig:
     lens_kl_weight: float = 0.0
     lens_budget_smooth_weight: float = 0.0
     lens_budget_smooth_beta: float = 0.9
+    lens_hard_negative_ratio: float = 1.0
+    total_train_steps: int = 1
     train_wc_length: Optional[int] = None
     num_random_variants: int = 4
     random_variant_iterations: int = 4
@@ -111,7 +113,7 @@ class MCConfig:
             self.eval_soft_max_length = self.wc_config.max_length
         self.infer_refocus_interval = max(1, int(self.infer_refocus_interval))
         if self.train_wc_length is None:
-            default_len = int(self.wc_config.max_length * 0.75)
+            default_len = int(self.wc_config.max_length * 0.2)
             self.train_wc_length = max(1, min(self.wc_config.max_length, default_len))
         self.num_random_variants = max(0, int(self.num_random_variants))
         self.random_variant_iterations = max(1, int(self.random_variant_iterations))
@@ -122,3 +124,7 @@ class MCConfig:
             raise ValueError("lens_adv_norm_beta must be in (0, 1)")
         if not (0.0 < self.lens_budget_smooth_beta < 1.0):
             raise ValueError("lens_budget_smooth_beta must be in (0, 1)")
+        self.lens_hard_negative_ratio = float(self.lens_hard_negative_ratio)
+        if self.lens_hard_negative_ratio <= 0 or self.lens_hard_negative_ratio > 1.0:
+            raise ValueError("lens_hard_negative_ratio must be in (0, 1]")
+        self.total_train_steps = max(1, int(self.total_train_steps))

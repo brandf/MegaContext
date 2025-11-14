@@ -119,9 +119,9 @@ However, the *mechanics* of our loss—pairwise comparisons over different “vi
 | Policy KL regularization | Prevents LensNet from flipping sign every batch, which destabilizes the allocator. | Cache the previous policy scores per WC and add a symmetric KL term (`lens_kl_weight`) when computing `_compute_lens_losses`. |
 | Budget smoothing | Random variants sometimes bias a batch toward expand-only or collapse-only plans. | Track an EMA of net expand mass (`lens_budget_smooth_beta`) and penalize deviations via `lens_budget_smooth_weight`. |
 
-4. [ ] **Curriculum + hard-negative mining**
-   - Bucket variant pairs by Δloss magnitude; oversample “hard” comparisons to accelerate learning, similar to contrastive hard-negative mining.
-   - Gradually shrink `train_wc_length` or increase `num_random_variants` during training to expose LensNet to more challenging edits over time.
+4. [x] **Curriculum + hard-negative mining**
+   - Random variant target lengths now anneal linearly from 80 % of `max_seq_len` down to `mc_train_wc_length` (default 20 %), so LensNet sees easy compressions first and grows into harder ones.
+   - We sort `preference_pairs` by normalized advantage and keep only the top `mc_lens_hard_negative_ratio` fraction before shuffling, so the Bradley–Terry loss focuses on the most informative comparisons.
 
 5. [ ] **Evaluation + ablations**
    - Extend LensDebug to log reward-model style metrics (agreement rate, normalized advantage) and contrastive ones (temperature-scaled loss, InfoNCE analog).
