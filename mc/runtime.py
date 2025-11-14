@@ -471,14 +471,15 @@ class MCController:
         baseline = self._build_trimmed_baseline_variant(tree, level_cache, planned_target_len)
         if baseline is not None:
             baseline.source = "lod_0_baseline"
-            self._normalize_wc_length(baseline.working_context, tree, baseline.working_context.length)
+            if tree.num_tokens() > planned_target_len:
+                self._normalize_wc_length(baseline.working_context, tree, planned_target_len)
             variants.append(baseline)
         seed = baseline
         if seed is None:
             return variants
-        if tree.num_tokens() <= target_len:
-            return variants[: limit]
         target_len = baseline.working_context.length
+        if tree.num_tokens() <= target_len:
+            return variants[:1]
         limit = max(1, self.config.max_counterfactuals)
         seed_len = seed.working_context.length
         seen_signatures: set[Tuple[Tuple[int, int], ...]] = set()

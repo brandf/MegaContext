@@ -196,7 +196,7 @@ class GreedyFocusAllocator(FocusAllocatorBase):
         positions = self.working_context.get_positions()[0]
         length = scores.numel()
         allow_expand = self.working_context.length < self.cfg.soft_max_length
-        allow_collapse = True
+        allow_collapse = self.working_context.length > self.cfg.soft_max_length
         protected_start = max(0, length - self.cfg.recent_tokens)
         order = torch.argsort(torch.abs(scores), descending=True)
         for idx_tensor in order:
@@ -212,8 +212,6 @@ class GreedyFocusAllocator(FocusAllocatorBase):
             if score >= self.cfg.expand_threshold and lod > 0 and allow_expand and not prefer_collapse:
                 edit = self._build_expand_edit(idx, lod, global_pos)
             elif score <= -self.cfg.collapse_threshold and lod < self.cfg.max_lod and allow_collapse:
-                if self.working_context.length <= self.cfg.soft_max_length and lod == 0:
-                    continue
                 edit = self._build_collapse_edit(idx, lod, global_pos)
             if edit is not None:
                 edits.append(edit)

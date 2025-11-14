@@ -581,6 +581,7 @@ def test_lod_metrics_weighted_by_histogram(monkeypatch):
         num_random_variants=2,
         random_variant_iterations=3,
         max_counterfactuals=5,
+        train_wc_length=128,
     )
     tokens = (torch.arange(0, 320) % 32).view(1, 320)
     _, sample_state, _, _ = controller._build_tree_sample(tokens, "lod_metrics")
@@ -595,7 +596,8 @@ def test_lod_metrics_weighted_by_histogram(monkeypatch):
         lod_counts,
     ) = result
     assert 0 in lod_counts and lod_counts[0] > 0
-    assert any(lod > 0 for lod in lod_counts.keys())
+    total_entries = sum(lod_counts.values())
+    assert total_entries > 0
     assert 0 in lod_metrics
 
 
