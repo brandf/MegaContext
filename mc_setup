@@ -25,12 +25,17 @@ def run(cmd: list[str], **kwargs) -> None:
 def ensure_uv() -> str:
     uv_path = shutil.which("uv")
     if uv_path:
+        info(f"Using uv at {uv_path}")
         return uv_path
     info("uv not found; installing via curl | sh ...")
     install_cmd = "curl -LsSf https://astral.sh/uv/install.sh | sh"
     subprocess.run(["bash", "-lc", install_cmd], check=True)
     uv_path = shutil.which("uv")
     if uv_path:
+        info(f"Using uv at {uv_path}")
+        cargo_bin = str(Path.home() / ".cargo/bin")
+        if uv_path.startswith(cargo_bin):
+            info(f"If shells can't find uv, run: source \"{Path.home() / '.cargo/env'}\"")
         return uv_path
     # Fallback: look in ~/.cargo/bin and ~/.local/bin
     for candidate in (
@@ -39,6 +44,9 @@ def ensure_uv() -> str:
     ):
         if candidate.exists():
             os.environ["PATH"] = f"{candidate.parent}:{os.environ['PATH']}"
+            info(f"Using uv at {candidate}")
+            if ".cargo/bin" in str(candidate.parent):
+                info(f"If shells can't find uv, run: source \"{Path.home() / '.cargo/env'}\"")
             return str(candidate)
     raise RuntimeError("uv installation succeeded but executable not found on PATH")
 
