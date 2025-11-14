@@ -294,20 +294,10 @@ case "$GPU_PROFILE" in
     5090)
         DEVICE_BATCH_SIZE=12
         NUM_ITERATIONS=75500
-        MC_NUM_RANDOM_VARIANTS=3
-        MC_RANDOM_VARIANT_ITERATIONS=3
-        MC_MAX_COUNTERFACTUALS=5
-        MC_TRAIN_WC_LENGTH=1536
-        MC_LENS_HARD_NEGATIVE_RATIO=0.75
         ;;
     h100)
         DEVICE_BATCH_SIZE=40
         NUM_ITERATIONS=37750
-        MC_NUM_RANDOM_VARIANTS=4
-        MC_RANDOM_VARIANT_ITERATIONS=4
-        MC_MAX_COUNTERFACTUALS=8
-        MC_TRAIN_WC_LENGTH=""
-        MC_LENS_HARD_NEGATIVE_RATIO=1.0
         ;;
     *)
         echo "Unsupported GPU profile: $GPU_PROFILE (expected 5090 or h100)" >&2
@@ -330,9 +320,6 @@ echo "Depth: $DEPTH  |  Seq len: $MAX_SEQ_LEN"
 echo "Device batch: $DEVICE_BATCH_SIZE  |  Total batch: $TOTAL_BATCH_SIZE tokens"
 echo "Iterations: $NUM_ITERATIONS"
 echo "MegaContext enabled: $MC_ENABLED"
-if [ "$GPU_PROFILE" = "5090" ]; then
-    echo "5090 profile: train_wc_length=${MC_TRAIN_WC_LENGTH:-auto}, max_counterfactuals=$MC_MAX_COUNTERFACTUALS, random_variants=$MC_NUM_RANDOM_VARIANTS"
-fi
 
 # -----------------------------------------------------------------------------
 # Environment + dependencies

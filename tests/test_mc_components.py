@@ -541,6 +541,27 @@ def test_preference_agreement_metric_available(monkeypatch):
     assert 0.0 <= controller._last_preference_agreement <= 1.0
 
 
+def test_random_variants_are_unique(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        num_random_variants=3,
+        random_variant_iterations=3,
+        train_wc_length=256,
+        max_counterfactuals=5,
+    )
+    tokens = (torch.arange(0, 320) % 32).view(1, 320)
+    _, sample_state, _, _ = controller._build_tree_sample(tokens, "unique_variants")
+    assert sample_state.variants
+    baseline = sample_state.variants[0]
+    signatures = set()
+    for variant in sample_state.variants:
+        signatures.add(controller._variant_signature(variant.working_context))
+        if variant is baseline:
+            continue
+        assert variant.working_context.length <= baseline.working_context.length
+    assert len(signatures) == len(sample_state.variants)
+
+
 def test_lens_targets_mask_respects_legality(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,

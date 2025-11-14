@@ -450,10 +450,19 @@ class MCController:
         if seed is None:
             return variants
         target_len = self._current_target_wc_length()
+        seed_len = seed.working_context.length
+        seen_signatures: set[Tuple[Tuple[int, int], ...]] = set()
+        seen_signatures.add(self._variant_signature(seed.working_context))
         for idx in range(self.config.num_random_variants):
-            variant = self._build_random_variant(tree, seed, target_len, idx)
-            if variant is not None:
-                variants.append(variant)
+            variant_target = self._sample_variant_target_length(seed_len, target_len)
+            variant = self._build_random_variant(tree, seed, variant_target, idx)
+            if variant is None:
+                continue
+            signature = self._variant_signature(variant.working_context)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            variants.append(variant)
         limit = max(1, self.config.max_counterfactuals)
         return variants[:limit]
 
@@ -506,6 +515,24 @@ class MCController:
             edits_applied=total_edits,
             allocator=allocator,
         )
+
+    def _sample_variant_target_length(self, seed_len: int, curriculum_target: int) -> int:
+        if seed_len <= self.config.block_size:
+            return seed_len
+        upper_bound = min(seed_len - self.config.block_size, curriculum_target)
+        if upper_bound <= self.config.block_size:
+            return max(self.config.block_size, upper_bound)
+        min_ratio = 0.35
+        max_ratio = 0.95
+        frac = self._rng.uniform(min_ratio, max_ratio)
+        sampled = int(max(self.config.block_size, seed_len * frac))
+        sampled = min(sampled, upper_bound)
+        return max(self.config.block_size, sampled)
+
+    def _variant_signature(self, wc: WorkingContext) -> Tuple[Tuple[int, int], ...]:
+        positions = wc.get_positions()[0].tolist()
+        lods = wc.get_lod_tensor()[0].tolist()
+        return tuple(zip(positions, lods))
 
     def _build_primary_positional(
         self, batch_states: List[SampleContext]
