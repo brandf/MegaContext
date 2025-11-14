@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+safe_source() {
+    if [ ! -f "$1" ]; then
+        return 1
+    fi
+    set +u
+    # shellcheck disable=SC1090
+    source "$1"
+    set -u
+    return 0
+}
+
 source_shell_profile() {
     if [ -n "${MC_SHELL_PROFILE:-}" ] && [ -f "$MC_SHELL_PROFILE" ]; then
-        # shellcheck disable=SC1090
-        source "$MC_SHELL_PROFILE"
+        safe_source "$MC_SHELL_PROFILE"
         echo "[mc_run] Sourced MC_SHELL_PROFILE=$MC_SHELL_PROFILE"
         return
     fi
     for candidate in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.zshrc"; do
         if [ -f "$candidate" ]; then
-            # shellcheck disable=SC1090
-            source "$candidate"
+            safe_source "$candidate"
             echo "[mc_run] Sourced $candidate"
             return
         fi
@@ -23,8 +32,7 @@ ensure_uv_in_path() {
         return
     fi
     if [ -f "$HOME/.cargo/env" ]; then
-        # shellcheck disable=SC1090
-        source "$HOME/.cargo/env"
+        safe_source "$HOME/.cargo/env"
     fi
     if command -v uv >/dev/null 2>&1; then
         return
