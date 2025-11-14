@@ -467,14 +467,16 @@ class MCController:
     def _build_random_variant_set(self, tree: MegaContextTree, session_id: str) -> List[WorkingContextVariant]:
         variants: List[WorkingContextVariant] = []
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
-        baseline = self._build_trimmed_baseline_variant(tree, level_cache)
+        planned_target_len = min(self._current_target_wc_length(), tree.num_tokens())
+        baseline = self._build_trimmed_baseline_variant(tree, level_cache, planned_target_len)
         if baseline is not None:
             baseline.source = "lod_0_baseline"
+            self._normalize_wc_length(baseline.working_context, tree, baseline.working_context.length)
             variants.append(baseline)
         seed = baseline
         if seed is None:
             return variants
-        target_len = self._current_target_wc_length()
+        target_len = baseline.working_context.length
         limit = max(1, self.config.max_counterfactuals)
         seed_len = seed.working_context.length
         seen_signatures: set[Tuple[Tuple[int, int], ...]] = set()
@@ -484,6 +486,7 @@ class MCController:
             variant = self._build_random_variant(tree, seed, variant_target, idx)
             if variant is None:
                 continue
+            self._normalize_wc_length(variant.working_context, tree, target_len)
             signature = self._variant_signature(variant.working_context)
             if signature in seen_signatures:
                 continue
@@ -543,10 +546,6 @@ class MCController:
             total_edits += edits
             if wc.length <= target_len:
                 break
-        fixed_wc = self._ensure_wc_full_coverage(wc, tree, f"random_variant_{index}")
-        if fixed_wc is not wc:
-            wc = fixed_wc
-            allocator.working_context = wc
         lod_hint = self._infer_variant_lod_hint(wc)
         return WorkingContextVariant(
             working_context=wc,
@@ -619,11 +618,12 @@ class MCController:
         self,
         tree: MegaContextTree,
         level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+        target_len: int,
     ) -> Optional[WorkingContextVariant]:
         total_tokens = tree.num_tokens()
         if total_tokens <= 0:
             return None
-        target_len = max(1, self._current_target_wc_length())
+        target_len = max(1, min(target_len, total_tokens))
         tail_tokens = min(total_tokens, int(self.config.allocator_recent_tokens))
         tail_tokens = min(tail_tokens, target_len)
         if tail_tokens <= 0 and target_len > 0:
@@ -685,12 +685,18 @@ class MCController:
         head_embeddings = torch.cat(segments_embeddings, dim=1)
         head_positions = torch.cat(segments_positions, dim=1)
         head_lods = torch.cat(segments_lods, dim=1)
+        wc_config = WorkingContextConfig(
+            embed_dim=self.config.embed_dim,
+            max_length=target_len,
+            device=self.config.device,
+        )
         variant = self._create_variant(
             tree,
             head_embeddings,
             head_positions,
             lod=0,
             source="lod_0_baseline",
+            wc_config=wc_config,
             tail_tokens_override=tail_tokens,
         )
         variant.is_baseline = True
@@ -1309,6 +1315,31 @@ class MCController:
         if lods.numel() == 0:
             return 0
         return int(lods.max().item())
+
+    def _normalize_wc_length(self, wc: WorkingContext, tree: MegaContextTree, target_len: int) -> None:
+        target_len = int(max(1, min(target_len, tree.num_tokens())))
+        if wc.length == target_len:
+            return
+        allocator = self._build_allocator(tree, wc, soft_max_length=target_len)
+        max_attempts = abs(wc.length - target_len) * 4 + 10
+        device = wc.to_tensor().device
+        while wc.length != target_len and max_attempts > 0:
+            prefer_expand = wc.length < target_len
+            scores = torch.ones(1, wc.length, device=device)
+            if not prefer_expand:
+                scores = -scores
+            edits = allocator.update_focus(
+                max_replacements_per_iteration=1,
+                num_iterations=1,
+                scores=scores,
+            )
+            if edits == 0:
+                break
+            max_attempts -= 1
+        if wc.length != target_len:
+            raise RuntimeError(
+                f"[MegaContext] Unable to normalize WC length to {target_len} (final={wc.length})"
+            )
 
     def _current_target_wc_length(self) -> int:
         max_len = self.config.wc_config.max_length
