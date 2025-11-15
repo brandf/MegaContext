@@ -1940,6 +1940,7 @@ class MCController:
                 score_abs_means.append(float(stats_tensor.abs().mean().item()))
                 score_std_vals.append(float(stats_tensor.std(unbiased=False).item()))
         if not losses:
+            self._last_preference_agreement = None
             return torch.zeros((), device=self.device, dtype=self._target_dtype)
         if score_abs_means:
             score_abs_avg = sum(score_abs_means) / len(score_abs_means)
