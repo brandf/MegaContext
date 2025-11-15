@@ -1354,6 +1354,9 @@ class MCController:
         stacked_data, lengths = self._stack_working_contexts(pending)
         if not stacked_data:
             return cache
+        mark_step = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
+        if callable(mark_step):
+            mark_step()
         scores = self.lensnet(
             None,
             embeddings=stacked_data["embeddings"],
