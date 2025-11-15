@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from nanochat.report import get_report
 
 from .config import MCConfig, WorkingContextConfig
-from .gistnet import build_gistnet
+from .gistnet import GistNetBase, build_gistnet
 from .lensnet import build_lensnet
 from .focus_allocator import (
     build_focus_allocator,
@@ -120,6 +120,41 @@ class MCTelemetry:
         )
 
 
+class _AllocatorLensNetAdapter(torch.nn.Module):
+    """
+    Proxy that routes allocator LensNet calls through MCController so instrumentation and
+    cudagraph handling remain centralized even when focus allocators invoke LensNet directly.
+    """
+
+    def __init__(self, controller: "MCController") -> None:
+        super().__init__()
+        self.controller = controller
+
+    def forward(self, working_context: WorkingContext) -> torch.Tensor:  # type: ignore[override]
+        return self.controller._lensnet_allocator_forward(working_context)
+
+
+class _InstrumentedGistNet(GistNetBase):
+    """
+    Wraps the actual GistNet to count invocations and feed telemetry without
+    touching MegaContextTree internals.
+    """
+
+    def __init__(self, module: GistNetBase, controller: "MCController") -> None:
+        super().__init__()
+        self.module = module
+        self.controller = controller
+        self.block_size = getattr(module, "block_size", 0)
+
+    def forward(self, *args, **kwargs):  # type: ignore[override]
+        if args:
+            blocks = args[0]
+        else:
+            blocks = kwargs.get("blocks")
+        self.controller._record_gistnet_usage(blocks)
+        return self.module(*args, **kwargs)
+
+
 class MCController:
     """
     Bridges the nanochat training loop with the MegaContext components.
@@ -168,7 +203,7 @@ class MCController:
         self.embed = self._resolve_embedding_layer(model)
         embed_dim = config.embed_dim
         self._head_dim = embed_dim // config.num_heads
-        self.gistnet = build_gistnet(
+        base_gistnet = build_gistnet(
             config.gistnet_type,
             embed_dim,
             block_size=config.block_size,
@@ -180,7 +215,7 @@ class MCController:
         self._gistnet_compiled = False
         if config.compile_gistnet and hasattr(torch, "compile") and config.device.startswith("cuda"):
             try:
-                self.gistnet = torch.compile(self.gistnet, mode="reduce-overhead")
+                base_gistnet = torch.compile(base_gistnet, mode="reduce-overhead")
                 self._gistnet_compiled = True
                 if self._is_rank0:
                     print("[MegaContext] GistNet compiled with torch.compile(mode='reduce-overhead')", flush=True)
@@ -197,8 +232,9 @@ class MCController:
             head=config.lensnet_head,
         ).to(self.device)
         self._aux_dtype = self._resolve_aux_dtype()
-        self.gistnet.to(dtype=self._aux_dtype)
+        base_gistnet.to(dtype=self._aux_dtype)
         self.lensnet.to(dtype=self._aux_dtype)
+        self.gistnet = _InstrumentedGistNet(base_gistnet, self)
         self._lensnet_compiled = False
         if config.compile_lensnet and hasattr(torch, "compile") and config.device.startswith("cuda"):
             try:
@@ -209,6 +245,15 @@ class MCController:
             except Exception as exc:
                 if self._is_rank0:
                     print(f"[MegaContext] torch.compile for LensNet disabled: {exc}", flush=True)
+        self._lensnet_usage: Dict[str, Dict[str, int]] = {
+            "train": self._make_lensnet_usage_dict(),
+            "inference": self._make_lensnet_usage_dict(),
+        }
+        self._lensnet_allocator_adapter = _AllocatorLensNetAdapter(self)
+        self._gistnet_usage: Dict[str, Dict[str, int]] = {
+            "train": self._make_gistnet_usage_dict(),
+            "inference": self._make_gistnet_usage_dict(),
+        }
         self.focus_allocator: Optional[FocusAllocatorBase] = None
         self.telemetry = MCTelemetry(interval=config.telemetry_interval)
         self.telemetry_provider = telemetry_provider or NoOpTelemetryProvider()
@@ -276,6 +321,119 @@ class MCController:
         if self.device.type == "cuda" and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
             return torch.bfloat16
         return torch.float32
+
+    def _make_lensnet_usage_dict(self) -> Dict[str, int]:
+        return {
+            "batched_calls": 0,
+            "batched_variants": 0,
+            "batched_tokens": 0,
+            "allocator_calls": 0,
+            "allocator_tokens": 0,
+        }
+
+    def _reset_lensnet_usage(self, context: str) -> None:
+        key = "inference" if context == "inference" else "train"
+        self._lensnet_usage[key] = self._make_lensnet_usage_dict()
+
+    def _record_lensnet_usage(self, source: str, batch_size: int, seq_len: int) -> None:
+        context = "inference" if self._current_context == "inference" else "train"
+        stats = self._lensnet_usage.setdefault(context, self._make_lensnet_usage_dict())
+        seq_elems = max(0, int(batch_size)) * max(0, int(seq_len))
+        if source == "batched":
+            stats["batched_calls"] += 1
+            stats["batched_variants"] += int(batch_size)
+            stats["batched_tokens"] += seq_elems
+        elif source == "allocator":
+            if context == "train":
+                raise RuntimeError("[MegaContext] LensNet allocator path invoked during training")
+            stats["allocator_calls"] += 1
+            # allocator path always processes one WC; store its token length for context.
+            stats["allocator_tokens"] += max(seq_elems, max(0, int(seq_len)))
+        else:
+            raise ValueError(f"Unknown LensNet usage source: {source}")
+
+    def _log_lensnet_usage_event(
+        self,
+        session_id: str,
+        context: str,
+        *,
+        label: Optional[str] = None,
+    ) -> None:
+        key = "inference" if context == "inference" else "train"
+        stats = self._lensnet_usage.get(key)
+        if not stats:
+            return
+        payload: Dict[str, Any] = {"context": key}
+        if label:
+            payload["label"] = label
+        payload.update({k: int(v) for k, v in stats.items()})
+        self._log_event(session_id, "lensnet_usage", payload, force=True)
+
+    def _lensnet_mark_step(self) -> None:
+        mark_step = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
+        if callable(mark_step):
+            mark_step()
+
+    def _run_lensnet_batched(self, stacked_data: Dict[str, torch.Tensor]) -> torch.Tensor:
+        embeddings = stacked_data["embeddings"]
+        batch = int(embeddings.shape[0]) if embeddings is not None else 0
+        seq_len = int(embeddings.shape[1]) if embeddings is not None else 0
+        self._lensnet_mark_step()
+        scores = self.lensnet(
+            None,
+            embeddings=embeddings,
+            positions=stacked_data["positions"],
+            lods=stacked_data["lods"],
+            cos=stacked_data["cos"],
+            sin=stacked_data["sin"],
+        )
+        self._record_lensnet_usage("batched", batch, seq_len)
+        return scores.clone()
+
+    def _lensnet_allocator_forward(self, working_context: WorkingContext) -> torch.Tensor:
+        self._lensnet_mark_step()
+        scores = self.lensnet(working_context)
+        self._record_lensnet_usage("allocator", 1, working_context.length)
+        return scores.clone()
+
+    def _make_gistnet_usage_dict(self) -> Dict[str, int]:
+        return {
+            "calls": 0,
+            "block_batches": 0,
+            "block_tokens": 0,
+        }
+
+    def _reset_gistnet_usage(self, context: str) -> None:
+        key = "inference" if context == "inference" else "train"
+        self._gistnet_usage[key] = self._make_gistnet_usage_dict()
+
+    def _record_gistnet_usage(self, blocks: Optional[torch.Tensor]) -> None:
+        if blocks is None or not torch.is_tensor(blocks):
+            return
+        context = "inference" if self._current_context == "inference" else "train"
+        stats = self._gistnet_usage.setdefault(context, self._make_gistnet_usage_dict())
+        batch = int(blocks.shape[0]) if blocks.dim() >= 1 else 1
+        block_len = int(blocks.shape[1]) if blocks.dim() >= 2 else 1
+        stats["calls"] += 1
+        stats["block_batches"] += batch
+        stats["block_tokens"] += batch * block_len
+
+    def _log_gistnet_usage_event(
+        self,
+        session_id: str,
+        context: str,
+        *,
+        label: Optional[str] = None,
+    ) -> None:
+        key = "inference" if context == "inference" else "train"
+        stats = self._gistnet_usage.get(key)
+        if not stats:
+            return
+        payload: Dict[str, Any] = {"context": key}
+        if label:
+            payload["label"] = label
+        payload.update({k: int(v) for k, v in stats.items()})
+        self._log_event(session_id, "gistnet_usage", payload, force=True)
 
     @contextmanager
     def _scoped_context(self, context: str):
@@ -503,9 +661,15 @@ class MCController:
         """
         prev_context = self._current_context
         self._current_context = context
+        session_id = f"{context}_step_{step}"
+        self._reset_lensnet_usage(context)
+        self._reset_gistnet_usage(context)
         try:
-            return self._process_batch_impl(tokens, step, context)
+            result = self._process_batch_impl(tokens, step, context)
+            return result
         finally:
+            self._log_lensnet_usage_event(session_id, context, label="process_batch")
+            self._log_gistnet_usage_event(session_id, context, label="process_batch")
             self._current_context = prev_context
 
     def _build_sample_context(self, tree: MegaContextTree, session_id: str) -> SampleContext:
@@ -973,7 +1137,7 @@ class MCController:
             self.config.allocator_type,
             tree=tree,
             working_context=working_context,
-            lensnet=self.lensnet,
+            lensnet=self._lensnet_allocator_adapter,
             config=allocator_cfg,
         )
 
@@ -1301,20 +1465,7 @@ class MCController:
         stacked_data, lengths = self._stack_working_contexts(pending)
         if not stacked_data:
             return cache
-        mark_step = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
-        if callable(mark_step):
-            mark_step()
-        mark_step = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
-        if callable(mark_step):
-            mark_step()
-        scores = self.lensnet(
-            None,
-            embeddings=stacked_data["embeddings"],
-            positions=stacked_data["positions"],
-            lods=stacked_data["lods"],
-            cos=stacked_data["cos"],
-            sin=stacked_data["sin"],
-        ).clone()
+        scores = self._run_lensnet_batched(stacked_data)
         for idx, variant in enumerate(pending):
             length = lengths[idx]
             var_scores = scores[idx : idx + 1, -length:].clone()
@@ -2382,6 +2533,8 @@ class MCController:
         eval_soft_max = self.config.eval_soft_max_length or self.config.wc_config.max_length
         fits_soft_max = original_len <= eval_soft_max
         session = session_id or f"infer_{uuid.uuid4().hex}"
+        self._reset_lensnet_usage("inference")
+        self._reset_gistnet_usage("inference")
         self._timing_sync()
         t_tree0 = time.time()
         with torch.no_grad():
@@ -2497,6 +2650,8 @@ class MCController:
         timings["total_ms"] = total_ms
         timings["early_exit"] = 1.0 if fits_soft_max else 0.0
         self.last_timings = timings
+        self._log_lensnet_usage_event(session, "inference", label="prefill")
+        self._log_gistnet_usage_event(session, "inference", label="prefill")
         return session
 
     def begin_inference_session(
@@ -2526,6 +2681,8 @@ class MCController:
             new_tokens = new_tokens.unsqueeze(0)
         tokens = new_tokens.to(self.device)
         state = self.inference_state
+        self._reset_lensnet_usage("inference")
+        self._reset_gistnet_usage("inference")
         with torch.no_grad():
             embeddings = self.embed(tokens)
             if state.allocator is None:
@@ -2563,6 +2720,8 @@ class MCController:
             force=True,
         )
         self._refresh_inference_report()
+        self._log_lensnet_usage_event(state.session_id, "inference", label="step")
+        self._log_gistnet_usage_event(state.session_id, "inference", label="step")
 
     def inference_step(self, new_tokens: torch.Tensor) -> None:
         """
