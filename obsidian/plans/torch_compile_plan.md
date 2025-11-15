@@ -44,12 +44,13 @@ summary: Structured plan to make torch.compile reliable for LensNet/GistNet with
   - Runs the same batched call as training.
   - Runs the allocator-style repeated calls.
   - Checks for cudagraph errors.
-- Run this harness before enabling compile in `mc_run`.
-- ✅ Implemented in `scripts/mc_compile_harness.py` (`python scripts/mc_compile_harness.py --device cuda --enable-compile`) which exercises GistNet + both LensNet call paths and surfaces cudagraph issues.
+- Run this harness before enabling compile in `mc_run`/`run10.sh` so we only toggle the flag in the standard workflow after it passes.
+- ✅ Implemented in `scripts/mc_compile_harness.py`. We still run all official experiments through `mc_run.sh … run10.sh`; the harness exists purely for debugging so we can reproduce compile bugs before toggling the flag in the standard workflow.
 
 ### 5. Re-enable compile progressively
 - Once the harness passes, re-enable compile for training (single batch) and gate inference allocator behind a config flag so we can roll out gradually.
-- Update `mc_run.sh` to expose a `--mc_compile_lensnet_inference` flag if needed.
+- Update `mc_run.sh`/`run10.sh` so the supported way to flip compile on is passing `--mc_compile_lensnet=1 [--mc_compile_lensnet_inference=1]` through the normal entry point. Avoid bespoke scripts so the behavior mirrors production.
+- **Status:** enabling `--mc_compile_lensnet=1` via `mc_run.sh … run10.sh` still throws Inductor/cudagraph exceptions (same failure we saw before this refactor). Compile remains disabled in default configs until we fix those runtime errors.
 
 ### 6. Documentation & tests
 - Update `obsidian/reference/LensNet Pairwise Training.md` with the new invariants (“LensNet outputs must be consumed or cloned via the helper”).
@@ -65,3 +66,8 @@ summary: Structured plan to make torch.compile reliable for LensNet/GistNet with
 4. [x] Build/run the torch.compile harness.
 5. [ ] Update docs and unit tests.
 6. [ ] Verify full pytest suite + harness + end-to-end training smoke test (or as close as feasible without full GPU run).
+
+## Current Status
+- Instrumentation + helper refactors landed (`mc/runtime.py`), and the new `tests/test_mc_components.py::test_lensnet_timers_and_usage` covers the controller helpers.
+- The harness (`scripts/mc_compile_harness.py`) reproduces LensNet/GistNet compile issues locally, but running `mc_run.sh … run10.sh --mc_compile_lensnet=1` still throws Inductor/cudagraph exceptions, so compile remains disabled in default configs.
+- Next steps: finish the doc/test polish (item 5), integrate compile toggles/testing into the run10 workflow, and chase down the remaining compile-time exceptions so we can check off item 6.

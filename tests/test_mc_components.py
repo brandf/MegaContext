@@ -759,6 +759,28 @@ def test_lens_targets_mask_respects_legality(monkeypatch):
     assert span_tokens[1].item() == float(controller.config.block_size ** 2)
 
 
+def test_lensnet_timers_and_usage(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        num_random_variants=1,
+        random_variant_iterations=1,
+        max_counterfactuals=2,
+        allocator_iterations=1,
+        allocator_recent_tokens=0,
+        train_wc_length=64,
+    )
+    tokens = torch.randint(0, 32, (1, controller.config.max_seq_len))
+    result = controller.process_batch(tokens, step=0, context="train")
+    assert result is not None
+    timings = controller.last_timings
+    assert "lens_forward_ms" in timings
+    assert "lens_loss_ms" in timings
+    assert timings["lens_forward_ms"] >= 0.0
+    assert timings["lens_loss_ms"] >= timings["lens_forward_ms"]
+    usage = controller._lensnet_usage["train"]  # type: ignore[attr-defined]
+    assert usage["batched_calls"] == 1
+
+
 def test_train_report_uses_non_baseline_variant(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,

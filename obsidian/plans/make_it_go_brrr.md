@@ -21,7 +21,7 @@ summary: Step-by-step plan to make MegaContext training throughput competitive b
    - When `MC_MEMORY_DEBUG` is set, dump `torch.cuda.memory_summary()` after each phase, tied to the timing logs.  
    - Store summaries in `report/` so we have persistent evidence when tuning knobs.
 
-> Deliverable: WANDB dashboard that shows `build_ms`, `variants`, `lens_ms`, `base_forward_ms`, `optimizer_ms`, `tokens/sec`.
+> Deliverable: WANDB dashboard that shows `build_ms`, `variants`, `lens_loss_ms`, `lens_forward_ms`, `base_forward_ms`, `optimizer_ms`, `tokens/sec`.
 
 ---
 

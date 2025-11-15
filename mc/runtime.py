@@ -300,6 +300,7 @@ class MCController:
         self._timing_device = torch.device(config.device)
         self.total_train_steps = max(1, int(config.total_train_steps))
         self._train_progress = 0.0
+        self._last_lens_forward_ms: float = 0.0
 
     @staticmethod
     def _resolve_embedding_layer(model: torch.nn.Module):
@@ -334,6 +335,7 @@ class MCController:
     def _reset_lensnet_usage(self, context: str) -> None:
         key = "inference" if context == "inference" else "train"
         self._lensnet_usage[key] = self._make_lensnet_usage_dict()
+        self._last_lens_forward_ms = 0.0
 
     def _record_lensnet_usage(self, source: str, batch_size: int, seq_len: int) -> None:
         context = "inference" if self._current_context == "inference" else "train"
@@ -508,6 +510,8 @@ class MCController:
                 "positional_ms": (t_pos1 - t_pos0) * 1000.0,
                 "variant_ms": 0.0,
                 "lens_ms": 0.0,
+                "lens_loss_ms": 0.0,
+                "lens_forward_ms": self._last_lens_forward_ms,
                 "focus_ms": 0.0,
                 "total_ms": total_ms,
             }
@@ -526,6 +530,7 @@ class MCController:
         t_lens0 = time.time()
         lens_loss = self._compute_lens_losses(batch_states)
         t_lens1 = time.time()
+        lens_loss_ms = (t_lens1 - t_lens0) * 1000.0
         result = MCBatchResult(
             positional_cache=positional_cache,
             variant_loss=variant_loss,
@@ -613,7 +618,9 @@ class MCController:
             "build_ms": (t_build1 - t_build0) * 1000.0,
             "positional_ms": (t_pos1 - t_pos0) * 1000.0,
             "variant_ms": (t_var1 - t_var0) * 1000.0,
-            "lens_ms": (t_lens1 - t_lens0) * 1000.0,
+            "lens_ms": lens_loss_ms,
+            "lens_loss_ms": lens_loss_ms,
+            "lens_forward_ms": self._last_lens_forward_ms,
             "focus_ms": 0.0,
             "total_ms": total_ms,
         }
@@ -1393,27 +1400,27 @@ class MCController:
         embed_dim = self.config.embed_dim
         batch = len(variants)
         device = self.device
-        embeddings = torch.zeros(
+        embeddings = torch.empty(
             (batch, max_len, embed_dim),
             dtype=self._target_dtype,
             device=device,
         )
-        positions = torch.zeros(
+        positions = torch.empty(
             (batch, max_len),
             dtype=torch.long,
             device=device,
         )
-        lods = torch.zeros(
+        lods = torch.empty(
             (batch, max_len),
             dtype=torch.long,
             device=device,
         )
-        cos_tensor = torch.zeros(
+        cos_tensor = torch.empty(
             (batch, max_len, cos_heads, cos_dim),
             dtype=self._target_dtype,
             device=device,
         )
-        sin_tensor = torch.zeros(
+        sin_tensor = torch.empty(
             (batch, max_len, cos_heads, cos_dim),
             dtype=self._target_dtype,
             device=device,
@@ -1421,23 +1428,29 @@ class MCController:
         lengths: List[int] = []
         for idx, variant in enumerate(variants):
             wc = variant.working_context
-            tensor = wc.to_tensor().to(device, self._target_dtype)
-            pos = wc.get_positions().to(device)
-            lod = wc.get_lod_tensor().to(device)
+            tensor = wc.to_tensor().to(device, self._target_dtype)[0]
+            pos = wc.get_positions().to(device)[0]
+            lod = wc.get_lod_tensor().to(device)[0]
             cos, sin, _ = wc.get_positional_encodings()
             if cos.dim() == 3:
                 cos = cos.unsqueeze(2)
             if sin.dim() == 3:
                 sin = sin.unsqueeze(2)
-            cos = cos.to(device, self._target_dtype)
-            sin = sin.to(device, self._target_dtype)
-            length = tensor.shape[1]
+            cos = cos.to(device, self._target_dtype)[0]
+            sin = sin.to(device, self._target_dtype)[0]
+            length = tensor.shape[0]
             start = max_len - length
-            embeddings[idx, start:, :] = tensor[0]
-            positions[idx, start:] = pos[0]
-            lods[idx, start:] = lod[0]
-            cos_tensor[idx, start:, :, :] = cos[0]
-            sin_tensor[idx, start:, :, :] = sin[0]
+            if start > 0:
+                embeddings[idx, :start].zero_()
+                positions[idx, :start].zero_()
+                lods[idx, :start].zero_()
+                cos_tensor[idx, :start].zero_()
+                sin_tensor[idx, :start].zero_()
+            embeddings[idx, start:, :] = tensor[-length:]
+            positions[idx, start:] = pos[-length:]
+            lods[idx, start:] = lod[-length:]
+            cos_tensor[idx, start:, :, :] = cos[-length:, :, :]
+            sin_tensor[idx, start:, :, :] = sin[-length:, :, :]
             lengths.append(length)
         return {
             "embeddings": embeddings,
@@ -1465,7 +1478,9 @@ class MCController:
         stacked_data, lengths = self._stack_working_contexts(pending)
         if not stacked_data:
             return cache
+        start = time.time()
         scores = self._run_lensnet_batched(stacked_data)
+        self._last_lens_forward_ms += (time.time() - start) * 1000.0
         for idx, variant in enumerate(pending):
             length = lengths[idx]
             var_scores = scores[idx : idx + 1, -length:].clone()
@@ -2380,12 +2395,12 @@ class MCController:
         return best
 
     def _build_lod_lookup(self, wc: WorkingContext) -> Dict[int, int]:
-        positions = wc.get_positions()[0]
-        lods = wc.get_lod_tensor()[0]
+        positions = wc.get_positions()[0].to("cpu")
+        lods = wc.get_lod_tensor()[0].to("cpu")
         return {int(pos.item()): int(lod.item()) for pos, lod in zip(positions, lods)}
 
     def _lod_histogram(self, wc: WorkingContext) -> Dict[int, int]:
-        lods = wc.get_lod_tensor()[0]
+        lods = wc.get_lod_tensor()[0].to("cpu")
         values, counts = torch.unique(lods, return_counts=True)
         return {int(v.item()): int(c.item()) for v, c in zip(values, counts)}
 
@@ -2476,8 +2491,8 @@ class MCController:
         score_template: torch.Tensor,
         delta_vs_best: float,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        positions = variant.working_context.get_positions()[0]
-        lods = variant.working_context.get_lod_tensor()[0]
+        positions = variant.working_context.get_positions()[0].to("cpu")
+        lods = variant.working_context.get_lod_tensor()[0].to("cpu")
         targets = torch.zeros_like(score_template)
         mask = torch.zeros_like(score_template, dtype=torch.bool)
         span_tokens = torch.ones_like(score_template)
@@ -2649,6 +2664,9 @@ class MCController:
         timings["telemetry_ms"] = telemetry_time * 1000.0
         timings["total_ms"] = total_ms
         timings["early_exit"] = 1.0 if fits_soft_max else 0.0
+        timings.setdefault("lens_loss_ms", 0.0)
+        timings.setdefault("lens_ms", timings["lens_loss_ms"])
+        timings["lens_forward_ms"] = self._last_lens_forward_ms
         self.last_timings = timings
         self._log_lensnet_usage_event(session, "inference", label="prefill")
         self._log_gistnet_usage_event(session, "inference", label="prefill")

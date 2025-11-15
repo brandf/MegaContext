@@ -82,7 +82,7 @@ All scripts perform the following stages in order:
    - `tail -f report/log.txt` (if running inside `screen`/`tmux`).
    - WANDB dashboard for ΔNLL@H, swap rate, residency, MFU, the `mc/token_loss|lod*_loss|lens_loss` curves, and the controller latency gauge `mc/time_controller_ms` (watch for spikes >200 ms).
    - `nvidia-smi` for memory/utilization sanity.
-  - MC telemetry backend (Grafana/Kibana/etc.) for tree/WC/focus visualizations if you’ve configured a `TelemetryProvider`; chart `mc_timing` span fields (`build_ms`, `positional_ms`, `lens_ms`) alongside WANDB metrics to catch regressions early.
+- MC telemetry backend (Grafana/Kibana/etc.) for tree/WC/focus visualizations if you’ve configured a `TelemetryProvider`; chart `mc_timing` span fields (`build_ms`, `positional_ms`, `lens_loss_ms`, `lens_forward_ms`) alongside WANDB metrics to catch regressions early.
 4. **Resume if interrupted**: re-run the same script with the same `WANDB_RUN`. The scripts load checkpoints from `NANOCHAT_BASE_DIR` and continue.
 5. **Evaluate & demo** once the script finishes:
    ```bash
@@ -139,7 +139,7 @@ export MC_OTEL_INSECURE=1  # set only if you’re skipping TLS
 
 If you need to disable telemetry entirely, unset `MC_OTEL_ENDPOINT` (the provider falls back to OTLP defaults) or patch the script to use `NoOpTelemetryProvider`.
 
-Once enabled, expect event types such as `mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `mc_timing`, and `inference_update`. `mc_timing` exposes per-batch timings (`build_ms`, `positional_ms`, `lens_ms`) so you can correlate controller overhead with ΔNLL/AUX curves. Use these to drive Grafana dashboards / alerts (see [[Telemetry]] for schema details).
+Once enabled, expect event types such as `mc_tree_snapshot`, `working_context_snapshot`, `focus_allocator`, `mc_timing`, and `inference_update`. `mc_timing` exposes per-batch timings (`build_ms`, `positional_ms`, `lens_loss_ms`, `lens_forward_ms`) so you can correlate controller overhead with ΔNLL/AUX curves (legacy `lens_ms` remains as an alias). Use these to drive Grafana dashboards / alerts (see [[Telemetry]] for schema details).
 
 ## 6. Fair MC vs. vanilla comparisons
 
