@@ -65,6 +65,8 @@ if [ ! -f ".mc_env" ]; then
     python3 mc_setup
 fi
 
+export MC_COMPILE_GISTNET=0
+
 bash run10.sh --mc \
     --gpu 5090 \
     --mc_train_report 1 \
@@ -72,6 +74,5 @@ bash run10.sh --mc \
     --mc_log_lod_ascii_train 1 \
     --mc_log_lens_debug 1 \
     --mc_disable_val 1 \
-    --mc_compile_gistnet 0 \
     --grad_clip 1.0 \
     --warmup_ratio 0.02
