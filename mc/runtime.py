@@ -479,7 +479,11 @@ class MCController:
         seen_signatures: set[Tuple[Tuple[int, int], ...]] = set()
         if variants:
             seen_signatures.add(self._variant_signature(variants[0].working_context))
-        if self.config.num_random_variants <= 0:
+        min_train_len = int(self.config.train_wc_length or self.config.wc_config.max_length)
+        if (
+            self.config.num_random_variants <= 0
+            or (tree.num_tokens() <= min_train_len and tree.num_tokens() <= target_len)
+        ):
             return variants
         seed = self._build_full_lod0_variant(tree)
         if seed is None:
@@ -487,8 +491,8 @@ class MCController:
         limit = max(1, self.config.max_counterfactuals)
         for idx in range(self.config.num_random_variants):
             wc = self._clone_working_context(seed.working_context)
-            force_variation = tree.num_tokens() <= target_len
-            self._collapse_wc_randomly(wc, tree, target_len, ensure_variation=force_variation)
+            self._collapse_wc_randomly(wc, tree, target_len, ensure_variation=False)
+            self._normalize_wc_length(wc, tree, target_len)
             self._reinforce_recent_tail(wc, tree)
             variant = WorkingContextVariant(
                 working_context=wc,
@@ -1244,32 +1248,52 @@ class MCController:
 
     def _stack_working_contexts(
         self, variants: List[WorkingContextVariant]
-    ) -> Optional[WorkingContext]:
+    ) -> Tuple[Optional[WorkingContext], List[int]]:
         if not variants:
-            return None
-        embeddings = []
-        positions = []
-        lods = []
-        for variant in variants:
+            return None, []
+        max_len = max(variant.working_context.length for variant in variants)
+        embed_dim = self.config.embed_dim
+        batch = len(variants)
+        embeddings = torch.zeros(
+            (batch, max_len, embed_dim),
+            dtype=self._target_dtype,
+            device=self.device,
+        )
+        positions = torch.zeros(
+            (batch, max_len),
+            dtype=torch.long,
+            device=self.device,
+        )
+        lods = torch.zeros(
+            (batch, max_len),
+            dtype=torch.long,
+            device=self.device,
+        )
+        lengths: List[int] = []
+        for idx, variant in enumerate(variants):
             wc = variant.working_context
-            embeddings.append(wc.to_tensor())
-            positions.append(wc.get_positions())
-            lods.append(wc.get_lod_tensor())
-        stacked_embeddings = torch.cat(embeddings, dim=0)
-        stacked_positions = torch.cat(positions, dim=0)
-        stacked_lods = torch.cat(lods, dim=0)
+            tensor = wc.to_tensor().to(self.device, self._target_dtype)
+            pos = wc.get_positions().to(self.device)
+            lod = wc.get_lod_tensor().to(self.device)
+            length = tensor.shape[1]
+            start = max_len - length
+            embeddings[idx, start:, :] = tensor[0, :, :]
+            positions[idx, start:] = pos[0, :]
+            lods[idx, start:] = lod[0, :]
+            lengths.append(length)
         config = WorkingContextConfig(
             embed_dim=self.config.embed_dim,
-            max_length=self.config.wc_config.max_length,
-            device=stacked_embeddings.device.type,
+            max_length=max_len,
+            device=self.device.type,
         )
-        return WorkingContext(
-            stacked_embeddings,
-            stacked_positions,
+        stacked = WorkingContext(
+            embeddings,
+            positions,
             config,
-            lod_tensor=stacked_lods,
+            lod_tensor=lods,
             recent_tokens=self.config.allocator_recent_tokens,
         )
+        return stacked, lengths
 
     def _batch_variant_scores(
         self, variants: List[WorkingContextVariant]
@@ -1277,23 +1301,28 @@ class MCController:
         cache: Dict[int, torch.Tensor] = {}
         if not variants:
             return cache
-        groups: Dict[int, List[WorkingContextVariant]] = {}
+        pending = [variant for variant in variants if variant.policy_scores is None]
+        if not pending:
+            for variant in variants:
+                cache[id(variant)] = variant.policy_scores  # type: ignore[arg-type]
+            return cache
+        reference_len = pending[0].working_context.length
+        uniform = all(variant.working_context.length == reference_len for variant in pending)
+        if not uniform:
+            pass  # padding handles differing lengths
+        stacked_wc, lengths = self._stack_working_contexts(pending)
+        if stacked_wc is None:
+            return cache
+        self._configure_wc_positional(stacked_wc)
+        scores = self.lensnet(stacked_wc)
+        for idx, variant in enumerate(pending):
+            length = lengths[idx]
+            var_scores = scores[idx : idx + 1, -length:]
+            cache[id(variant)] = var_scores
+            variant.policy_scores = var_scores.detach()
         for variant in variants:
             if variant.policy_scores is not None:
-                cache[id(variant)] = variant.policy_scores
-                continue
-            length = variant.working_context.length
-            groups.setdefault(length, []).append(variant)
-        for group in groups.values():
-            stacked_wc = self._stack_working_contexts(group)
-            if stacked_wc is None:
-                continue
-            self._configure_wc_positional(stacked_wc)
-            scores = self.lensnet(stacked_wc)
-            for idx, variant in enumerate(group):
-                var_scores = scores[idx : idx + 1, : variant.working_context.length]
-                cache[id(variant)] = var_scores
-                variant.policy_scores = var_scores.detach()
+                cache.setdefault(id(variant), variant.policy_scores)
         return cache
 
     def _log_preference_debug(self, batch_states: List[SampleContext]) -> None:

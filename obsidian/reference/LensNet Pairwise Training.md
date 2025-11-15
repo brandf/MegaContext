@@ -53,6 +53,7 @@ To mirror RLHF dashboards we now emit:
 - `mc/preference_agreement` & `mc/preference_pair_count` — share and count of preference pairs where LensNet’s signed scores pick the same winner as the measured Δloss.
 - `mc/policy_score_abs_mean`, `mc/policy_score_std_mean` — how much of the tanh range LensNet is actually using.
 - `mc/lod_loss/{0,1,2}` — weighted by each variant’s LOD histogram (token coverage) so every active LOD shows up even when a single WC mixes detail levels.
+- **Single batched LensNet forward** — every WC variant (across both samples in the training batch) is padded tail-aligned to the fixed `train_wc_length` and stacked before we call LensNet, so the policy evaluates *once per step* instead of once per preference pair. Padded prefixes are ignored when we slice the outputs back down to each variant’s true length, which keeps the “pure tail” invariant intact.
 
 These WandB traces serve as the “reward model agreement” + “advantage histogram” analogs from standard RLHF setups, with additional visibility into policy calibration.
 
