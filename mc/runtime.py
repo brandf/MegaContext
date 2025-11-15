@@ -466,56 +466,49 @@ class MCController:
 
     def _build_random_variant_set(self, tree: MegaContextTree, session_id: str) -> List[WorkingContextVariant]:
         variants: List[WorkingContextVariant] = []
-        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
         planned_target_len = min(self._current_target_wc_length(), tree.num_tokens())
         target_len = self._reachable_target_length(tree, planned_target_len)
-        baseline = self._build_trimmed_baseline_variant(tree, level_cache, target_len)
+        baseline = self._build_trimmed_baseline_variant(tree, {}, target_len)
+        baseline_signature = None
         if baseline is not None:
             baseline.source = "lod_0_baseline"
             if tree.num_tokens() > target_len:
                 self._normalize_wc_length(baseline.working_context, tree, target_len)
             variants.append(baseline)
+            baseline_signature = self._variant_signature(baseline.working_context)
         seen_signatures: set[Tuple[Tuple[int, int], ...]] = set()
         if variants:
             seen_signatures.add(self._variant_signature(variants[0].working_context))
         if self.config.num_random_variants <= 0:
             return variants
-        seed = self._build_variant_seed(tree, level_cache, target_len)
+        seed = self._build_full_lod0_variant(tree)
         if seed is None:
             return variants
-        seen_signatures.add(self._variant_signature(seed.working_context))
         limit = max(1, self.config.max_counterfactuals)
-        seed_len = seed.working_context.length
-        need_length_match = tree.num_tokens() > target_len
         for idx in range(self.config.num_random_variants):
-            variant_target = self._sample_variant_target_length(seed_len, target_len)
-            variant = self._build_random_variant(tree, seed, variant_target, idx)
-            if variant is None:
-                continue
-            if need_length_match:
-                self._normalize_wc_length(variant.working_context, tree, target_len)
-            signature = self._variant_signature(variant.working_context)
+            wc = self._clone_working_context(seed.working_context)
+            force_variation = tree.num_tokens() <= target_len
+            self._collapse_wc_randomly(wc, tree, target_len, ensure_variation=force_variation)
+            self._reinforce_recent_tail(wc, tree)
+            variant = WorkingContextVariant(
+                working_context=wc,
+                source=f"random_variant_{idx}",
+                lod_hint=self._infer_variant_lod_hint(wc),
+            )
+            signature = self._variant_signature(wc)
+            if baseline_signature is not None and signature == baseline_signature:
+                changed = self._force_head_collapse(wc, tree)
+                if changed:
+                    self._reinforce_recent_tail(wc, tree)
+                    signature = self._variant_signature(wc)
+                else:
+                    continue
             if signature in seen_signatures:
                 continue
             seen_signatures.add(signature)
             variants.append(variant)
             if len(variants) >= limit:
                 break
-        if len(variants) < limit and self.config.num_random_variants > 0:
-            aggressive_target = max(self.config.block_size, target_len // 2)
-            extra_variant = self._build_random_variant(
-                tree,
-                seed,
-                aggressive_target,
-                self.config.num_random_variants,
-            )
-            if extra_variant is not None:
-                if need_length_match:
-                    self._normalize_wc_length(extra_variant.working_context, tree, target_len)
-                signature = self._variant_signature(extra_variant.working_context)
-                if signature not in seen_signatures:
-                    seen_signatures.add(signature)
-                    variants.append(extra_variant)
         return variants[:limit]
 
     def _build_random_variant(
@@ -668,98 +661,139 @@ class MCController:
         )
         return variant
 
-    def _build_variant_seed(
+    def _build_full_lod0_variant(
         self,
         tree: MegaContextTree,
-        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-        target_len: int,
     ) -> Optional[WorkingContextVariant]:
         total_tokens = tree.num_tokens()
         if total_tokens <= 0:
             return None
-        target_len = self._reachable_target_length(tree, target_len)
-        tail_tokens = min(total_tokens, int(self.config.allocator_recent_tokens))
-        tail_tokens = min(tail_tokens, target_len)
-        if tail_tokens <= 0 and target_len > 0:
-            tail_tokens = min(target_len, self.config.block_size)
-        tail_tokens = min(tail_tokens, total_tokens)
-
-        head_tokens = max(0, total_tokens - tail_tokens)
-        head_budget = max(0, target_len - tail_tokens)
-
-        segments_embeddings: List[torch.Tensor] = []
-        segments_positions: List[torch.Tensor] = []
-        segments_lods: List[torch.Tensor] = []
-
-        def append_segment(tensor: torch.Tensor, positions: torch.Tensor, lod: int) -> None:
-            segments_embeddings.append(tensor)
-            segments_positions.append(positions.long())
-            lod_tensor = torch.full(
-                (tensor.shape[0], tensor.shape[1]),
-                lod,
-                dtype=torch.long,
-                device=tensor.device,
-            )
-            segments_lods.append(lod_tensor)
-
-        def append_lod_range(start: int, end: int, lod: int) -> None:
-            if end <= start:
-                return
-            if lod == 0:
-                slice_embeddings = tree.get_lod0_slice(start, end)
-                slice_positions = tree.get_positions_for_lod(0)[:, start:end]
-            else:
-                metadata = self._get_level_metadata_cached(tree, lod, level_cache)
-                if metadata is None or metadata[0].shape[1] == 0:
-                    return
-                slice_embeddings, slice_positions = metadata
-                stride = max(1, tree.tokens_per_entry(lod))
-                max_entries = math.ceil((end - start) / stride)
-                slice_embeddings = slice_embeddings[:, :max_entries, :]
-                slice_positions = slice_positions[:, :max_entries]
-            append_segment(slice_embeddings, slice_positions, lod)
-
-        if head_tokens > 0 and head_budget > 0:
-            lod = self.config.max_lod
-            while head_budget > 0 and lod > 0:
-                before = len(segments_embeddings)
-                append_lod_range(0, min(head_tokens, head_budget * tree.tokens_per_entry(lod)), lod)
-                if len(segments_embeddings) == before:
-                    lod -= 1
-                    continue
-                head_budget -= tree.tokens_per_entry(lod) * segments_embeddings[-1].shape[1]
-                lod -= 1
-            if head_budget > 0:
-                append_lod_range(0, head_tokens, 0)
-
-        if tail_tokens > 0:
-            tail_start = max(0, total_tokens - tail_tokens)
-            append_lod_range(tail_start, total_tokens, 0)
-
-        if not segments_embeddings:
-            append_lod_range(0, total_tokens, 0)
-
-        embeddings = torch.cat(segments_embeddings, dim=1)
-        positions = torch.cat(segments_positions, dim=1)
-        lods = torch.cat(segments_lods, dim=1)
+        level_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+        metadata = self._get_level_metadata_cached(tree, 0, level_cache)
+        if metadata is None:
+            return None
+        embeddings, positions = metadata
+        lods = torch.zeros_like(positions)
         wc_config = WorkingContextConfig(
             embed_dim=self.config.embed_dim,
-            max_length=max(target_len, self.config.wc_config.max_length),
+            max_length=max(total_tokens, self.config.wc_config.max_length),
             device=self.config.device,
         )
         variant = self._create_variant(
             tree,
             embeddings,
             positions,
-            lod=int(lods.max().item()),
-            source="variant_seed",
+            lod=0,
+            source="full_lod0_seed",
             wc_config=wc_config,
-            tail_tokens_override=tail_tokens,
         )
-        if total_tokens > target_len:
-            self._normalize_wc_length(variant.working_context, tree, target_len)
-            self._reinforce_recent_tail(variant.working_context, tree)
         return variant
+
+    def _collapse_wc_randomly(
+        self,
+        wc: WorkingContext,
+        tree: MegaContextTree,
+        target_len: int,
+        *,
+        ensure_variation: bool = False,
+    ) -> None:
+        effective_target = target_len
+        if ensure_variation and target_len > 1:
+            effective_target = max(1, target_len - self.config.block_size)
+        if wc.length > effective_target:
+            allocator = self._build_allocator(tree, wc, soft_max_length=effective_target)
+            recent_limit = 0 if ensure_variation else max(0, int(self.config.allocator_recent_tokens))
+            attempts = wc.length * 10
+            device = wc.to_tensor().device
+            while wc.length > effective_target and attempts > 0:
+                attempts -= 1
+                candidate_idx = None
+                prefer_high_lod = self.config.max_lod >= 2 and self._rng.random() < 0.1
+                if prefer_high_lod:
+                    candidate_idx = self._pick_collapse_index(wc, tree, target_lod=1, recent_tokens=recent_limit)
+                if candidate_idx is None:
+                    candidate_idx = self._pick_collapse_index(wc, tree, target_lod=0, recent_tokens=recent_limit)
+                if candidate_idx is None and prefer_high_lod:
+                    candidate_idx = self._pick_collapse_index(wc, tree, target_lod=1, recent_tokens=recent_limit)
+                if candidate_idx is None:
+                    break
+                scores = torch.zeros(1, wc.length, device=device)
+                scores[0, candidate_idx] = -1.0
+                edits = allocator.update_focus(
+                    max_replacements_per_iteration=1,
+                    num_iterations=1,
+                    scores=scores,
+                )
+                if edits == 0:
+                    continue
+            if wc.length > effective_target and not ensure_variation:
+                raise RuntimeError(
+                    f"[MegaContext] Unable to randomize WC length to {effective_target} (final={wc.length})"
+                )
+        if not ensure_variation and wc.length < target_len:
+            self._normalize_wc_length(wc, tree, target_len)
+
+    def _pick_collapse_index(
+        self,
+        wc: WorkingContext,
+        tree: MegaContextTree,
+        *,
+        target_lod: int,
+        recent_tokens: int,
+    ) -> Optional[int]:
+        if target_lod < 0 or target_lod >= self.config.max_lod:
+            return None
+        positions = wc.get_positions()[0]
+        lods = wc.get_lod_tensor()[0]
+        length = wc.length
+        block = max(1, self.config.block_size)
+        required = block
+        total_tokens = tree.num_tokens()
+        span = tree.tokens_per_entry(target_lod)
+        protected_tokens = min(recent_tokens, max(0, total_tokens - self.config.block_size))
+        coverage_limit = max(0, total_tokens - protected_tokens)
+        candidates: List[int] = []
+        for idx in range(0, length - required + 1):
+            if lods[idx] != target_lod:
+                continue
+            if torch.any(lods[idx : idx + required] != target_lod):
+                continue
+            start_pos = int(positions[idx].item())
+            chunk_span = span * block
+            if start_pos + chunk_span > coverage_limit:
+                continue
+            # ensure contiguous positions
+            contiguous = True
+            for offset in range(1, required):
+                expected = start_pos + offset * span
+                if int(positions[idx + offset].item()) != expected:
+                    contiguous = False
+                    break
+            if not contiguous:
+                continue
+            candidates.append(idx)
+        if not candidates:
+            return None
+        return self._rng.choice(candidates)
+
+    def _force_head_collapse(self, wc: WorkingContext, tree: MegaContextTree) -> bool:
+        if wc.length <= 1:
+            return False
+        try:
+            allocator = self._build_allocator(tree, wc, soft_max_length=max(1, wc.length - 1))
+        except RuntimeError:
+            return False
+        candidate_idx = self._pick_collapse_index(wc, tree, target_lod=0, recent_tokens=0)
+        if candidate_idx is None:
+            return False
+        scores = torch.zeros(1, wc.length, device=wc.to_tensor().device)
+        scores[0, candidate_idx] = -1.0
+        edits = allocator.update_focus(
+            max_replacements_per_iteration=1,
+            num_iterations=1,
+            scores=scores,
+        )
+        return edits > 0
 
     def _build_inference_recency_variant(
         self,
@@ -2154,7 +2188,7 @@ class MCController:
         seen_pairs: set[Tuple[int, int]] = set()
         for loss_val, variant in scored[1:]:
             delta = float(loss_val - best_loss)
-            if delta <= 1e-6:
+            if delta < 0.0:
                 continue
             primary_pairs.append((best_variant, variant, delta))
             seen_pairs.add((id(best_variant), id(variant)))
@@ -2164,7 +2198,7 @@ class MCController:
             for j in range(i + 1, len(scored)):
                 loss_j, var_j = scored[j]
                 delta = abs(loss_i - loss_j)
-                if delta <= 1e-6:
+                if delta < 0.0:
                     continue
                 if loss_i <= loss_j:
                     better, worse = var_i, var_j
