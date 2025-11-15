@@ -747,34 +747,37 @@ class MCController:
         lods = wc.get_lod_tensor()[0]
         length = wc.length
         block = max(1, self.config.block_size)
-        required = block
+        if length < block:
+            return None
         total_tokens = tree.num_tokens()
         span = tree.tokens_per_entry(target_lod)
-        protected_tokens = min(recent_tokens, max(0, total_tokens - self.config.block_size))
+        protected_tokens = min(recent_tokens, max(0, total_tokens - block))
         coverage_limit = max(0, total_tokens - protected_tokens)
-        candidates: List[int] = []
-        for idx in range(0, length - required + 1):
-            if lods[idx] != target_lod:
-                continue
-            if torch.any(lods[idx : idx + required] != target_lod):
-                continue
-            start_pos = int(positions[idx].item())
-            chunk_span = span * block
-            if start_pos + chunk_span > coverage_limit:
-                continue
-            # ensure contiguous positions
-            contiguous = True
-            for offset in range(1, required):
-                expected = start_pos + offset * span
-                if int(positions[idx + offset].item()) != expected:
-                    contiguous = False
-                    break
-            if not contiguous:
-                continue
-            candidates.append(idx)
-        if not candidates:
+        valid_len = length - block + 1
+        lod_window = torch.nn.functional.avg_pool1d(
+            lods.eq(target_lod).float().unsqueeze(0).unsqueeze(0),
+            kernel_size=block,
+            stride=1,
+        ).squeeze(0).squeeze(0)
+        lod_mask = lod_window == 1.0
+        if block == 1:
+            contig_mask = torch.ones(valid_len, dtype=torch.bool, device=lod_mask.device)
+        else:
+            diffs = positions[1:] - positions[:-1]
+            contig_window = torch.nn.functional.avg_pool1d(
+                (diffs == span).float().unsqueeze(0).unsqueeze(0),
+                kernel_size=block - 1,
+                stride=1,
+            ).squeeze(0).squeeze(0)
+            contig_mask = contig_window == 1.0
+        start_positions = positions[:valid_len]
+        coverage_mask = (start_positions + span * block) <= coverage_limit
+        combined = lod_mask[:valid_len] & contig_mask & coverage_mask
+        candidate_idx = torch.nonzero(combined, as_tuple=False).flatten()
+        if candidate_idx.numel() == 0:
             return None
-        return self._rng.choice(candidates)
+        choice = int(candidate_idx[self._rng.randrange(0, candidate_idx.numel())].item())
+        return choice
 
     def _force_head_collapse(self, wc: WorkingContext, tree: MegaContextTree) -> bool:
         if wc.length <= 1:
