@@ -1279,6 +1279,9 @@ class MCController:
             return cache
         groups: Dict[int, List[WorkingContextVariant]] = {}
         for variant in variants:
+            if variant.policy_scores is not None:
+                cache[id(variant)] = variant.policy_scores
+                continue
             length = variant.working_context.length
             groups.setdefault(length, []).append(variant)
         for group in groups.values():
@@ -1826,10 +1829,13 @@ class MCController:
         score_std_vals: List[float] = []
         self._last_preference_agreement = None
         self._last_policy_stats = {}
+        all_variants: List[WorkingContextVariant] = []
+        for sample in batch_states:
+            all_variants.extend(sample.variants)
+        global_score_cache = self._batch_variant_scores(all_variants)
         for sample in batch_states:
             preference_pairs = self._build_preference_pairs(sample.variants)
-            score_cache: Dict[int, torch.Tensor] = {}
-            score_cache.update(self._batch_variant_scores(sample.variants))
+            score_cache: Dict[int, torch.Tensor] = global_score_cache
             if not preference_pairs:
                 for variant in sample.variants:
                     scores = variant.policy_scores
@@ -1842,10 +1848,6 @@ class MCController:
                     score_std_vals.append(float(stats_tensor.std(unbiased=False).item()))
                 continue
             map_cache: Dict[int, Dict[int, int]] = {}
-            for variant in sample.variants:
-                scores = self.lensnet(variant.working_context)
-                score_cache[id(variant)] = scores
-                variant.policy_scores = scores.detach()
 
             for better, worse, strength in preference_pairs:
                 scores_live = score_cache[id(worse)]
@@ -1938,7 +1940,7 @@ class MCController:
                 score_abs_means.append(float(stats_tensor.abs().mean().item()))
                 score_std_vals.append(float(stats_tensor.std(unbiased=False).item()))
         if not losses:
-            return None
+            return torch.zeros((), device=self.device, dtype=self._target_dtype)
         if score_abs_means:
             score_abs_avg = sum(score_abs_means) / len(score_abs_means)
             score_std_avg = sum(score_std_vals) / len(score_std_vals) if score_std_vals else 0.0
