@@ -63,6 +63,8 @@ MC_LENS_ADV_NORM_BETA=0.9
 MC_LENS_BUDGET_SMOOTH_WEIGHT=0.0
 MC_LENS_BUDGET_SMOOTH_BETA=0.9
 MC_LENS_HARD_NEGATIVE_RATIO=1.0
+MC_COMPILE_GISTNET=1
+MC_COMPILE_LENSNET=1
 GRAD_CLIP=1.0
 WARMUP_RATIO=0.02
 MC_MAX_COUNTERFACTUALS=8
@@ -271,6 +273,16 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_lens_hard_negative_ratio" >&2; exit 1; }
             MC_LENS_HARD_NEGATIVE_RATIO="$1"
             ;;
+        --mc_compile_gistnet)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_compile_gistnet" >&2; exit 1; }
+            MC_COMPILE_GISTNET="$1"
+            ;;
+        --mc_compile_lensnet)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_compile_lensnet" >&2; exit 1; }
+            MC_COMPILE_LENSNET="$1"
+            ;;
         --grad_clip)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --grad_clip" >&2; exit 1; }
@@ -428,6 +440,8 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_lens_budget_smooth_weight="$MC_LENS_BUDGET_SMOOTH_WEIGHT" \
     --mc_lens_budget_smooth_beta="$MC_LENS_BUDGET_SMOOTH_BETA" \
     --mc_lens_hard_negative_ratio="$MC_LENS_HARD_NEGATIVE_RATIO" \
+    --mc_compile_gistnet="$MC_COMPILE_GISTNET" \
+    --mc_compile_lensnet="$MC_COMPILE_LENSNET" \
     --grad_clip="$GRAD_CLIP" \
     --warmup_ratio="$WARMUP_RATIO"
 
