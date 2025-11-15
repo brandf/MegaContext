@@ -74,6 +74,10 @@ class TransformerLensNet(nn.Module):
             x = x.to(target_dtype)
 
         cos, sin, _ = working_context.get_positional_encodings()
+        if cos.device != x.device:
+            cos = cos.to(x.device)
+        if sin.device != x.device:
+            sin = sin.to(x.device)
         cos = cos.to(target_dtype).expand(-1, -1, self.num_heads, -1)
         sin = sin.to(target_dtype).expand(-1, -1, self.num_heads, -1)
         cos_sin = (cos, sin)
