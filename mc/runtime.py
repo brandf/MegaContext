@@ -1235,17 +1235,63 @@ class MCController:
         variants: List[WorkingContextVariant],
         score_cache: Optional[Dict[int, torch.Tensor]] = None,
     ) -> None:
-        with torch.no_grad():
-            for variant in variants:
-                if variant.policy_scores is not None:
-                    continue
-                if score_cache is not None:
-                    cached = score_cache.get(id(variant))
-                    if cached is not None:
-                        variant.policy_scores = cached.detach()
-                        continue
-                preview = self.lensnet(variant.working_context)
-                variant.policy_scores = preview.detach()
+        missing = [variant for variant in variants if variant.policy_scores is None]
+        if not missing:
+            return
+        cache = self._batch_variant_scores(missing)
+        if score_cache is not None:
+            score_cache.update(cache)
+
+    def _stack_working_contexts(
+        self, variants: List[WorkingContextVariant]
+    ) -> Optional[WorkingContext]:
+        if not variants:
+            return None
+        embeddings = []
+        positions = []
+        lods = []
+        for variant in variants:
+            wc = variant.working_context
+            embeddings.append(wc.to_tensor())
+            positions.append(wc.get_positions())
+            lods.append(wc.get_lod_tensor())
+        stacked_embeddings = torch.cat(embeddings, dim=0)
+        stacked_positions = torch.cat(positions, dim=0)
+        stacked_lods = torch.cat(lods, dim=0)
+        config = WorkingContextConfig(
+            embed_dim=self.config.embed_dim,
+            max_length=self.config.wc_config.max_length,
+            device=stacked_embeddings.device.type,
+        )
+        return WorkingContext(
+            stacked_embeddings,
+            stacked_positions,
+            config,
+            lod_tensor=stacked_lods,
+            recent_tokens=self.config.allocator_recent_tokens,
+        )
+
+    def _batch_variant_scores(
+        self, variants: List[WorkingContextVariant]
+    ) -> Dict[int, torch.Tensor]:
+        cache: Dict[int, torch.Tensor] = {}
+        if not variants:
+            return cache
+        groups: Dict[int, List[WorkingContextVariant]] = {}
+        for variant in variants:
+            length = variant.working_context.length
+            groups.setdefault(length, []).append(variant)
+        for group in groups.values():
+            stacked_wc = self._stack_working_contexts(group)
+            if stacked_wc is None:
+                continue
+            self._configure_wc_positional(stacked_wc)
+            scores = self.lensnet(stacked_wc)
+            for idx, variant in enumerate(group):
+                var_scores = scores[idx : idx + 1, : variant.working_context.length]
+                cache[id(variant)] = var_scores
+                variant.policy_scores = var_scores.detach()
+        return cache
 
     def _log_preference_debug(self, batch_states: List[SampleContext]) -> None:
         if not (self.config.log_lens_debug and self._is_rank0):
@@ -1782,8 +1828,9 @@ class MCController:
         self._last_policy_stats = {}
         for sample in batch_states:
             preference_pairs = self._build_preference_pairs(sample.variants)
+            score_cache: Dict[int, torch.Tensor] = {}
+            score_cache.update(self._batch_variant_scores(sample.variants))
             if not preference_pairs:
-                self._ensure_policy_scores_logged(sample.variants)
                 for variant in sample.variants:
                     scores = variant.policy_scores
                     if scores is None:
@@ -1795,19 +1842,13 @@ class MCController:
                     score_std_vals.append(float(stats_tensor.std(unbiased=False).item()))
                 continue
             map_cache: Dict[int, Dict[int, int]] = {}
-            score_cache: Dict[int, torch.Tensor] = {}
-
-            def _get_scores(variant: WorkingContextVariant) -> torch.Tensor:
-                key = id(variant)
-                cached = score_cache.get(key)
-                if cached is None:
-                    cached = self.lensnet(variant.working_context)
-                    score_cache[key] = cached
-                    variant.policy_scores = cached.detach()
-                return cached
+            for variant in sample.variants:
+                scores = self.lensnet(variant.working_context)
+                score_cache[id(variant)] = scores
+                variant.policy_scores = scores.detach()
 
             for better, worse, strength in preference_pairs:
-                scores_live = _get_scores(worse)
+                scores_live = score_cache[id(worse)]
                 if scores_live.dim() > 1:
                     scores_1d = scores_live.squeeze(0)
                 else:
