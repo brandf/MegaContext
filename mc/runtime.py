@@ -1367,9 +1367,9 @@ class MCController:
         )
         for idx, variant in enumerate(pending):
             length = lengths[idx]
-            var_scores = scores[idx : idx + 1, -length:]
+            var_scores = scores[idx : idx + 1, -length:].contiguous()
             cache[id(variant)] = var_scores
-            variant.policy_scores = var_scores.detach()
+            variant.policy_scores = var_scores.detach().clone()
         for variant in variants:
             if variant.policy_scores is not None:
                 cache.setdefault(id(variant), variant.policy_scores)
