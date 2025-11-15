@@ -1311,7 +1311,7 @@ class MCController:
             lods=stacked_data["lods"],
             cos=stacked_data["cos"],
             sin=stacked_data["sin"],
-        )
+        ).clone()
         for idx, variant in enumerate(pending):
             length = lengths[idx]
             var_scores = scores[idx : idx + 1, -length:].clone()

@@ -125,7 +125,7 @@ class FocusAllocatorBase:
                 mark_step = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
                 if callable(mark_step):
                     mark_step()
-                policy_scores = self.lensnet(self.working_context)
+                policy_scores = self.lensnet(self.working_context).clone()
             policy_scores = policy_scores.detach()
             if policy_scores.dim() == 2:
                 # Average across batch; allocator operates on shared WC indices.
