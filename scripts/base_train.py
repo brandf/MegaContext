@@ -899,10 +899,22 @@ for step in range(num_iterations + 1):
                 if mc_result.lens_loss is not None:
                     mc_extra_loss = mc_extra_loss + mc_result.lens_loss * mc_controller.config.lens_loss_weight
             loss = base_loss + mc_extra_loss
+        base_forward_ms = (time.time() - t_fw0) * 1000.0
         train_loss = loss.detach() # for logging
         loss = loss / grad_accum_steps # each .backward() is a grad sum => normalize loss here
         loss.backward()
-        forward_time_samples.append((time.time() - t_fw0) * 1000.0)
+        forward_time_samples.append(base_forward_ms)
+        if mc_controller is not None and hasattr(mc_controller, "last_timings"):
+            mc_controller.last_timings["base_forward_ms"] = base_forward_ms
+        if mc_log_timers and mc_controller is not None:
+            lens_ms = getattr(mc_controller, "last_timings", {}).get("lens_ms")
+            if lens_ms is not None:
+                print0(
+                    "[Model Timers] base_forward={:.2f}ms lens_forward={:.2f}ms".format(
+                        base_forward_ms,
+                        lens_ms,
+                    )
+                )
         t_loader0 = time.time()
         x, y = next(train_loader) # prefetch the next batch while the GPU is busy with forward/backward
         loader_time_samples.append((time.time() - t_loader0) * 1000.0)
