@@ -18,13 +18,13 @@ MegaContext integrates compression and focus as part of the runtime, whereas RAG
 
 ### High-level comparison
 
-| Aspect | RAG | MegaContext |
-|---------|-----|-------------|
-| **Storage** | External documents, often text chunks in a vector DB | Hierarchical learned gists (vectors) directly aligned to the model's lifetime |
-| **Retrieval trigger** | Query-time semantic search | Continuous, learned focus from [[LensNet]] |
-| **Integration** | Concatenate retrieved text to prompt | Replace/expand in [[Working Context]] with proper positional encoding |
-| **Training** | Separate retriever / generator | Single substitutability & focus training |
-| **Memory type** | Stateless look-up | Persistent evolving memory with reversible summarization |
+| Aspect                | RAG                                                  | MegaContext                                                                   |
+| --------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Storage**           | External documents, often text chunks in a vector DB | Hierarchical learned gists (vectors) directly aligned to the model's lifetime |
+| **Retrieval trigger** | Query-time semantic search                           | Continuous, learned focus from [[LensNet]]                                    |
+| **Integration**       | Concatenate retrieved text to prompt                 | Replace/expand in [[Working Context]] with proper positional encoding         |
+| **Training**          | Separate retriever / generator                       | Single substitutability & focus training                                      |
+| **Memory type**       | Stateless look-up                                    | Persistent evolving memory with reversible summarization                      |
 
 MegaContext treats compression and focus as an integrated learned process rather than retrieval over external text.
 
@@ -72,10 +72,10 @@ MegaContext treats compression and focus as an integrated learned process rather
 
 ## References
 
-1. **RAG** (Lewis et al., 2020) — [[reference/papers/RAG - 2005.11401v4.md|Analysis]] — Retrieval-augmented generation baseline
-2. **RETRO** (Borgeaud et al., 2022) — [[reference/papers/RETRO.md|Analysis]] — Retrieval-enhanced autoregressive transformers
-3. **Memorizing Transformers** (Wu et al., 2022) — [[reference/papers/Memorizing Transformers.md|Analysis]] — kNN-augmented approximate retrieval
-4. **Gist Tokens** (Mu et al., 2023) — [[reference/papers/Gist Tokens - 2304.08467v3.md|Analysis]] — Learned prompt compression via attention masking
-5. **Compressive Transformer** (Rae et al., 2019) — [[reference/papers/Compressive Transformer.md|Analysis]] — Long-term compressed memory for transformers
+1. **RAG** (Lewis et al., 2020) — [[papers/RAG - 2005.11401v4|Analysis]] — Retrieval-augmented generation baseline
+2. **RETRO** (Borgeaud et al., 2022) — [[papers/RETRO|Analysis]] — Retrieval-enhanced autoregressive transformers
+3. **Memorizing Transformers** (Wu et al., 2022) — [[papers/Memorizing Transformers|Analysis]] — kNN-augmented approximate retrieval
+4. **Gist Tokens** (Mu et al., 2023) — [[papers/Gist Tokens - 2304.08467v3|Analysis]] — Learned prompt compression via attention masking
+5. **Compressive Transformer** (Rae et al., 2019) — [[papers/Compressive Transformer|Analysis]] — Long-term compressed memory for transformers
 
 See [[Related Work]] for the complete bibliography of all research papers referenced throughout the documentation.
