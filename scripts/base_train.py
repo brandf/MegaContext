@@ -131,6 +131,8 @@ mc_train_wc_length = None
 mc_num_random_variants = 4
 mc_random_variant_iterations = 4
 mc_max_lens_pairs = 8
+mc_compile_gistnet = 1
+mc_compile_lensnet = 1
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -176,6 +178,8 @@ mc_train_wc_length = _parse_optional_int(mc_train_wc_length)
 mc_num_random_variants = int(mc_num_random_variants)
 mc_random_variant_iterations = int(mc_random_variant_iterations)
 mc_max_lens_pairs = int(mc_max_lens_pairs)
+mc_compile_gistnet = _parse_bool_flag(mc_compile_gistnet)
+mc_compile_lensnet = _parse_bool_flag(mc_compile_lensnet)
 disable_validation = bool(mc_disable_val)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------

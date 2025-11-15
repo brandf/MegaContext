@@ -87,6 +87,8 @@ class MCConfig:
     num_random_variants: int = 4
     random_variant_iterations: int = 4
     max_lens_pairs: int = 8
+    compile_gistnet: bool = True
+    compile_lensnet: bool = True
 
     def __post_init__(self) -> None:
         self.mc_tree_type = self.mc_tree_type.lower()

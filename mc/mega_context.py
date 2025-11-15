@@ -184,10 +184,6 @@ class MegaContextTree:
     def _apply_gistnet(self, blocks: torch.Tensor) -> torch.Tensor:
         if self.gistnet is None:
             raise ValueError("GistNet not attached")
-        if getattr(self.gistnet, "_mega_ctx_compiled", False):
-            mark_step = getattr(torch.compiler, "cudagraph_mark_step_begin", None)
-            if callable(mark_step):
-                mark_step()
         return self.gistnet(blocks)
 
     def _gather_child_block(self, lod: int, node_index: int) -> torch.Tensor:

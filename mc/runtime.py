@@ -177,11 +177,10 @@ class MCController:
             num_heads=config.num_heads,
         ).to(self.device)
         self._gistnet_compiled = False
-        if hasattr(torch, "compile") and config.device.startswith("cuda"):
+        if config.compile_gistnet and hasattr(torch, "compile") and config.device.startswith("cuda"):
             try:
                 self.gistnet = torch.compile(self.gistnet, mode="reduce-overhead")
                 self._gistnet_compiled = True
-                setattr(self.gistnet, "_mega_ctx_compiled", True)
                 if self._is_rank0:
                     print("[MegaContext] GistNet compiled with torch.compile(mode='reduce-overhead')", flush=True)
             except Exception as exc:
@@ -200,7 +199,7 @@ class MCController:
         self.gistnet.to(dtype=self._aux_dtype)
         self.lensnet.to(dtype=self._aux_dtype)
         self._lensnet_compiled = False
-        if hasattr(torch, "compile") and config.device.startswith("cuda"):
+        if config.compile_lensnet and hasattr(torch, "compile") and config.device.startswith("cuda"):
             try:
                 self.lensnet = torch.compile(self.lensnet, mode="reduce-overhead")
                 self._lensnet_compiled = True
