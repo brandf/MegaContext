@@ -1304,6 +1304,9 @@ class MCController:
         mark_step = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
         if callable(mark_step):
             mark_step()
+        mark_step = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
+        if callable(mark_step):
+            mark_step()
         scores = self.lensnet(
             None,
             embeddings=stacked_data["embeddings"],
