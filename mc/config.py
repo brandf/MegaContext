@@ -82,6 +82,7 @@ class MCConfig:
     lens_budget_smooth_weight: float = 0.0
     lens_budget_smooth_beta: float = 0.9
     lens_hard_negative_ratio: float = 1.0
+    training_lod2_probability: float = 0.1
     total_train_steps: int = 1
     train_wc_length: Optional[int] = None
     num_random_variants: int = 4
@@ -130,4 +131,9 @@ class MCConfig:
         self.lens_hard_negative_ratio = float(self.lens_hard_negative_ratio)
         if self.lens_hard_negative_ratio <= 0 or self.lens_hard_negative_ratio > 1.0:
             raise ValueError("lens_hard_negative_ratio must be in (0, 1]")
+        self.training_lod2_probability = float(self.training_lod2_probability)
+        if self.training_lod2_probability < 0.0:
+            self.training_lod2_probability = 0.0
+        if self.training_lod2_probability > 1.0:
+            self.training_lod2_probability = 1.0
         self.total_train_steps = max(1, int(self.total_train_steps))

@@ -4,7 +4,7 @@ import math
 import os
 import random
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
@@ -26,6 +26,7 @@ from .mega_context import MegaContextTree, build_mega_context
 from .working_context import WorkingContext
 from .gaussian_rope import build_positional, GaussianRoPE
 from .telemetry import TelemetryEvent, TelemetryProvider, NoOpTelemetryProvider
+from .training_allocator import TrainingWCVariationAllocator
 
 
 @dataclass
@@ -248,6 +249,8 @@ class MCController:
         self.current_batch_states: List[SampleContext] = []
         self.inference_state: Optional[InferenceState] = None
         self.last_timings: Dict[str, float] = {}
+        self._current_context: str = "train"
+        self._training_lod2_prob: float = float(self.config.training_lod2_probability)
         self.debug_metrics = config.collect_debug_metrics
         self._timing_device = torch.device(config.device)
         self.total_train_steps = max(1, int(config.total_train_steps))
@@ -274,18 +277,24 @@ class MCController:
             return torch.bfloat16
         return torch.float32
 
-    def process_batch(
+    @contextmanager
+    def _scoped_context(self, context: str):
+        prev = self._current_context
+        self._current_context = context
+        try:
+            yield
+        finally:
+            self._current_context = prev
+
+    def _in_training_mode(self) -> bool:
+        return self._current_context == "train"
+
+    def _process_batch_impl(
         self,
         tokens: torch.Tensor,
         step: int,
         context: str = "train",
     ) -> Optional["MCBatchResult"]:
-        """
-        Args:
-            tokens: [B, T] token ids from nanochat loader.
-        Returns:
-            Batch result containing positional cache and auxiliary losses.
-        """
         self._update_train_progress(step, context)
         self.last_batch_profile = None
         self.last_timings = {}
@@ -480,6 +489,25 @@ class MCController:
     # ------------------------------------------------------------------ #
     # Training helpers
     # ------------------------------------------------------------------ #
+    def process_batch(
+        self,
+        tokens: torch.Tensor,
+        step: int,
+        context: str = "train",
+    ) -> Optional["MCBatchResult"]:
+        """
+        Args:
+            tokens: [B, T] token ids from nanochat loader.
+        Returns:
+            Batch result containing positional cache and auxiliary losses.
+        """
+        prev_context = self._current_context
+        self._current_context = context
+        try:
+            return self._process_batch_impl(tokens, step, context)
+        finally:
+            self._current_context = prev_context
+
     def _build_sample_context(self, tree: MegaContextTree, session_id: str) -> SampleContext:
         random_variants = self._build_random_variant_set(tree, session_id=session_id)
         return SampleContext(session_id=session_id, tree=tree, variants=random_variants)
@@ -509,9 +537,31 @@ class MCController:
         if seed is None:
             return variants
         limit = max(1, self.config.max_counterfactuals)
+        training_variator = self._build_training_variation_allocator(tree)
+        retries = max(5, int(self.config.random_variant_iterations) * 4)
         for idx in range(self.config.num_random_variants):
-            wc = self._clone_working_context(seed.working_context)
-            self._collapse_wc_randomly(wc, tree, target_len, ensure_variation=False)
+            wc: Optional[WorkingContext] = None
+            for _ in range(retries):
+                candidate = self._clone_working_context(seed.working_context)
+                try:
+                    training_variator.collapse_to_target(
+                        candidate,
+                        target_len,
+                        recent_tokens=self.config.allocator_recent_tokens,
+                    )
+                except RuntimeError:
+                    continue
+                wc = candidate
+                break
+            if wc is None:
+                fallback = self._clone_working_context(seed.working_context)
+                training_variator.collapse_to_target(
+                    fallback,
+                    target_len,
+                    recent_tokens=self.config.allocator_recent_tokens,
+                    prefer_head=True,
+                )
+                wc = fallback
             self._normalize_wc_length(wc, tree, target_len)
             self._reinforce_recent_tail(wc, tree)
             variant = WorkingContextVariant(
@@ -521,12 +571,7 @@ class MCController:
             )
             signature = self._variant_signature(wc)
             if baseline_signature is not None and signature == baseline_signature:
-                changed = self._force_head_collapse(wc, tree)
-                if changed:
-                    self._reinforce_recent_tail(wc, tree)
-                    signature = self._variant_signature(wc)
-                else:
-                    continue
+                continue
             if signature in seen_signatures:
                 continue
             seen_signatures.add(signature)
@@ -712,115 +757,6 @@ class MCController:
             wc_config=wc_config,
         )
         return variant
-
-    def _collapse_wc_randomly(
-        self,
-        wc: WorkingContext,
-        tree: MegaContextTree,
-        target_len: int,
-        *,
-        ensure_variation: bool = False,
-    ) -> None:
-        effective_target = target_len
-        if ensure_variation and target_len > 1:
-            effective_target = max(1, target_len - self.config.block_size)
-        if wc.length > effective_target:
-            allocator = self._build_allocator(tree, wc, soft_max_length=effective_target)
-            recent_limit = 0 if ensure_variation else max(0, int(self.config.allocator_recent_tokens))
-            attempts = wc.length * 10
-            device = wc.to_tensor().device
-            while wc.length > effective_target and attempts > 0:
-                attempts -= 1
-                candidate_idx = None
-                prefer_high_lod = self.config.max_lod >= 2 and self._rng.random() < 0.1
-                if prefer_high_lod:
-                    candidate_idx = self._pick_collapse_index(wc, tree, target_lod=1, recent_tokens=recent_limit)
-                if candidate_idx is None:
-                    candidate_idx = self._pick_collapse_index(wc, tree, target_lod=0, recent_tokens=recent_limit)
-                if candidate_idx is None and prefer_high_lod:
-                    candidate_idx = self._pick_collapse_index(wc, tree, target_lod=1, recent_tokens=recent_limit)
-                if candidate_idx is None:
-                    break
-                scores = torch.zeros(1, wc.length, device=device)
-                scores[0, candidate_idx] = -1.0
-                edits = allocator.update_focus(
-                    max_replacements_per_iteration=1,
-                    num_iterations=1,
-                    scores=scores,
-                )
-                if edits == 0:
-                    continue
-            if wc.length > effective_target and not ensure_variation:
-                raise RuntimeError(
-                    f"[MegaContext] Unable to randomize WC length to {effective_target} (final={wc.length})"
-                )
-        if not ensure_variation and wc.length < target_len:
-            self._normalize_wc_length(wc, tree, target_len)
-
-    def _pick_collapse_index(
-        self,
-        wc: WorkingContext,
-        tree: MegaContextTree,
-        *,
-        target_lod: int,
-        recent_tokens: int,
-    ) -> Optional[int]:
-        if target_lod < 0 or target_lod >= self.config.max_lod:
-            return None
-        positions = wc.get_positions()[0]
-        lods = wc.get_lod_tensor()[0]
-        length = wc.length
-        block = max(1, self.config.block_size)
-        if length < block:
-            return None
-        total_tokens = tree.num_tokens()
-        span = tree.tokens_per_entry(target_lod)
-        protected_tokens = min(recent_tokens, max(0, total_tokens - block))
-        coverage_limit = max(0, total_tokens - protected_tokens)
-        valid_len = length - block + 1
-        lod_window = torch.nn.functional.avg_pool1d(
-            lods.eq(target_lod).float().unsqueeze(0).unsqueeze(0),
-            kernel_size=block,
-            stride=1,
-        ).squeeze(0).squeeze(0)
-        lod_mask = lod_window == 1.0
-        if block == 1:
-            contig_mask = torch.ones(valid_len, dtype=torch.bool, device=lod_mask.device)
-        else:
-            diffs = positions[1:] - positions[:-1]
-            contig_window = torch.nn.functional.avg_pool1d(
-                (diffs == span).float().unsqueeze(0).unsqueeze(0),
-                kernel_size=block - 1,
-                stride=1,
-            ).squeeze(0).squeeze(0)
-            contig_mask = contig_window == 1.0
-        start_positions = positions[:valid_len]
-        coverage_mask = (start_positions + span * block) <= coverage_limit
-        combined = lod_mask[:valid_len] & contig_mask & coverage_mask
-        candidate_idx = torch.nonzero(combined, as_tuple=False).flatten()
-        if candidate_idx.numel() == 0:
-            return None
-        choice = int(candidate_idx[self._rng.randrange(0, candidate_idx.numel())].item())
-        return choice
-
-    def _force_head_collapse(self, wc: WorkingContext, tree: MegaContextTree) -> bool:
-        if wc.length <= 1:
-            return False
-        try:
-            allocator = self._build_allocator(tree, wc, soft_max_length=max(1, wc.length - 1))
-        except RuntimeError:
-            return False
-        candidate_idx = self._pick_collapse_index(wc, tree, target_lod=0, recent_tokens=0)
-        if candidate_idx is None:
-            return False
-        scores = torch.zeros(1, wc.length, device=wc.to_tensor().device)
-        scores[0, candidate_idx] = -1.0
-        edits = allocator.update_focus(
-            max_replacements_per_iteration=1,
-            num_iterations=1,
-            scores=scores,
-        )
-        return edits > 0
 
     def _build_inference_recency_variant(
         self,
@@ -1019,6 +955,8 @@ class MCController:
         soft_max_length: Optional[int] = None,
         recent_tokens: Optional[int] = None,
     ) -> FocusAllocatorBase:
+        if self._in_training_mode():
+            raise RuntimeError("Focus allocator is restricted to inference usage during training")
         soft_length = soft_max_length or self.config.soft_max_length
         recent = self.config.allocator_recent_tokens if recent_tokens is None else recent_tokens
         allocator_cfg = FocusAllocatorConfig(
@@ -1037,6 +975,15 @@ class MCController:
             working_context=working_context,
             lensnet=self.lensnet,
             config=allocator_cfg,
+        )
+
+    def _build_training_variation_allocator(self, tree: MegaContextTree) -> TrainingWCVariationAllocator:
+        return TrainingWCVariationAllocator(
+            tree=tree,
+            block_size=self.config.block_size,
+            max_lod=self.config.max_lod,
+            lod2_probability=self._training_lod2_prob,
+            rng=self._rng,
         )
 
     def _select_primary_variant(
@@ -1570,6 +1517,19 @@ class MCController:
     def _normalize_wc_length(self, wc: WorkingContext, tree: MegaContextTree, target_len: int) -> None:
         target_len = self._reachable_target_length(tree, target_len)
         if wc.length == target_len:
+            return
+        if self._in_training_mode():
+            if wc.length < target_len:
+                raise RuntimeError(
+                    f"[MegaContext] Training WC shorter than target ({wc.length} < {target_len}); "
+                    "expansion is not supported in training mode"
+                )
+            training_variator = self._build_training_variation_allocator(tree)
+            training_variator.collapse_to_target(
+                wc,
+                target_len,
+                recent_tokens=self.config.allocator_recent_tokens,
+            )
             return
         allocator = self._build_allocator(tree, wc, soft_max_length=target_len)
         max_attempts = abs(wc.length - target_len) * 4 + 10
@@ -2404,15 +2364,12 @@ class MCController:
     # ------------------------------------------------------------------ #
     # Inference facade
     # ------------------------------------------------------------------ #
-    def begin_inference_session(
+    def _begin_inference_session_impl(
         self,
         initial_tokens: torch.Tensor,
         session_id: Optional[str] = None,
         rebuild: bool = True,
     ) -> str:
-        """
-        Initialize a persistent MegaContext for inference/autoregressive decoding.
-        """
         t_total0 = time.time()
         timings: Dict[str, float] = {}
         if initial_tokens.dim() == 1:
@@ -2539,10 +2496,27 @@ class MCController:
         self.last_timings = timings
         return session
 
-    def inference_step(self, new_tokens: torch.Tensor) -> None:
+    def begin_inference_session(
+        self,
+        initial_tokens: torch.Tensor,
+        session_id: Optional[str] = None,
+        rebuild: bool = True,
+    ) -> str:
         """
-        Append freshly generated tokens and refocus the Working Context.
+        Initialize a persistent MegaContext for inference/autoregressive decoding.
         """
+        prev_context = self._current_context
+        self._current_context = "inference"
+        try:
+            return self._begin_inference_session_impl(
+                initial_tokens,
+                session_id=session_id,
+                rebuild=rebuild,
+            )
+        finally:
+            self._current_context = prev_context
+
+    def _inference_step_impl(self, new_tokens: torch.Tensor) -> None:
         if self.inference_state is None:
             raise RuntimeError("Inference session not initialized. Call begin_inference_session() first.")
         if new_tokens.dim() == 1:
@@ -2586,6 +2560,17 @@ class MCController:
             force=True,
         )
         self._refresh_inference_report()
+
+    def inference_step(self, new_tokens: torch.Tensor) -> None:
+        """
+        Append freshly generated tokens and refocus the Working Context.
+        """
+        prev_context = self._current_context
+        self._current_context = "inference"
+        try:
+            self._inference_step_impl(new_tokens)
+        finally:
+            self._current_context = prev_context
 
     def _inference_append_without_allocator(
         self,

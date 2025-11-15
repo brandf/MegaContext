@@ -11,7 +11,7 @@ summary: Relating the LensNet random-variant training recipe to reinforcement le
 During MC training we now:
 
 1. Build a *baseline* working context (pure LOD0 tail-preserving window) trimmed to the current curriculum target length so it is directly comparable to every random variant.
-2. Sample `N` *random variants* by stochastically collapsing/expanding the baseline down to a fixed `train_wc_length`.
+2. Sample `N` *random variants* via the dedicated **`training_wc_variation_allocator`**: starting from the full LOD0 view, it randomly collapses spans (LOD1 or LOD2 candidates) until every WC hits the exact `train_wc_length`. This helper never queries LensNet, so the policy only runs once later during preference supervision.
 3. Run next-token loss for every variant, producing per-variant NLLs and the natural “preference” ordering between them.
 4. Supervise LensNet by comparing variant pairs (our `preference_pairs`): the lower-loss WC is the “better” policy action, and we regress LensNet’s per-entry focus scores so that it prefers the edits that differentiate better vs. worse variants.
 

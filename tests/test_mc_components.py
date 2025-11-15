@@ -30,9 +30,25 @@ class FirstTokenGistNet(GistNetBase):
 
 
 class ZeroLensNet(nn.Module):
-    def forward(self, working_context: WorkingContext) -> torch.Tensor:  # type: ignore[override]
-        length = working_context.length
-        return working_context.to_tensor().new_zeros((1, length, 1))
+    def forward(  # type: ignore[override]
+        self,
+        working_context: Optional[WorkingContext] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        if working_context is not None:
+            tensor = working_context.to_tensor()
+            length = working_context.length
+            device = tensor.device
+        else:
+            embeddings: torch.Tensor = kwargs["embeddings"]
+            length = embeddings.shape[1]
+            device = embeddings.device
+        return torch.zeros((1, length, 1), device=device, dtype=torch.float32)
+
+
+class ExplodingLensNet(nn.Module):
+    def forward(self, *args, **kwargs):  # type: ignore[override]
+        raise RuntimeError("LensNet should not be invoked during training variant generation")
 
 
 class DummyReport:
@@ -200,6 +216,50 @@ def test_focus_allocator_expand_and_collapse():
         scores=collapse_scores,
     )
     assert edits_collapse == 1
+    lods_after_collapse = allocator.working_context.get_lod_tensor()[0]
+    assert torch.any(lods_after_collapse == 2)
+
+
+def test_training_random_variants_skip_lensnet(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        block_size=2,
+        max_seq_len=32,
+        train_wc_length=16,
+        num_random_variants=2,
+        max_counterfactuals=4,
+        allocator_recent_tokens=2,
+    )
+    controller.lensnet = ExplodingLensNet()
+    controller.lensnet.train()
+    controller._train_progress = 1.0
+    tokens = torch.arange(0, 32).view(1, 32)
+    tree, sample_state, _, _ = controller._build_tree_sample(tokens, session_id="test_train_variants")
+    assert sample_state.variants, "expected at least one variant"
+    target = controller._reachable_target_length(tree, controller._current_target_wc_length())
+    for variant in sample_state.variants:
+        assert variant.working_context.length == target
+        lods = variant.working_context.get_lod_tensor()[0]
+        tail_start = max(0, tree.num_tokens() - controller.config.allocator_recent_tokens)
+        tail_mask = variant.working_context.get_positions()[0] >= tail_start
+        if torch.any(tail_mask):
+            assert torch.all(lods[tail_mask] == 0)
+
+
+def test_focus_allocator_usage_blocked_during_training(monkeypatch):
+    controller = _build_mc_controller(
+        monkeypatch,
+        block_size=2,
+        max_seq_len=16,
+        train_wc_length=8,
+        allocator_recent_tokens=0,
+        num_random_variants=1,
+    )
+    tokens = torch.arange(0, 16).view(1, 16)
+    tree, sample_state, _, _ = controller._build_tree_sample(tokens, session_id="guard_test")
+    wc = sample_state.variants[0].working_context
+    with pytest.raises(RuntimeError):
+        controller._build_allocator(tree, wc)
 
 
 def test_baseline_variant_is_pure_lod0_tail(monkeypatch):
@@ -444,14 +504,23 @@ def test_pairwise_lens_loss_backprop(monkeypatch):
         lens_budget_smooth_beta=0.6,
         lens_adv_norm_beta=0.8,
     )
+    controller._train_progress = 1.0
 
     class LinearLens(nn.Module):
         def __init__(self) -> None:
             super().__init__()
             self.proj = nn.Linear(1, 1)
 
-        def forward(self, working_context: WorkingContext) -> torch.Tensor:  # type: ignore[override]
-            values = working_context.to_tensor().mean(dim=-1, keepdim=True)
+        def forward(  # type: ignore[override]
+            self,
+            working_context: Optional[WorkingContext] = None,
+            **kwargs,
+        ) -> torch.Tensor:
+            if working_context is not None:
+                values = working_context.to_tensor().mean(dim=-1, keepdim=True)
+            else:
+                embeddings: torch.Tensor = kwargs["embeddings"]
+                values = embeddings.mean(dim=-1, keepdim=True)
             return self.proj(values)
 
     controller.lensnet = LinearLens()
@@ -524,7 +593,9 @@ def test_random_variant_lod_hint_reflects_highest_lod(monkeypatch):
         allocator_iterations=1,
         allocator_max_replacements=2,
         num_random_variants=2,
+        train_wc_length=64,
     )
+    controller._train_progress = 1.0
     tokens = (torch.arange(0, 96) % 32).view(1, 96)
     _, sample_state, _, _ = controller._build_tree_sample(tokens, "lod_hint_sync")
     random_variants = [v for v in sample_state.variants if v.source.startswith("random_variant_")]
@@ -544,6 +615,7 @@ def test_preference_pairs_always_include_best_variant(monkeypatch):
         max_counterfactuals=5,
         max_lens_pairs=12,
     )
+    controller._train_progress = 1.0
     tokens = (torch.arange(0, 192) % 32).view(1, 192)
     _, sample_state, _, _ = controller._build_tree_sample(tokens, "pair_best")
     controller._compute_variant_losses([sample_state], tokens)
@@ -565,6 +637,7 @@ def test_preference_agreement_metric_available(monkeypatch):
         train_wc_length=64,
         max_counterfactuals=4,
     )
+    controller._train_progress = 1.0
     tokens = (torch.arange(0, 192) % 32).view(1, 192)
     _, sample_state, _, _ = controller._build_tree_sample(tokens, "agreement_metric")
     controller._compute_variant_losses([sample_state], tokens)
