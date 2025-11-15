@@ -133,6 +133,8 @@ mc_random_variant_iterations = 4
 mc_max_lens_pairs = 8
 mc_compile_gistnet = 1
 mc_compile_lensnet = 1
+mc_compile_gistnet = 1
+mc_compile_lensnet = 1
 # now allow CLI to override the settings via the configurator lol
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open(os.path.join('nanochat', 'configurator.py')).read()) # overrides from command line or config file
@@ -156,6 +158,8 @@ mc_infer_allocator_max_replacements = _parse_optional_int(mc_infer_allocator_max
 mc_infer_allocator_iterations = _parse_optional_int(mc_infer_allocator_iterations)
 mc_infer_rebuild_max_replacements = _parse_optional_int(mc_infer_rebuild_max_replacements)
 mc_infer_rebuild_iterations = _parse_optional_int(mc_infer_rebuild_iterations)
+mc_compile_gistnet = os.getenv("MC_COMPILE_GISTNET", str(mc_compile_gistnet))
+mc_compile_lensnet = os.getenv("MC_COMPILE_LENSNET", str(mc_compile_lensnet))
 mc_infer_refocus_interval = int(mc_infer_refocus_interval)
 mc_train_report = _parse_bool_flag(mc_train_report)
 mc_val_report = _parse_bool_flag(mc_val_report)
@@ -178,6 +182,8 @@ mc_train_wc_length = _parse_optional_int(mc_train_wc_length)
 mc_num_random_variants = int(mc_num_random_variants)
 mc_random_variant_iterations = int(mc_random_variant_iterations)
 mc_max_lens_pairs = int(mc_max_lens_pairs)
+mc_compile_gistnet = _parse_bool_flag(mc_compile_gistnet)
+mc_compile_lensnet = _parse_bool_flag(mc_compile_lensnet)
 mc_compile_gistnet = _parse_bool_flag(mc_compile_gistnet)
 mc_compile_lensnet = _parse_bool_flag(mc_compile_lensnet)
 disable_validation = bool(mc_disable_val)
@@ -300,6 +306,8 @@ if mc_enabled:
         num_random_variants=mc_num_random_variants,
         random_variant_iterations=mc_random_variant_iterations,
         max_lens_pairs=mc_max_lens_pairs,
+        compile_gistnet=mc_compile_gistnet,
+        compile_lensnet=mc_compile_lensnet,
         allocator_recent_tokens=allocator_recent_tokens,
         allocator_expand_threshold=allocator_expand_threshold,
         allocator_collapse_threshold=allocator_collapse_threshold,
