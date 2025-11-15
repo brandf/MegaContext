@@ -1271,6 +1271,13 @@ class MCController:
     ) -> Tuple[Dict[str, torch.Tensor], List[int]]:
         if not variants:
             return {}, []
+        sample_cos, sample_sin, _ = variants[0].working_context.get_positional_encodings()
+        if sample_cos.dim() == 3:
+            sample_cos = sample_cos.unsqueeze(2)
+        if sample_sin.dim() == 3:
+            sample_sin = sample_sin.unsqueeze(2)
+        cos_heads = sample_cos.shape[2]
+        cos_dim = sample_cos.shape[3]
         max_len = max(variant.working_context.length for variant in variants)
         embed_dim = self.config.embed_dim
         batch = len(variants)
@@ -1291,11 +1298,15 @@ class MCController:
             device=device,
         )
         cos_tensor = torch.zeros(
-            (batch, max_len, self.config.num_heads, self._head_dim),
+            (batch, max_len, cos_heads, cos_dim),
             dtype=self._target_dtype,
             device=device,
         )
-        sin_tensor = torch.zeros_like(cos_tensor)
+        sin_tensor = torch.zeros(
+            (batch, max_len, cos_heads, cos_dim),
+            dtype=self._target_dtype,
+            device=device,
+        )
         lengths: List[int] = []
         for idx, variant in enumerate(variants):
             wc = variant.working_context
@@ -1303,6 +1314,10 @@ class MCController:
             pos = wc.get_positions().to(device)
             lod = wc.get_lod_tensor().to(device)
             cos, sin, _ = wc.get_positional_encodings()
+            if cos.dim() == 3:
+                cos = cos.unsqueeze(2)
+            if sin.dim() == 3:
+                sin = sin.unsqueeze(2)
             cos = cos.to(device, self._target_dtype)
             sin = sin.to(device, self._target_dtype)
             length = tensor.shape[1]

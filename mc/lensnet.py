@@ -94,8 +94,16 @@ class TransformerLensNet(nn.Module):
         target_dtype = self.blocks[0].attn.c_q.weight.dtype
         if x.dtype != target_dtype:
             x = x.to(target_dtype)
-        cos = cos.to(x.device, target_dtype).expand(-1, -1, self.num_heads, -1)
-        sin = sin.to(x.device, target_dtype).expand(-1, -1, self.num_heads, -1)
+        cos = cos.to(x.device, target_dtype)
+        sin = sin.to(x.device, target_dtype)
+        if cos.dim() == 3:
+            cos = cos.unsqueeze(2)
+            sin = sin.unsqueeze(2)
+        if cos.shape[2] == 1 and self.num_heads > 1:
+            cos = cos.expand(-1, -1, self.num_heads, -1)
+            sin = sin.expand(-1, -1, self.num_heads, -1)
+        elif cos.shape[2] != self.num_heads:
+            raise ValueError("Positional encoding head dimension mismatch")
         cos_sin = (cos, sin)
         for block in self.blocks:
             x = block(x, cos_sin, kv_cache=None, alibi=None)
