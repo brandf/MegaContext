@@ -83,7 +83,7 @@ class TransformerLensNet(nn.Module):
         positions = working_context.get_positions().to(x.device)
         span_width = torch.exp(levels.float() * self._log_block).unsqueeze(-1)
         cursor_norm = positions.float()
-        denom = max(cursor_norm.max().item(), 1.0)
+        denom = torch.maximum(cursor_norm.max(), cursor_norm.new_tensor(1.0))
         cursor_norm = cursor_norm / denom
         level_feat = self.level_embed(levels.long())
         span_feat = self.span_mlp(span_width)
