@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -67,26 +68,41 @@ class TransformerLensNet(nn.Module):
             )
         raise ValueError(f"Unknown LensNet head: {head}")
 
-    def forward(self, working_context: WorkingContext) -> torch.Tensor:
-        x = working_context.to_tensor()  # [B, W, D]
+    def forward(
+        self,
+        working_context: Optional[WorkingContext] = None,
+        *,
+        embeddings: Optional[torch.Tensor] = None,
+        positions: Optional[torch.Tensor] = None,
+        lods: Optional[torch.Tensor] = None,
+        cos: Optional[torch.Tensor] = None,
+        sin: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if working_context is None:
+            if embeddings is None or positions is None or lods is None or cos is None or sin is None:
+                raise ValueError("LensNet forward requires either a WorkingContext or explicit tensors")
+            x = embeddings
+            positions_tensor = positions
+            lod_tensor = lods
+        else:
+            x = working_context.to_tensor()
+            positions_tensor = working_context.get_positions()
+            lod_tensor = working_context.get_lod_tensor()
+            cos, sin, _ = working_context.get_positional_encodings()
+        if cos is None or sin is None:
+            raise ValueError("Positional encodings required for LensNet forward")
         target_dtype = self.blocks[0].attn.c_q.weight.dtype
         if x.dtype != target_dtype:
             x = x.to(target_dtype)
-
-        cos, sin, _ = working_context.get_positional_encodings()
-        if cos.device != x.device:
-            cos = cos.to(x.device)
-        if sin.device != x.device:
-            sin = sin.to(x.device)
-        cos = cos.to(target_dtype).expand(-1, -1, self.num_heads, -1)
-        sin = sin.to(target_dtype).expand(-1, -1, self.num_heads, -1)
+        cos = cos.to(x.device, target_dtype).expand(-1, -1, self.num_heads, -1)
+        sin = sin.to(x.device, target_dtype).expand(-1, -1, self.num_heads, -1)
         cos_sin = (cos, sin)
         for block in self.blocks:
             x = block(x, cos_sin, kv_cache=None, alibi=None)
-        levels = working_context.get_lod_tensor().to(x.device)
-        positions = working_context.get_positions().to(x.device)
+        levels = lod_tensor.to(x.device)
+        positions_tensor = positions_tensor.to(x.device)
         span_width = torch.exp(levels.float() * self._log_block).unsqueeze(-1)
-        cursor_norm = positions.float()
+        cursor_norm = positions_tensor.float()
         denom = torch.maximum(cursor_norm.max(), cursor_norm.new_tensor(1.0))
         cursor_norm = cursor_norm / denom
         level_feat = self.level_embed(levels.long())

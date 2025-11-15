@@ -1269,52 +1269,58 @@ class MCController:
 
     def _stack_working_contexts(
         self, variants: List[WorkingContextVariant]
-    ) -> Tuple[Optional[WorkingContext], List[int]]:
+    ) -> Tuple[Dict[str, torch.Tensor], List[int]]:
         if not variants:
-            return None, []
+            return {}, []
         max_len = max(variant.working_context.length for variant in variants)
         embed_dim = self.config.embed_dim
         batch = len(variants)
+        device = self.device
         embeddings = torch.zeros(
             (batch, max_len, embed_dim),
             dtype=self._target_dtype,
-            device=self.device,
+            device=device,
         )
         positions = torch.zeros(
             (batch, max_len),
             dtype=torch.long,
-            device=self.device,
+            device=device,
         )
         lods = torch.zeros(
             (batch, max_len),
             dtype=torch.long,
-            device=self.device,
+            device=device,
         )
+        cos_tensor = torch.zeros(
+            (batch, max_len, self.config.num_heads, self._head_dim),
+            dtype=self._target_dtype,
+            device=device,
+        )
+        sin_tensor = torch.zeros_like(cos_tensor)
         lengths: List[int] = []
         for idx, variant in enumerate(variants):
             wc = variant.working_context
-            tensor = wc.to_tensor().to(self.device, self._target_dtype)
-            pos = wc.get_positions().to(self.device)
-            lod = wc.get_lod_tensor().to(self.device)
+            tensor = wc.to_tensor().to(device, self._target_dtype)
+            pos = wc.get_positions().to(device)
+            lod = wc.get_lod_tensor().to(device)
+            cos, sin, _ = wc.get_positional_encodings()
+            cos = cos.to(device, self._target_dtype)
+            sin = sin.to(device, self._target_dtype)
             length = tensor.shape[1]
             start = max_len - length
-            embeddings[idx, start:, :] = tensor[0, :, :]
-            positions[idx, start:] = pos[0, :]
-            lods[idx, start:] = lod[0, :]
+            embeddings[idx, start:, :] = tensor[0]
+            positions[idx, start:] = pos[0]
+            lods[idx, start:] = lod[0]
+            cos_tensor[idx, start:, :, :] = cos[0]
+            sin_tensor[idx, start:, :, :] = sin[0]
             lengths.append(length)
-        config = WorkingContextConfig(
-            embed_dim=self.config.embed_dim,
-            max_length=max_len,
-            device=self.device.type,
-        )
-        stacked = WorkingContext(
-            embeddings,
-            positions,
-            config,
-            lod_tensor=lods,
-            recent_tokens=self.config.allocator_recent_tokens,
-        )
-        return stacked, lengths
+        return {
+            "embeddings": embeddings,
+            "positions": positions,
+            "lods": lods,
+            "cos": cos_tensor,
+            "sin": sin_tensor,
+        }, lengths
 
     def _batch_variant_scores(
         self, variants: List[WorkingContextVariant]
@@ -1331,11 +1337,17 @@ class MCController:
         uniform = all(variant.working_context.length == reference_len for variant in pending)
         if not uniform:
             pass  # padding handles differing lengths
-        stacked_wc, lengths = self._stack_working_contexts(pending)
-        if stacked_wc is None:
+        stacked_data, lengths = self._stack_working_contexts(pending)
+        if not stacked_data:
             return cache
-        self._configure_wc_positional(stacked_wc)
-        scores = self.lensnet(stacked_wc)
+        scores = self.lensnet(
+            None,
+            embeddings=stacked_data["embeddings"],
+            positions=stacked_data["positions"],
+            lods=stacked_data["lods"],
+            cos=stacked_data["cos"],
+            sin=stacked_data["sin"],
+        )
         for idx, variant in enumerate(pending):
             length = lengths[idx]
             var_scores = scores[idx : idx + 1, -length:]
