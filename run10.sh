@@ -320,7 +320,7 @@ case "$GPU_PROFILE" in
         NUM_ITERATIONS=75500
         ;;
     h100)
-        DEVICE_BATCH_SIZE=40
+        DEVICE_BATCH_SIZE=56
         NUM_ITERATIONS=37750
         ;;
     *)

@@ -185,12 +185,12 @@ class MegaContextTree:
         if self.gistnet is None:
             raise ValueError("GistNet not attached")
         # Compiled (torch.compile) models may capture the forward in a CUDA graph.
-        # Mark the start of each invocation so repeated calls with overlapping
-        # lifetimes don't reuse graph outputs that autograd still needs.
+        # Mark each invocation and clone the output so replayed graphs never hand
+        # back buffers that autograd still references.
         mark_step = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
         if callable(mark_step):
             mark_step()
-        return self.gistnet(blocks)
+        return self.gistnet(blocks).clone()
 
     def _gather_child_block(self, lod: int, node_index: int) -> torch.Tensor:
         child_lod = lod - 1

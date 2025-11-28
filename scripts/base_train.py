@@ -219,7 +219,7 @@ get_max_memory = torch.cuda.max_memory_allocated if device_type == "cuda" else l
 
 # wandb logging init
 use_dummy_wandb = run == "dummy" or not master_process
-wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat", name=run, config=user_config)
+wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="megacontext", name=run, config=user_config)
 mc_controller = None
 
 # Tokenizer will be useful for evaluation, also we need the vocab size
@@ -734,23 +734,25 @@ for step in range(num_iterations + 1):
             print0(tokenizer.decode(sample[0]))
         model.train()
 
-    # save checkpoint at the end of the run (only on master process)
-    if master_process and last_step:
-        output_dirname = model_tag if model_tag else f"d{depth}" # e.g. d12
+    # periodic checkpointing (only on master process)
+    should_checkpoint = last_step or (master_process and step > 0 and step % 1000 == 0)
+    if master_process and should_checkpoint:
+        output_dirname = model_tag if model_tag else f"d{depth}"
         checkpoint_dir = os.path.join(base_dir, "base_checkpoints", output_dirname)
+        os.makedirs(checkpoint_dir, exist_ok=True)
         save_checkpoint(
             checkpoint_dir,
             step,
             orig_model.state_dict(),
-            [opt.state_dict() for opt in optimizers], # TODO: make sure saving across ranks is done correctly
+            [opt.state_dict() for opt in optimizers],
             {
                 "step": step,
-                "val_bpb": val_bpb, # loss at last step
+                "val_bpb": val_bpb,
                 "model_config": model_config_kwargs,
-                "user_config": user_config, # inputs to the training script
+                "user_config": user_config,
                 "device_batch_size": device_batch_size,
                 "max_seq_len": max_seq_len,
-            }
+            },
         )
 
     if last_step:
@@ -916,13 +918,12 @@ for step in range(num_iterations + 1):
             mc_controller.last_timings["base_forward_ms"] = base_forward_ms
         if mc_log_timers and mc_controller is not None:
             lens_ms = getattr(mc_controller, "last_timings", {}).get("lens_ms")
+            pack_ms = getattr(mc_controller, "last_timings", {}).get("variant_pack_ms")
             if lens_ms is not None:
-                print0(
-                    "[Model Timers] base_forward={:.2f}ms lens_forward={:.2f}ms".format(
-                        base_forward_ms,
-                        lens_ms,
-                    )
-                )
+                msg = "[Model Timers] base_forward={:.2f}ms lens_forward={:.2f}ms".format(base_forward_ms, lens_ms)
+                if pack_ms is not None:
+                    msg += " variant_pack={:.2f}ms".format(pack_ms)
+                print0(msg)
         t_loader0 = time.time()
         x, y = next(train_loader) # prefetch the next batch while the GPU is busy with forward/backward
         loader_time_samples.append((time.time() - t_loader0) * 1000.0)
@@ -1026,6 +1027,10 @@ for step in range(num_iterations + 1):
             log_data["train/loss_lod0"] = vanilla_loss_val
         if mc_lens_loss_val is not None:
             log_data["mc/lens_loss"] = mc_lens_loss_val
+        if mc_controller is not None and hasattr(mc_controller, "last_timings"):
+            for key in ("base_forward_ms", "lens_forward_ms", "lens_loss_ms", "lens_ms"):
+                if key in mc_controller.last_timings:
+                    log_data[f"mc/{key}"] = mc_controller.last_timings[key]
         if mc_log_timers:
             timer_labels = [
                 ("mc/time_controller_ms", "[Timers] controller"),

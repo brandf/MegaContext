@@ -30,3 +30,15 @@ summary: Why LensNet timings dwarf the base model and how to fix it.
    - Added automated tests (see `tests/test_mc_components.py::test_lensnet_timers_and_usage`) plus per-step telemetry to ensure we still execute a single batched LensNet call in training, and that `lens_loss_ms ≥ lens_forward_ms`.
 5. **Revisit LensNet torch.compile**
    - Once the CPU-side overhead is under control, debug the compile failures separately (run `scripts/mc_compile_harness.py --enable-compile`). But that won’t fix the current 1300 ms issue until we address the CPU-side overhead above.
+
+## Latest Telemetry (Nov 27 2025, evening)
+- `lens_forward_ms` is **≈1.6–1.8 ms** (single batched call).
+- `lens_loss_ms` dropped to **≈160–180 ms** after vectorizing the pairwise-target builder and removing `.item()` loops. Controller overhead is now within a few hundred microseconds of the GPU forward instead of dwarfing it.
+- `mc_smoke_train.py` covers the full MCController path with torch.compile (cudagraphs disabled for the aux nets) so we can reproduce regressions without a full `run10.sh`.
+- Per-variant metadata (positions/lods/spans) is cached on the CPU, so preference targets reuse those tensors instead of re-copying from GPU each time.
+- Bradley–Terry losses are now computed in a single batched kernel: per-pair masked scores get concatenated and reduced via scatter-add on the GPU, cutting another ~40 ms from `lens_loss_ms`.
+
+### Next optimizations
+1. **Batch Bradley–Terry loss on GPU:** targets/masks are now dense tensors; push ΔNLL arrays + weights through a batched GPU loss kernel so the remaining ~160 ms shrinks toward the 10–20 ms band.
+2. **Histogram/coverage vectorization:** `_lod_histogram` and `_wc_token_coverage` still rebuild dictionaries via Python loops—rewrite these using tensor ops (`torch.unique`, `scatter_add`) to shave the remaining tens of milliseconds from controller bookkeeping.
+3. **Re-enable cudagraphs for aux nets (stretch):** once the CPU work is sub‑20 ms and the loss path is batched, revisit torch.compile with cudagraph capture so GistNet/LensNet match the base model’s mode.

@@ -19,6 +19,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from mc.gaussian_rope import build_positional  # noqa: E402
 from mc.gistnet import build_gistnet  # noqa: E402
 from mc.lensnet import build_lensnet  # noqa: E402
 from mc.working_context import WorkingContext, WorkingContextConfig  # noqa: E402
@@ -56,16 +57,15 @@ def maybe_mark_step() -> None:
         mark_step()
 
 
-def _random_positional(
-    batch: int,
-    length: int,
-    num_heads: int,
+def _gaussian_rope(
+    positions: torch.Tensor,
+    lods: torch.Tensor,
+    block_size: int,
     head_dim: int,
-    device: torch.device,
-    dtype: torch.dtype,
+    num_heads: int,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    cos = torch.randn(batch, length, num_heads, head_dim, device=device, dtype=dtype)
-    sin = torch.randn(batch, length, num_heads, head_dim, device=device, dtype=dtype)
+    encoder = build_positional("gaussian", head_dim=head_dim, block_size=block_size, num_heads=num_heads)
+    cos, sin, _ = encoder(positions, lods, device=positions.device)
     return cos, sin
 
 
@@ -93,7 +93,7 @@ def run_lensnet_batched(args: argparse.Namespace, device: torch.device, dtype: t
     embeddings = torch.randn(args.batch_size, args.seq_len, args.embed_dim, device=device, dtype=dtype)
     positions = torch.arange(args.seq_len, device=device).repeat(args.batch_size, 1)
     lods = torch.zeros(args.batch_size, args.seq_len, dtype=torch.long, device=device)
-    cos, sin = _random_positional(args.batch_size, args.seq_len, args.num_heads, head_dim, device, dtype)
+    cos, sin = _gaussian_rope(positions, lods, args.seq_len, head_dim, args.num_heads)
     payload = {
         "embeddings": embeddings,
         "positions": positions,
@@ -122,7 +122,14 @@ def run_lensnet_working_context(args: argparse.Namespace, device: torch.device, 
     with torch.no_grad():
         for _ in range(args.lensnet_iters):
             maybe_mark_step()
-            scores = lensnet(wc)
+            payload = {
+                "embeddings": wc.to_tensor(),
+                "positions": wc.get_positions(),
+                "lods": wc.get_lod_tensor(),
+                "cos": wc.get_positional_encodings()[0].clone(),
+                "sin": wc.get_positional_encodings()[1].clone(),
+            }
+            scores = lensnet(None, **payload)
             if torch.isnan(scores).any():
                 raise RuntimeError("Detected NaNs in LensNet allocator outputs.")
 

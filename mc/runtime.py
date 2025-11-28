@@ -43,6 +43,9 @@ class WorkingContextVariant:
     is_baseline: bool = False
     adv_delta: float = 0.0
     norm_adv_delta: float = 0.0
+    positions_cpu: Optional[torch.Tensor] = None
+    lods_cpu: Optional[torch.Tensor] = None
+    spans_cpu: Optional[torch.Tensor] = None
 
 
 @dataclass
@@ -152,7 +155,10 @@ class _InstrumentedGistNet(GistNetBase):
         else:
             blocks = kwargs.get("blocks")
         self.controller._record_gistnet_usage(blocks)
-        return self.module(*args, **kwargs)
+        self.controller._gistnet_mark_step()
+        outputs = self.module(*args, **kwargs)
+        # Avoid cudagraph output aliasing when torch.compile is enabled by cloning once per call.
+        return outputs.clone()
 
 
 class MCController:
@@ -203,6 +209,10 @@ class MCController:
         self.embed = self._resolve_embedding_layer(model)
         embed_dim = config.embed_dim
         self._head_dim = embed_dim // config.num_heads
+        self._span_cache = torch.tensor(
+            [config.block_size ** i for i in range(config.max_lod + 2)],
+            dtype=torch.long,
+        )
         base_gistnet = build_gistnet(
             config.gistnet_type,
             embed_dim,
@@ -213,12 +223,13 @@ class MCController:
             num_heads=config.num_heads,
         ).to(self.device)
         self._gistnet_compiled = False
+        compile_options = {"triton.cudagraphs": False}
         if config.compile_gistnet and hasattr(torch, "compile") and config.device.startswith("cuda"):
             try:
-                base_gistnet = torch.compile(base_gistnet, mode="reduce-overhead")
+                base_gistnet = torch.compile(base_gistnet, options=compile_options)
                 self._gistnet_compiled = True
                 if self._is_rank0:
-                    print("[MegaContext] GistNet compiled with torch.compile(mode='reduce-overhead')", flush=True)
+                    print("[MegaContext] GistNet compiled with torch.compile (cudagraphs disabled).", flush=True)
             except Exception as exc:
                 if self._is_rank0:
                     print(f"[MegaContext] torch.compile for GistNet disabled: {exc}", flush=True)
@@ -238,10 +249,10 @@ class MCController:
         self._lensnet_compiled = False
         if config.compile_lensnet and hasattr(torch, "compile") and config.device.startswith("cuda"):
             try:
-                self.lensnet = torch.compile(self.lensnet, mode="reduce-overhead")
+                self.lensnet = torch.compile(self.lensnet, options=compile_options)
                 self._lensnet_compiled = True
                 if self._is_rank0:
-                    print("[MegaContext] LensNet compiled with torch.compile(mode='reduce-overhead')", flush=True)
+                    print("[MegaContext] LensNet compiled with torch.compile (cudagraphs disabled).", flush=True)
             except Exception as exc:
                 if self._is_rank0:
                     print(f"[MegaContext] torch.compile for LensNet disabled: {exc}", flush=True)
@@ -250,6 +261,7 @@ class MCController:
             "inference": self._make_lensnet_usage_dict(),
         }
         self._lensnet_allocator_adapter = _AllocatorLensNetAdapter(self)
+        self._variant_meta_cache: Dict[int, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
         self._gistnet_usage: Dict[str, Dict[str, int]] = {
             "train": self._make_gistnet_usage_dict(),
             "inference": self._make_gistnet_usage_dict(),
@@ -336,6 +348,7 @@ class MCController:
         key = "inference" if context == "inference" else "train"
         self._lensnet_usage[key] = self._make_lensnet_usage_dict()
         self._last_lens_forward_ms = 0.0
+        self._variant_meta_cache = {}
 
     def _record_lensnet_usage(self, source: str, batch_size: int, seq_len: int) -> None:
         context = "inference" if self._current_context == "inference" else "train"
@@ -371,10 +384,16 @@ class MCController:
         payload.update({k: int(v) for k, v in stats.items()})
         self._log_event(session_id, "lensnet_usage", payload, force=True)
 
-    def _lensnet_mark_step(self) -> None:
+    def _cudagraph_mark_step(self) -> None:
         mark_step = getattr(getattr(torch, "compiler", None), "cudagraph_mark_step_begin", None)
         if callable(mark_step):
             mark_step()
+
+    def _lensnet_mark_step(self) -> None:
+        self._cudagraph_mark_step()
+
+    def _gistnet_mark_step(self) -> None:
+        self._cudagraph_mark_step()
 
     def _run_lensnet_batched(self, stacked_data: Dict[str, torch.Tensor]) -> torch.Tensor:
         embeddings = stacked_data["embeddings"]
@@ -394,7 +413,21 @@ class MCController:
 
     def _lensnet_allocator_forward(self, working_context: WorkingContext) -> torch.Tensor:
         self._lensnet_mark_step()
-        scores = self.lensnet(working_context)
+        embeddings = working_context.to_tensor()
+        positions = working_context.get_positions()
+        lods = working_context.get_lod_tensor()
+        cos, sin, _ = working_context.get_positional_encodings()
+        # Clone positional caches to avoid cudagraph aliasing when torch.compile is enabled.
+        cos = cos.clone()
+        sin = sin.clone()
+        scores = self.lensnet(
+            None,
+            embeddings=embeddings,
+            positions=positions,
+            lods=lods,
+            cos=cos,
+            sin=sin,
+        )
         self._record_lensnet_usage("allocator", 1, working_context.length)
         return scores.clone()
 
@@ -1399,31 +1432,36 @@ class MCController:
         max_len = max(variant.working_context.length for variant in variants)
         embed_dim = self.config.embed_dim
         batch = len(variants)
-        device = self.device
-        embeddings = torch.empty(
+        device = torch.device("cpu")
+        embeddings_cpu = torch.empty(
             (batch, max_len, embed_dim),
             dtype=self._target_dtype,
             device=device,
+            pin_memory=True,
         )
-        positions = torch.empty(
+        positions_cpu = torch.empty(
             (batch, max_len),
             dtype=torch.long,
             device=device,
+            pin_memory=True,
         )
-        lods = torch.empty(
+        lods_cpu = torch.empty(
             (batch, max_len),
             dtype=torch.long,
             device=device,
+            pin_memory=True,
         )
-        cos_tensor = torch.empty(
+        cos_cpu = torch.empty(
             (batch, max_len, cos_heads, cos_dim),
             dtype=self._target_dtype,
             device=device,
+            pin_memory=True,
         )
-        sin_tensor = torch.empty(
+        sin_cpu = torch.empty(
             (batch, max_len, cos_heads, cos_dim),
             dtype=self._target_dtype,
             device=device,
+            pin_memory=True,
         )
         lengths: List[int] = []
         for idx, variant in enumerate(variants):
@@ -1441,24 +1479,26 @@ class MCController:
             length = tensor.shape[0]
             start = max_len - length
             if start > 0:
-                embeddings[idx, :start].zero_()
-                positions[idx, :start].zero_()
-                lods[idx, :start].zero_()
-                cos_tensor[idx, :start].zero_()
-                sin_tensor[idx, :start].zero_()
-            embeddings[idx, start:, :] = tensor[-length:]
-            positions[idx, start:] = pos[-length:]
-            lods[idx, start:] = lod[-length:]
-            cos_tensor[idx, start:, :, :] = cos[-length:, :, :]
-            sin_tensor[idx, start:, :, :] = sin[-length:, :, :]
+                embeddings_cpu[idx, :start].zero_()
+                positions_cpu[idx, :start].zero_()
+                lods_cpu[idx, :start].zero_()
+                cos_cpu[idx, :start].zero_()
+                sin_cpu[idx, :start].zero_()
+            embeddings_cpu[idx, start:, :] = tensor[-length:]
+            positions_cpu[idx, start:] = pos[-length:]
+            lods_cpu[idx, start:] = lod[-length:]
+            cos_cpu[idx, start:, :, :] = cos[-length:, :, :]
+            sin_cpu[idx, start:, :, :] = sin[-length:, :, :]
             lengths.append(length)
-        return {
-            "embeddings": embeddings,
-            "positions": positions,
-            "lods": lods,
-            "cos": cos_tensor,
-            "sin": sin_tensor,
-        }, lengths
+        staged = {
+            "embeddings": embeddings_cpu,
+            "positions": positions_cpu,
+            "lods": lods_cpu,
+            "cos": cos_cpu,
+            "sin": sin_cpu,
+        }
+        gpu_data = {k: v.to(self.device, non_blocking=True) for k, v in staged.items()}
+        return gpu_data, lengths
 
     def _batch_variant_scores(
         self, variants: List[WorkingContextVariant]
@@ -1475,7 +1515,9 @@ class MCController:
         uniform = all(variant.working_context.length == reference_len for variant in pending)
         if not uniform:
             pass  # padding handles differing lengths
+        t_pack0 = time.time()
         stacked_data, lengths = self._stack_working_contexts(pending)
+        self.last_timings["variant_pack_ms"] = (time.time() - t_pack0) * 1000.0
         if not stacked_data:
             return cache
         start = time.time()
@@ -2057,6 +2099,8 @@ class MCController:
                 continue
             map_cache: Dict[int, Dict[int, int]] = {}
 
+            pair_entries: List[Dict[str, Any]] = []
+            pref_payloads: List[Dict[str, torch.Tensor]] = []
             for better, worse, strength in preference_pairs:
                 scores_live = score_cache[id(worse)]
                 if scores_live.dim() > 1:
@@ -2084,54 +2128,33 @@ class MCController:
                 target_sign = torch.sign(masked_targets)
                 target_strength = torch.abs(masked_targets).clamp_min(1e-6)
                 pair_scale = max(1.0, float(strength)) / temperature
-                scaled_scores = masked_scores * pair_scale
-                logit = target_sign * scaled_scores
-                pref_loss = F.softplus(-logit)
-                pref_loss = pref_loss * target_strength
-                pref_loss = (pref_loss * sample_weights).mean()
-                rank_loss = masked_scores.new_tensor(0.0)
-                budget_loss = masked_scores.new_tensor(0.0)
-                if rank_weight > 0.0:
-                    pos_mask = masked_targets > 0
-                    neg_mask = masked_targets < 0
-                    if torch.any(pos_mask) and torch.any(neg_mask):
-                        pos_mean = masked_scores[pos_mask].mean()
-                        neg_mean = masked_scores[neg_mask].mean()
-                        rank_loss = F.relu(margin - (pos_mean - neg_mean))
-                if budget_weight > 0.0:
-                    span_vals = span_tokens[mask].to(masked_scores.dtype)
-                    pos_mass = (span_vals * torch.relu(masked_scores)).sum()
-                    neg_mass = (span_vals * torch.relu(-masked_scores)).sum()
-                    denom = pos_mass + neg_mass + 1e-6
-                    budget_loss = ((pos_mass - neg_mass) / denom) ** 2
-                smooth_loss = masked_scores.new_tensor(0.0)
-                if budget_smooth_weight > 0.0:
-                    current_diff = ((pos_mass - neg_mass) / (pos_mass + neg_mass + 1e-6))
-                    self._budget_mass_ema = budget_smooth_beta * self._budget_mass_ema + (1.0 - budget_smooth_beta) * float(current_diff.detach())
-                    target = current_diff - self._budget_mass_ema
-                    smooth_loss = target * target
-
-                kl_loss = masked_scores.new_tensor(0.0)
-                history_key = id(worse.working_context)
-                if kl_weight > 0.0:
-                    prev_scores = self._policy_history.get(history_key)
-                    if prev_scores is not None and prev_scores.shape == scores_1d.shape:
-                        prev = prev_scores.to(scores_1d.device)
-                        p_curr = torch.sigmoid(scores_1d / temperature).clamp(1e-6, 1 - 1e-6)
-                        p_prev = torch.sigmoid(prev / temperature).clamp(1e-6, 1 - 1e-6)
-                        kl_forward = F.kl_div(p_curr.log(), p_prev, reduction="batchmean")
-                        kl_backward = F.kl_div(p_prev.log(), p_curr, reduction="batchmean")
-                        kl_loss = 0.5 * (kl_forward + kl_backward)
-                self._policy_history[history_key] = scores_1d.detach().to("cpu")
-
-                total_loss = (
-                    pref_loss
-                    + rank_weight * rank_loss
-                    + budget_weight * budget_loss
-                    + budget_smooth_weight * smooth_loss
-                    + kl_weight * kl_loss
+                pref_payloads.append(
+                    {
+                        "scores": masked_scores,
+                        "sign": target_sign,
+                        "strength": target_strength,
+                        "weights": sample_weights,
+                        "scale": pair_scale,
+                    }
                 )
-                signed_alignment = (masked_scores * target_sign).mean().item()
+                span_vals = span_tokens[mask].to(masked_scores.dtype)
+                history_key = id(worse.working_context)
+                self._policy_history[history_key] = scores_1d.detach().to("cpu")
+                pair_entries.append(
+                    {
+                        "scores": masked_scores,
+                        "targets": masked_targets,
+                        "spans": span_vals,
+                        "history_key": history_key,
+                    }
+                )
+            pref_losses = self._batched_pref_losses(pref_payloads)
+            agg_losses = self._batched_aux_losses(pair_entries, pref_losses)
+            for total_loss, signed_alignment in agg_losses:
+                total_loss = (
+                    total_loss
+                    + 0.0  # placeholder for compatibility
+                )
                 if math.isfinite(signed_alignment):
                     agreement_total += 1
                     if signed_alignment > 0:
@@ -2399,26 +2422,39 @@ class MCController:
         lods = wc.get_lod_tensor()[0].to("cpu")
         return {int(pos.item()): int(lod.item()) for pos, lod in zip(positions, lods)}
 
+    def _get_variant_metadata(self, variant: WorkingContextVariant) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        cache_key = id(variant.working_context)
+        if cache_key not in self._variant_meta_cache:
+            positions = variant.working_context.get_positions()[0].to(device="cpu", dtype=torch.long).clone()
+            lods = variant.working_context.get_lod_tensor()[0].to(device="cpu", dtype=torch.long).clone()
+            cache = self._span_cache
+            max_index = cache.numel() - 1
+            spans = cache[lods.clamp(min=0, max=max_index)].clone()
+            self._variant_meta_cache[cache_key] = (positions, lods, spans)
+        return self._variant_meta_cache[cache_key]
+
     def _lod_histogram(self, wc: WorkingContext) -> Dict[int, int]:
         lods = wc.get_lod_tensor()[0].to("cpu")
         values, counts = torch.unique(lods, return_counts=True)
         return {int(v.item()): int(c.item()) for v, c in zip(values, counts)}
 
     def _wc_token_coverage(self, wc: WorkingContext, tree: MegaContextTree) -> int:
-        positions = wc.get_positions()[0]
-        lods = wc.get_lod_tensor()[0]
         total_tokens = tree.num_tokens()
         if total_tokens <= 0:
             return 0
-        covered = torch.zeros(total_tokens, dtype=torch.bool)
-        for pos_tensor, lod_tensor in zip(positions, lods):
-            start = int(pos_tensor.item())
-            lod = int(lod_tensor.item())
-            span = max(1, tree.tokens_per_entry(lod))
-            if start >= total_tokens:
-                continue
-            end = min(total_tokens, start + span)
-            covered[start:end] = True
+        positions = wc.get_positions()[0].to(device="cpu", dtype=torch.long).clone()
+        lods = wc.get_lod_tensor()[0].to(device="cpu", dtype=torch.long).clone()
+        cache = self._span_cache
+        max_index = cache.numel() - 1
+        spans = cache[lods.clamp(min=0, max=max_index)]
+        starts = positions.clamp(min=0, max=max(total_tokens - 1, 0))
+        ends = torch.clamp(starts + spans, max=total_tokens)
+        if starts.numel() == 0:
+            return 0
+        token_idx = torch.arange(total_tokens, dtype=torch.long).unsqueeze(0)
+        start_row = starts.unsqueeze(1)
+        end_row = ends.unsqueeze(1)
+        covered = ((token_idx >= start_row) & (token_idx < end_row)).any(dim=0)
         return int(covered.sum().item())
 
     def _lod_equivalent_tokens_from_hist(self, hist: Dict[int, int]) -> int:
@@ -2484,6 +2520,119 @@ class MCController:
         self._rng.shuffle(kept)
         return kept
 
+    def _batched_pref_losses(self, entries: List[Dict[str, torch.Tensor]]) -> List[torch.Tensor]:
+        if not entries:
+            return []
+        device = entries[0]["scores"].device
+        dtype = entries[0]["scores"].dtype
+        counts = [int(entry["scores"].numel()) for entry in entries]
+        scores = torch.cat([entry["scores"] for entry in entries])
+        signs = torch.cat([entry["sign"] for entry in entries])
+        strengths = torch.cat([entry["strength"] for entry in entries])
+        weights = torch.cat([entry["weights"] for entry in entries])
+        scales = torch.cat(
+            [
+                torch.full((count,), entry["scale"], device=device, dtype=dtype)
+                for entry, count in zip(entries, counts)
+            ]
+        )
+        logits = signs * (scores * scales)
+        losses = F.softplus(-logits)
+        losses = losses * strengths
+        losses = losses * weights
+        pair_ids = torch.repeat_interleave(
+            torch.arange(len(entries), device=device, dtype=torch.long),
+            torch.tensor(counts, device=device, dtype=torch.long),
+        )
+        pair_losses = torch.zeros(len(entries), device=device, dtype=losses.dtype)
+        pair_counts = torch.zeros(len(entries), device=device, dtype=losses.dtype)
+        pair_losses.scatter_add_(0, pair_ids, losses)
+        ones = torch.ones_like(losses)
+        pair_counts.scatter_add_(0, pair_ids, ones)
+        pair_means = pair_losses / pair_counts.clamp_min(1.0)
+        return list(pair_means)
+
+    def _batched_aux_losses(
+        self,
+        entries: List[Dict[str, Any]],
+        pref_losses: List[torch.Tensor],
+    ) -> List[Tuple[torch.Tensor, float]]:
+        if not entries:
+            return []
+        device = entries[0]["scores"].device
+        dtype = entries[0]["scores"].dtype
+        num_pairs = len(entries)
+        lengths = torch.tensor([entry["scores"].numel() for entry in entries], device=device, dtype=torch.long)
+        pair_ids = torch.repeat_interleave(torch.arange(num_pairs, device=device, dtype=torch.long), lengths)
+        scores_cat = torch.cat([entry["scores"] for entry in entries])
+        targets_cat = torch.cat([entry["targets"] for entry in entries])
+        spans_cat = torch.cat([entry["spans"] for entry in entries])
+        pref_losses_tensor = torch.stack(pref_losses).to(device=device, dtype=dtype)
+        ones = torch.ones_like(scores_cat, device=device, dtype=dtype)
+        counts = torch.zeros(num_pairs, device=device, dtype=dtype)
+        counts.scatter_add_(0, pair_ids, ones)
+        alignment_sum = torch.zeros(num_pairs, device=device, dtype=dtype)
+        alignment_sum.scatter_add_(0, pair_ids, scores_cat * targets_cat.sign())
+        alignment_mean = alignment_sum / counts.clamp_min(1.0)
+        pos_mask = targets_cat > 0
+        neg_mask = targets_cat < 0
+        pos_sums = torch.zeros(num_pairs, device=device, dtype=dtype)
+        pos_counts = torch.zeros(num_pairs, device=device, dtype=dtype)
+        pos_sums.scatter_add_(0, pair_ids[pos_mask], scores_cat[pos_mask])
+        pos_counts.scatter_add_(0, pair_ids[pos_mask], ones[pos_mask])
+        neg_sums = torch.zeros(num_pairs, device=device, dtype=dtype)
+        neg_counts = torch.zeros(num_pairs, device=device, dtype=dtype)
+        neg_sums.scatter_add_(0, pair_ids[neg_mask], scores_cat[neg_mask])
+        neg_counts.scatter_add_(0, pair_ids[neg_mask], ones[neg_mask])
+        pos_mean = torch.where(pos_counts > 0, pos_sums / pos_counts.clamp_min(1.0), torch.zeros_like(pos_sums))
+        neg_mean = torch.where(neg_counts > 0, neg_sums / neg_counts.clamp_min(1.0), torch.zeros_like(neg_sums))
+        rank_loss_tensor = torch.clamp(margin - (pos_mean - neg_mean), min=0.0)
+        has_posneg = (pos_counts > 0) & (neg_counts > 0)
+        rank_loss_tensor = rank_loss_tensor * has_posneg.to(dtype)
+        relu_scores = torch.relu(scores_cat)
+        relu_neg_scores = torch.relu(-scores_cat)
+        pos_mass = torch.zeros(num_pairs, device=device, dtype=dtype)
+        neg_mass = torch.zeros(num_pairs, device=device, dtype=dtype)
+        pos_mass.scatter_add_(0, pair_ids, spans_cat * relu_scores)
+        neg_mass.scatter_add_(0, pair_ids, spans_cat * relu_neg_scores)
+        denom = pos_mass + neg_mass + 1e-6
+        budget_loss_tensor = ((pos_mass - neg_mass) / denom) ** 2
+        current_diff_tensor = (pos_mass - neg_mass) / denom
+        results: List[Tuple[torch.Tensor, float]] = []
+        budget_smooth_weight = float(self.config.lens_budget_smooth_weight)
+        budget_smooth_beta = float(self.config.lens_budget_smooth_beta)
+        kl_weight = float(self.config.lens_kl_weight)
+        temperature = max(1e-6, float(self.config.lens_temperature))
+        rank_weight = float(self.config.lens_rank_weight)
+        budget_weight = float(self.config.lens_budget_weight)
+        margin = float(self.config.lens_margin)
+        for idx, (entry, pref_loss) in enumerate(zip(entries, pref_losses_tensor)):
+            scores = entry["scores"]
+            history_key = entry["history_key"]
+            total = pref_loss
+            total = total + rank_weight * rank_loss_tensor[idx]
+            total = total + budget_weight * budget_loss_tensor[idx]
+            smooth_loss_val = scores.new_tensor(0.0)
+            if budget_smooth_weight > 0.0:
+                current_diff = current_diff_tensor[idx]
+                self._budget_mass_ema = budget_smooth_beta * self._budget_mass_ema + (1.0 - budget_smooth_beta) * float(current_diff.detach())
+                target = current_diff - self._budget_mass_ema
+                smooth_loss_val = target * target
+                total = total + budget_smooth_weight * smooth_loss_val
+            if kl_weight > 0.0:
+                kl_loss = scores.new_tensor(0.0)
+                prev_scores = self._policy_history.get(history_key)
+                if prev_scores is not None and prev_scores.shape == scores.shape:
+                    prev = prev_scores.to(device=device, dtype=dtype)
+                    p_curr = torch.sigmoid(scores / temperature).clamp(1e-6, 1 - 1e-6)
+                    p_prev = torch.sigmoid(prev / temperature).clamp(1e-6, 1 - 1e-6)
+                    kl_forward = F.kl_div(p_curr.log(), p_prev, reduction="batchmean")
+                    kl_backward = F.kl_div(p_prev.log(), p_curr, reduction="batchmean")
+                    kl_loss = 0.5 * (kl_forward + kl_backward)
+                    total = total + kl_weight * kl_loss
+            signed_alignment = float(alignment_mean[idx].item())
+            results.append((total, signed_alignment))
+        return results
     def _build_pairwise_targets(
         self,
         variant: WorkingContextVariant,
@@ -2491,44 +2640,51 @@ class MCController:
         score_template: torch.Tensor,
         delta_vs_best: float,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        positions = variant.working_context.get_positions()[0].to("cpu")
-        lods = variant.working_context.get_lod_tensor()[0].to("cpu")
-        targets = torch.zeros_like(score_template)
-        mask = torch.zeros_like(score_template, dtype=torch.bool)
-        span_tokens = torch.ones_like(score_template)
-        max_lod = self.config.max_lod
-        block_size = self.config.block_size
+        positions, lods, spans = self._get_variant_metadata(variant)
+        dtype = score_template.dtype
+        device = score_template.device
+        targets_cpu = torch.zeros(score_template.shape, dtype=dtype)
+        mask_cpu = torch.zeros(score_template.shape, dtype=torch.bool)
         strength = math.tanh(abs(delta_vs_best))
         if strength <= 0.0:
-            return targets, mask, span_tokens
-        for idx, (pos, lod_tensor) in enumerate(zip(positions, lods)):
-            lod = int(lod_tensor.item())
-            pos_int = int(pos.item())
-            desired_lod = best_map.get(pos_int, lod)
-            span_tokens[idx] = float(block_size ** max(lod, 0))
-            if desired_lod == lod:
-                continue
-            if desired_lod < lod:
-                if lod <= 0:
-                    continue
-                targets[idx] = strength
-                mask[idx] = True
-            elif desired_lod > lod:
-                if lod >= max_lod:
-                    continue
-                parent_span = block_size ** (lod + 1)
-                parent_start = (pos_int // parent_span) * parent_span
-                parent_end = parent_start + parent_span
-                collapse_val = -strength
-                for jdx, (pos_j, lod_j) in enumerate(zip(positions, lods)):
-                    lod_j_val = int(lod_j.item())
-                    pos_j_int = int(pos_j.item())
-                    if lod_j_val != lod:
-                        continue
-                    if parent_start <= pos_j_int < parent_end:
-                        targets[jdx] = collapse_val
-                        mask[jdx] = True
-        return targets, mask, span_tokens
+            span_tokens = torch.ones_like(score_template)
+            return targets_cpu.to(device=device), mask_cpu.to(device=device), span_tokens.to(device=device)
+        span_tokens = spans.to(score_template.dtype)
+        if best_map:
+            desired_list = [best_map.get(int(pos), int(lod)) for pos, lod in zip(positions.tolist(), lods.tolist())]
+            desired_lods = torch.tensor(desired_list, dtype=torch.long)
+        else:
+            desired_lods = lods
+        delta = desired_lods - lods
+        max_lod = self.config.max_lod
+        expand_mask = (delta < 0) & (lods > 0)
+        if expand_mask.any():
+            targets_cpu[expand_mask] = strength
+            mask_cpu[expand_mask] = True
+        max_index = self._span_cache.numel() - 1
+        collapse_requests = (delta > 0) & (lods < max_lod)
+        if collapse_requests.any():
+            parent_index = (lods + 1).clamp(min=0, max=max_index)
+            parent_spans = self._span_cache[parent_index]
+            parent_ids = positions // parent_spans
+            collapse_parent_ids = parent_ids[collapse_requests]
+            collapse_lods = lods[collapse_requests]
+            collapse_keys = torch.stack([collapse_lods, collapse_parent_ids], dim=1)
+            unique_keys = torch.unique(collapse_keys, dim=0)
+            if unique_keys.numel() > 0:
+                lods_row = lods.unsqueeze(0)
+                parents_row = parent_ids.unsqueeze(0)
+                key_lods = unique_keys[:, 0].unsqueeze(1)
+                key_parents = unique_keys[:, 1].unsqueeze(1)
+                matches = (lods_row == key_lods) & (parents_row == key_parents)
+                collapse_mask = matches.any(dim=0)
+                targets_cpu[collapse_mask] = -strength
+                mask_cpu[collapse_mask] = True
+        return (
+            targets_cpu.to(device=device),
+            mask_cpu.to(device=device),
+            span_tokens.to(device=device),
+        )
 
     # ------------------------------------------------------------------ #
     # Inference facade
