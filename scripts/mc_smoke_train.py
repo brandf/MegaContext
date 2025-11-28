@@ -83,7 +83,6 @@ def main() -> None:
         compile_lensnet=True,
         allocator_iterations=1,
         allocator_max_replacements=1,
-        max_counterfactuals=2,
         num_random_variants=2,
         random_variant_iterations=1,
         auxiliary_dtype="fp32",

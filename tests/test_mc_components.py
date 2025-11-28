@@ -119,7 +119,6 @@ def _build_mc_controller(
         max_seq_len=max_seq_len,
         block_size=block_size,
         device="cpu",
-        max_counterfactuals=overrides.pop("max_counterfactuals", 1),
         allocator_recent_tokens=overrides.pop("allocator_recent_tokens", 0),
         random_seed=random_seed,
         **overrides,
@@ -227,7 +226,6 @@ def test_training_random_variants_skip_lensnet(monkeypatch):
         max_seq_len=32,
         train_wc_length=16,
         num_random_variants=2,
-        max_counterfactuals=4,
         allocator_recent_tokens=2,
     )
     controller.lensnet = ExplodingLensNet()
@@ -265,7 +263,6 @@ def test_focus_allocator_usage_blocked_during_training(monkeypatch):
 def test_baseline_variant_is_pure_lod0_tail(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        max_counterfactuals=2,
         allocator_recent_tokens=16,
         max_seq_len=128,
         train_wc_length=32,
@@ -429,7 +426,6 @@ def test_random_variant_sampler_preserves_baseline_and_compresses(monkeypatch):
         allocator_recent_tokens=0,
         train_wc_length=64,
         num_random_variants=3,
-        max_counterfactuals=4,
         random_seed=7,
     )
     tokens = (torch.arange(0, 256) % 32).view(1, 256)
@@ -467,7 +463,6 @@ def test_random_variant_sampler_is_deterministic(monkeypatch):
         allocator_recent_tokens=0,
         train_wc_length=48,
         num_random_variants=2,
-        max_counterfactuals=3,
     )
     controller_a = _build_mc_controller(monkeypatch, random_seed=11, **overrides)
     controller_b = _build_mc_controller(monkeypatch, random_seed=11, **overrides)
@@ -497,7 +492,6 @@ def test_pairwise_lens_loss_backprop(monkeypatch):
         allocator_recent_tokens=0,
         train_wc_length=32,
         num_random_variants=2,
-        max_counterfactuals=3,
         random_seed=5,
         lens_kl_weight=0.05,
         lens_budget_smooth_weight=0.05,
@@ -547,7 +541,6 @@ def test_preference_loss_stability_terms(monkeypatch):
         allocator_recent_tokens=0,
         train_wc_length=64,
         num_random_variants=2,
-        max_counterfactuals=3,
         random_seed=17,
         lens_kl_weight=0.1,
         lens_budget_smooth_weight=0.1,
@@ -567,7 +560,6 @@ def test_preference_loss_stability_terms(monkeypatch):
 def test_lod0_baseline_skips_focus_and_stays_lod0(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        max_counterfactuals=5,
         allocator_iterations=1,
         allocator_max_replacements=2,
     )
@@ -589,7 +581,6 @@ def test_lod0_baseline_skips_focus_and_stays_lod0(monkeypatch):
 def test_random_variant_lod_hint_reflects_highest_lod(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        max_counterfactuals=5,
         allocator_iterations=1,
         allocator_max_replacements=2,
         num_random_variants=2,
@@ -612,7 +603,6 @@ def test_preference_pairs_always_include_best_variant(monkeypatch):
         num_random_variants=3,
         random_variant_iterations=2,
         train_wc_length=64,
-        max_counterfactuals=5,
         max_lens_pairs=12,
     )
     controller._train_progress = 1.0
@@ -635,7 +625,6 @@ def test_preference_agreement_metric_available(monkeypatch):
         num_random_variants=2,
         random_variant_iterations=2,
         train_wc_length=64,
-        max_counterfactuals=4,
     )
     controller._train_progress = 1.0
     tokens = (torch.arange(0, 192) % 32).view(1, 192)
@@ -653,7 +642,6 @@ def test_random_variants_are_unique(monkeypatch):
         num_random_variants=3,
         random_variant_iterations=3,
         train_wc_length=256,
-        max_counterfactuals=5,
     )
     tokens = (torch.arange(0, 320) % 32).view(1, 320)
     _, sample_state, _, _ = controller._build_tree_sample(tokens, "unique_variants")
@@ -686,7 +674,6 @@ def test_lod_metrics_weighted_by_histogram(monkeypatch):
         monkeypatch,
         num_random_variants=2,
         random_variant_iterations=3,
-        max_counterfactuals=5,
         train_wc_length=128,
     )
     tokens = (torch.arange(0, 320) % 32).view(1, 320)
@@ -700,11 +687,13 @@ def test_lod_metrics_weighted_by_histogram(monkeypatch):
         _,
         lod_metrics,
         lod_counts,
+        lod_delta_metrics,
     ) = result
     assert 0 in lod_counts and lod_counts[0] > 0
     total_entries = sum(lod_counts.values())
     assert total_entries > 0
     assert 0 in lod_metrics
+    assert isinstance(lod_delta_metrics, dict)
 
 
 def test_lens_targets_mask_respects_legality(monkeypatch):
@@ -764,7 +753,6 @@ def test_lensnet_timers_and_usage(monkeypatch):
         monkeypatch,
         num_random_variants=1,
         random_variant_iterations=1,
-        max_counterfactuals=2,
         allocator_iterations=1,
         allocator_recent_tokens=0,
         train_wc_length=64,
@@ -784,7 +772,6 @@ def test_lensnet_timers_and_usage(monkeypatch):
 def test_train_report_uses_non_baseline_variant(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        max_counterfactuals=6,
         max_lod=2,
         allocator_iterations=1,
         allocator_max_replacements=1,
@@ -806,7 +793,6 @@ def test_train_report_uses_non_baseline_variant(monkeypatch):
 def test_variants_respect_recent_tokens_tail(monkeypatch, recent):
     controller = _build_mc_controller(
         monkeypatch,
-        max_counterfactuals=8,
         max_lod=2,
         allocator_recent_tokens=recent,
         allocator_iterations=1,
@@ -871,7 +857,6 @@ def test_mc_controller_returns_cached_embeddings(monkeypatch):
 def test_process_batch_enforces_variant_coverage(monkeypatch):
     controller = _build_mc_controller(
         monkeypatch,
-        max_counterfactuals=6,
         allocator_recent_tokens=32,
         allocator_iterations=1,
         allocator_max_replacements=2,

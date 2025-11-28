@@ -100,6 +100,7 @@ class MCBatchResult:
     preference_agreement: Optional[float] = None
     policy_score_abs_mean: Optional[float] = None
     policy_score_std_mean: Optional[float] = None
+    lod_delta_metrics: Dict[int, float] = field(default_factory=dict)
 
 
 class MCTelemetry:
@@ -202,6 +203,7 @@ class MCController:
             "sibling_collapses": 0,
             "allocator_edits": 0,
         }
+        self._current_variant_fallbacks = 0
         self._debug_flags: Dict[str, bool] = {}
         self.last_batch_profile: Optional[Dict[str, int]] = None
         if config.embed_dim % config.num_heads != 0:
@@ -491,6 +493,8 @@ class MCController:
         self._update_train_progress(step, context)
         self.last_batch_profile = None
         self.last_timings = {}
+        self.last_timings["variant_pack_ms"] = 0.0
+        self._current_variant_fallbacks = 0
         batch_states: List[SampleContext] = []
         total_edits = 0
         tokens_device = tokens.to(self.device)
@@ -538,14 +542,21 @@ class MCController:
             self._emit_batch_counters(step)
             self.last_train_report = None
             total_ms = (time.time() - t_total0) * 1000.0
+            build_ms = (t_build1 - t_build0) * 1000.0
+            positional_ms = (t_pos1 - t_pos0) * 1000.0
+            variant_pack_ms = self.last_timings.get("variant_pack_ms", 0.0)
+            component_sum = build_ms + positional_ms + variant_pack_ms
+            other_ms = max(total_ms - component_sum, 0.0)
             self.last_timings = {
-                "build_ms": (t_build1 - t_build0) * 1000.0,
-                "positional_ms": (t_pos1 - t_pos0) * 1000.0,
+                "build_ms": build_ms,
+                "positional_ms": positional_ms,
                 "variant_ms": 0.0,
+                "variant_pack_ms": variant_pack_ms,
                 "lens_ms": 0.0,
                 "lens_loss_ms": 0.0,
                 "lens_forward_ms": self._last_lens_forward_ms,
                 "focus_ms": 0.0,
+                "other_ms": other_ms,
                 "total_ms": total_ms,
             }
             return result
@@ -558,6 +569,7 @@ class MCController:
             adv_delta_std,
             lod_metrics,
             lod_counts,
+            lod_delta_metrics,
         ) = self._compute_variant_losses(batch_states, tokens_device)
         t_var1 = time.time()
         t_lens0 = time.time()
@@ -577,6 +589,7 @@ class MCController:
             adv_delta_std=adv_delta_std,
             lod_metrics=lod_metrics,
             lod_counts=lod_counts,
+            lod_delta_metrics=lod_delta_metrics,
         )
         if getattr(self, "_last_preference_corr", None):
             result.preference_corr_mean = self._last_preference_corr.get("preference_corr_mean")
@@ -617,6 +630,7 @@ class MCController:
         self.last_batch_profile = {
             "variant_counts": variant_counts,
             "total_variants": total_variants,
+            "deterministic_variant_fallbacks": self._current_variant_fallbacks,
         }
         if adv_delta_mean is not None:
             self._log_event(
@@ -636,6 +650,12 @@ class MCController:
                 "lod_counts",
                 {f"lod_{lod}_count": int(val) for lod, val in lod_counts.items()},
             )
+        if self._current_variant_fallbacks:
+            self._log_event(
+                f"train_step_{step}",
+                "variant_fallbacks",
+                {"count": int(self._current_variant_fallbacks)},
+            )
         self._log_event(
             f"train_step_{step}",
             "mc_batch_stats",
@@ -647,14 +667,22 @@ class MCController:
             },
         )
         total_ms = (time.time() - t_total0) * 1000.0
+        build_ms = (t_build1 - t_build0) * 1000.0
+        positional_ms = (t_pos1 - t_pos0) * 1000.0
+        variant_ms = (t_var1 - t_var0) * 1000.0
+        variant_pack_ms = self.last_timings.get("variant_pack_ms", 0.0)
+        component_sum = build_ms + positional_ms + variant_ms + lens_loss_ms + variant_pack_ms
+        other_ms = max(total_ms - component_sum, 0.0)
         self.last_timings = {
-            "build_ms": (t_build1 - t_build0) * 1000.0,
-            "positional_ms": (t_pos1 - t_pos0) * 1000.0,
-            "variant_ms": (t_var1 - t_var0) * 1000.0,
+            "build_ms": build_ms,
+            "positional_ms": positional_ms,
+            "variant_ms": variant_ms,
+            "variant_pack_ms": variant_pack_ms,
             "lens_ms": lens_loss_ms,
             "lens_loss_ms": lens_loss_ms,
             "lens_forward_ms": self._last_lens_forward_ms,
             "focus_ms": 0.0,
+            "other_ms": other_ms,
             "total_ms": total_ms,
         }
         return result
@@ -740,10 +768,10 @@ class MCController:
         seed = self._build_full_lod0_variant(tree)
         if seed is None:
             return variants
-        limit = max(1, self.config.max_counterfactuals)
+        target_variants = max(0, int(self.config.num_random_variants))
         training_variator = self._build_training_variation_allocator(tree)
         retries = max(5, int(self.config.random_variant_iterations) * 4)
-        for idx in range(self.config.num_random_variants):
+        for idx in range(target_variants):
             wc: Optional[WorkingContext] = None
             for _ in range(retries):
                 candidate = self._clone_working_context(seed.working_context)
@@ -758,6 +786,7 @@ class MCController:
                 wc = candidate
                 break
             if wc is None:
+                self._current_variant_fallbacks += 1
                 fallback = self._clone_working_context(seed.working_context)
                 training_variator.collapse_to_target(
                     fallback,
@@ -780,9 +809,7 @@ class MCController:
                 continue
             seen_signatures.add(signature)
             variants.append(variant)
-            if len(variants) >= limit:
-                break
-        return variants[:limit]
+        return variants
 
     def _build_random_variant(
         self,
@@ -1432,36 +1459,31 @@ class MCController:
         max_len = max(variant.working_context.length for variant in variants)
         embed_dim = self.config.embed_dim
         batch = len(variants)
-        device = torch.device("cpu")
-        embeddings_cpu = torch.empty(
+        device = self.device
+        embeddings = torch.empty(
             (batch, max_len, embed_dim),
             dtype=self._target_dtype,
             device=device,
-            pin_memory=True,
         )
-        positions_cpu = torch.empty(
+        positions = torch.empty(
             (batch, max_len),
             dtype=torch.long,
             device=device,
-            pin_memory=True,
         )
-        lods_cpu = torch.empty(
+        lods = torch.empty(
             (batch, max_len),
             dtype=torch.long,
             device=device,
-            pin_memory=True,
         )
-        cos_cpu = torch.empty(
+        cos_tensor = torch.empty(
             (batch, max_len, cos_heads, cos_dim),
             dtype=self._target_dtype,
             device=device,
-            pin_memory=True,
         )
-        sin_cpu = torch.empty(
+        sin_tensor = torch.empty(
             (batch, max_len, cos_heads, cos_dim),
             dtype=self._target_dtype,
             device=device,
-            pin_memory=True,
         )
         lengths: List[int] = []
         for idx, variant in enumerate(variants):
@@ -1479,26 +1501,24 @@ class MCController:
             length = tensor.shape[0]
             start = max_len - length
             if start > 0:
-                embeddings_cpu[idx, :start].zero_()
-                positions_cpu[idx, :start].zero_()
-                lods_cpu[idx, :start].zero_()
-                cos_cpu[idx, :start].zero_()
-                sin_cpu[idx, :start].zero_()
-            embeddings_cpu[idx, start:, :] = tensor[-length:]
-            positions_cpu[idx, start:] = pos[-length:]
-            lods_cpu[idx, start:] = lod[-length:]
-            cos_cpu[idx, start:, :, :] = cos[-length:, :, :]
-            sin_cpu[idx, start:, :, :] = sin[-length:, :, :]
+                embeddings[idx, :start].zero_()
+                positions[idx, :start].zero_()
+                lods[idx, :start].zero_()
+                cos_tensor[idx, :start].zero_()
+                sin_tensor[idx, :start].zero_()
+            embeddings[idx, start:, :] = tensor[-length:]
+            positions[idx, start:] = pos[-length:]
+            lods[idx, start:] = lod[-length:]
+            cos_tensor[idx, start:, :, :] = cos[-length:, :, :]
+            sin_tensor[idx, start:, :, :] = sin[-length:, :, :]
             lengths.append(length)
-        staged = {
-            "embeddings": embeddings_cpu,
-            "positions": positions_cpu,
-            "lods": lods_cpu,
-            "cos": cos_cpu,
-            "sin": sin_cpu,
-        }
-        gpu_data = {k: v.to(self.device, non_blocking=True) for k, v in staged.items()}
-        return gpu_data, lengths
+        return {
+            "embeddings": embeddings,
+            "positions": positions,
+            "lods": lods,
+            "cos": cos_tensor,
+            "sin": sin_tensor,
+        }, lengths
 
     def _batch_variant_scores(
         self, variants: List[WorkingContextVariant]
@@ -1526,6 +1546,7 @@ class MCController:
         for idx, variant in enumerate(pending):
             length = lengths[idx]
             var_scores = scores[idx : idx + 1, -length:].clone()
+            var_scores = var_scores.reshape(var_scores.shape[0], -1)
             cache[id(variant)] = var_scores
             variant.policy_scores = var_scores.detach().clone()
         for variant in variants:
@@ -1799,6 +1820,7 @@ class MCController:
         Optional[float],
         Dict[int, float],
         Dict[int, int],
+        Dict[int, float],
     ]:
         entries = self._prepare_variant_entries(batch_states, original_tokens)
         if not entries:
@@ -1814,6 +1836,8 @@ class MCController:
         lod_sums: Dict[int, float] = {}
         lod_weights: Dict[int, float] = {}
         lod_token_counts: Dict[int, int] = {}
+        lod_delta_sums: Dict[int, float] = {}
+        lod_delta_weights: Dict[int, float] = {}
         for sample in batch_states:
             for variant in sample.variants:
                 variant.adv_delta = None  # type: ignore[attr-defined]
@@ -1837,6 +1861,11 @@ class MCController:
                     lod_sums[lod] = lod_sums.get(lod, 0.0) + val * weight
                     lod_weights[lod] = lod_weights.get(lod, 0.0) + weight
                     lod_token_counts[lod] = lod_token_counts.get(lod, 0) + int(count)
+                    if baseline is not None and variant.lod_hint != 0:
+                        delta = val - baseline
+                        if lod > 0:
+                            lod_delta_sums[lod] = lod_delta_sums.get(lod, 0.0) + delta * weight
+                            lod_delta_weights[lod] = lod_delta_weights.get(lod, 0.0) + weight
                 if baseline is not None and variant is not None and variant.lod_hint != 0:
                     adv_values.append(val - baseline)
                 if variant.adv_delta is not None:
@@ -1855,6 +1884,11 @@ class MCController:
             if lod_weights.get(lod)
         }
         lod_counts = lod_token_counts
+        lod_delta_metrics = {
+            lod: (lod_delta_sums[lod] / max(lod_delta_weights[lod], 1e-6))
+            for lod in lod_delta_sums.keys()
+            if lod_delta_weights.get(lod)
+        }
 
         if all_advantages:
             adv_tensor = torch.tensor(all_advantages, dtype=torch.float32)
@@ -1876,7 +1910,16 @@ class MCController:
                         continue
                     variant.norm_adv_delta = (variant.adv_delta - mean) / std
 
-        return loss_tensor.mean(), lod0_loss, adv_delta_mean, adv_delta_p95, adv_delta_std, lod_metrics, lod_counts
+        return (
+            loss_tensor.mean(),
+            lod0_loss,
+            adv_delta_mean,
+            adv_delta_p95,
+            adv_delta_std,
+            lod_metrics,
+            lod_counts,
+            lod_delta_metrics,
+        )
 
     def _prepare_variant_entries(
         self,
@@ -2562,6 +2605,7 @@ class MCController:
         device = entries[0]["scores"].device
         dtype = entries[0]["scores"].dtype
         num_pairs = len(entries)
+        margin = float(self.config.lens_margin)
         lengths = torch.tensor([entry["scores"].numel() for entry in entries], device=device, dtype=torch.long)
         pair_ids = torch.repeat_interleave(torch.arange(num_pairs, device=device, dtype=torch.long), lengths)
         scores_cat = torch.cat([entry["scores"] for entry in entries])
@@ -2648,7 +2692,11 @@ class MCController:
         strength = math.tanh(abs(delta_vs_best))
         if strength <= 0.0:
             span_tokens = torch.ones_like(score_template)
-            return targets_cpu.to(device=device), mask_cpu.to(device=device), span_tokens.to(device=device)
+            return (
+                targets_cpu.reshape(-1).to(device=device),
+                mask_cpu.reshape(-1).to(device=device),
+                span_tokens.reshape(-1).to(device=device),
+            )
         span_tokens = spans.to(score_template.dtype)
         if best_map:
             desired_list = [best_map.get(int(pos), int(lod)) for pos, lod in zip(positions.tolist(), lods.tolist())]
@@ -2681,9 +2729,9 @@ class MCController:
                 targets_cpu[collapse_mask] = -strength
                 mask_cpu[collapse_mask] = True
         return (
-            targets_cpu.to(device=device),
-            mask_cpu.to(device=device),
-            span_tokens.to(device=device),
+            targets_cpu.reshape(-1).to(device=device),
+            mask_cpu.reshape(-1).to(device=device),
+            span_tokens.reshape(-1).to(device=device),
         )
 
     # ------------------------------------------------------------------ #

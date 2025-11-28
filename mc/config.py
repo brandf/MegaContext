@@ -41,7 +41,6 @@ class MCConfig:
     lensnet_head: str = "mlp"  # mlp | linear
     allocator_type: str = "greedy"
     mc_tree_type: str = "ram"
-    max_counterfactuals: int = 4
     token_loss_weight: float = 1.0
     lens_loss_weight: float = 0.1
     soft_max_length: Optional[int] = None
@@ -111,7 +110,6 @@ class MCConfig:
         )
         if self.soft_max_length is None:
             self.soft_max_length = self.wc_config.max_length
-        self.max_counterfactuals = max(1, int(self.max_counterfactuals))
         if self.eval_soft_max_length is None:
             self.eval_soft_max_length = self.wc_config.max_length
         self.infer_refocus_interval = max(1, int(self.infer_refocus_interval))

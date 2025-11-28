@@ -33,7 +33,6 @@ def test_inference_facade_smoke():
         max_seq_len=16,
         block_size=2,
         device="cpu",
-        max_counterfactuals=1,
         allocator_recent_tokens=0,
         num_heads=1,
     )
@@ -56,7 +55,6 @@ def test_mc_controller_validates_head_divisibility():
         max_seq_len=16,
         block_size=2,
         device="cpu",
-        max_counterfactuals=1,
         allocator_recent_tokens=0,
         num_heads=3,
     )

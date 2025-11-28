@@ -43,7 +43,6 @@ def test_inference_emits_focus_telemetry_with_residency():
         max_seq_len=32,
         block_size=2,
         device="cpu",
-        max_counterfactuals=1,
         allocator_recent_tokens=0,
         allocator_iterations=1,  # ensure one update tick
         num_heads=1,

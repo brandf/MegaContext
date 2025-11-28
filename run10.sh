@@ -55,8 +55,8 @@ MC_DISABLE_VAL=0
 MC_LENS_COLLAPSE_WEIGHT=1.0
 MC_LENS_TEMPERATURE=1.0
 MC_TRAIN_WC_LENGTH=""
-MC_NUM_RANDOM_VARIANTS=4
-MC_RANDOM_VARIANT_ITERATIONS=4
+MC_NUM_RANDOM_VARIANTS=2
+MC_RANDOM_VARIANT_ITERATIONS=2
 MC_MAX_LENS_PAIRS=8
 MC_LENS_KL_WEIGHT=0.0
 MC_LENS_ADV_NORM_BETA=0.9
@@ -67,7 +67,6 @@ MC_COMPILE_GISTNET=1
 MC_COMPILE_LENSNET=1
 GRAD_CLIP=1.0
 WARMUP_RATIO=0.02
-MC_MAX_COUNTERFACTUALS=8
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gpu)
@@ -157,11 +156,6 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_infer_refocus_interval" >&2; exit 1; }
             MC_INFER_REFOCUS_INTERVAL="$1"
-            ;;
-        --mc_max_counterfactuals)
-            shift
-            [[ $# -gt 0 ]] || { echo "Missing value for --mc_max_counterfactuals" >&2; exit 1; }
-            MC_MAX_COUNTERFACTUALS="$1"
             ;;
         --allocator_soft_max)
             shift
@@ -317,11 +311,9 @@ MAX_SEQ_LEN=2048
 case "$GPU_PROFILE" in
     5090)
         DEVICE_BATCH_SIZE=20
-        NUM_ITERATIONS=75500
         ;;
     h100)
-        DEVICE_BATCH_SIZE=56
-        NUM_ITERATIONS=37750
+        DEVICE_BATCH_SIZE=52
         ;;
     *)
         echo "Unsupported GPU profile: $GPU_PROFILE (expected 5090 or h100)" >&2
@@ -338,11 +330,14 @@ TOKENIZER_MAX_CHARS=2000000000
 PRETRAIN_SHARDS=160
 
 TOTAL_BATCH_SIZE=$((DEVICE_BATCH_SIZE * MAX_SEQ_LEN))
+TRAIN_TOKENS_TARGET=${TRAIN_TOKENS_TARGET:-4329472000}
+NUM_ITERATIONS=$(( (TRAIN_TOKENS_TARGET + TOTAL_BATCH_SIZE - 1) / TOTAL_BATCH_SIZE ))
+ACTUAL_TRAIN_TOKENS=$((NUM_ITERATIONS * TOTAL_BATCH_SIZE))
 
 echo "Run10 profile: $GPU_PROFILE"
 echo "Depth: $DEPTH  |  Seq len: $MAX_SEQ_LEN"
 echo "Device batch: $DEVICE_BATCH_SIZE  |  Total batch: $TOTAL_BATCH_SIZE tokens"
-echo "Iterations: $NUM_ITERATIONS"
+echo "Iterations: $NUM_ITERATIONS (target tokens: $TRAIN_TOKENS_TARGET actual: $ACTUAL_TRAIN_TOKENS)"
 echo "MegaContext enabled: $MC_ENABLED"
 
 # -----------------------------------------------------------------------------
@@ -414,7 +409,6 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_aux_dtype="$MC_AUX_DTYPE" \
     --allocator_soft_max="$ALLOCATOR_SOFT_MAX" \
     --mc_auto_batch="$MC_AUTO_BATCH" \
-    --mc_max_counterfactuals="$MC_MAX_COUNTERFACTUALS" \
     --mc_eval_soft_max_length="$MC_EVAL_SOFT_MAX_LENGTH" \
     --mc_infer_allocator_max_replacements="$MC_INFER_ALLOCATOR_MAX_REPLACEMENTS" \
     --mc_infer_allocator_iterations="$MC_INFER_ALLOCATOR_ITERATIONS" \

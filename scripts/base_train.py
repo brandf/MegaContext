@@ -101,7 +101,6 @@ allocator_sample_top_k = 4
 allocator_sample_temperature = 1.0
 mc_aux_dtype = "auto"
 mc_tree_type = "ram"
-mc_max_counterfactuals = 8
 mc_lens_loss_weight = 0.1
 mc_auto_batch = 1
 mc_eval_soft_max_length = None
@@ -128,7 +127,7 @@ mc_lens_budget_smooth_weight = 0.0
 mc_lens_budget_smooth_beta = 0.9
 mc_lens_hard_negative_ratio = 1.0
 mc_train_wc_length = None
-mc_num_random_variants = 4
+mc_num_random_variants = 2
 mc_random_variant_iterations = 4
 mc_max_lens_pairs = 8
 mc_compile_gistnet = 1
@@ -188,7 +187,7 @@ user_config = {k: globals()[k] for k in config_keys} # will be useful for loggin
 
 # Auto-adjust batch size for MC variant amplification
 if mc_enabled and mc_auto_batch:
-    variant_multiplier = max(1, mc_max_counterfactuals)
+    variant_multiplier = max(1, mc_num_random_variants + 1)
     if variant_multiplier > 1:
         original_device_batch_size = device_batch_size
         original_total_batch_size = total_batch_size
@@ -274,7 +273,6 @@ if mc_enabled:
         lensnet_head=lensnet_head,
         allocator_type=allocator_type,
         mc_tree_type=mc_tree_type,
-        max_counterfactuals=mc_max_counterfactuals,
         lens_loss_weight=mc_lens_loss_weight,
         soft_max_length=allocator_soft_max,
         eval_soft_max_length=mc_eval_soft_max_length,
@@ -649,6 +647,7 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
 # -----------------------------------------------------------------------------
 # Training loop
 min_val_bpb = float("inf")
+val_bpb = float("inf")  # default so checkpoint/final logs always have a value
 smooth_train_loss = 0 # EMA of training loss
 ema_beta = 0.9 # EMA decay factor
 total_training_time = 0 # total wall-clock time of training
@@ -1003,6 +1002,9 @@ for step in range(num_iterations + 1):
         if mc_result is not None and mc_result.lod_metrics:
             for lod, val in mc_result.lod_metrics.items():
                 log_data[f"mc/lod_loss/{lod}"] = val
+        if mc_result is not None and mc_result.lod_delta_metrics:
+            for lod, val in mc_result.lod_delta_metrics.items():
+                log_data[f"mc/lod_delta/{lod}"] = val
         if mc_result is not None:
             if mc_result.preference_corr_mean is not None:
                 log_data["mc/preference_corr_mean"] = mc_result.preference_corr_mean

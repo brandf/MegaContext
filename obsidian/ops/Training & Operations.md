@@ -39,7 +39,7 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 
 | Scenario | Command | Notes |
 | --- | --- | --- |
-| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--block_size 8|32|128] [--gistnet_* ...] [--lensnet_* ...] [--allocator ...] [--mc_tree ram|disk] [--mc_num_random_variants N --mc_train_wc_length L --mc_max_counterfactuals N] [--mc_lens_loss_weight 0.1] [--mc_auto_batch 1|0]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
+| Single rented GPU (32 GB+) | `bash run10.sh --gpu 5090 [--mc] [--block_size 8|32|128] [--gistnet_* ...] [--lensnet_* ...] [--allocator ...] [--mc_tree ram|disk] [--mc_num_random_variants N --mc_train_wc_length L] [--mc_lens_loss_weight 0.1] [--mc_auto_batch 1|0]` | Depth 12, ~3.1 B tokens, fits 5090/A6000 class cards. |
 | Single H100 (80 GB) | `bash run10.sh --gpu h100 [--mc] ...` | Doubles device batch size, halves iteration count for the same token budget. |
 | $100 speed tier | `bash speedrun.sh [--mc] ...` | 8×H100, depth 20 (Karpathy’s “best $100” recipe). |
 | $1000 tier | `bash run1000.sh [--mc] ...` | 8×H100, depth 32 with tuned accumulation. |
@@ -52,9 +52,9 @@ If you discover a missing script or new entrypoint, add it here and update `obsi
 
 - **Tree / WC sampling**
   - `--mc_tree ram` (disk-backed MegaContext is on the roadmap; today only the in-memory tree is wired up and the scripts will error if another value is provided).
-  - `--mc_num_random_variants` (N) + `--mc_max_counterfactuals` bound how many random WC compressions we train per sequence. The controller anneals the target WC length from 80 % of `max_seq_len` down to `mc_train_wc_length` (default 20 %) over the course of training, so the curriculum goes from “easy” compressions to “hard” ones automatically.
+  - `--mc_num_random_variants` (N) controls how many random WC compressions we train per sequence. The controller anneals the target WC length from 80 % of `max_seq_len` down to `mc_train_wc_length` (default 20 %) over the course of training, so the curriculum goes from “easy” compressions to “hard” ones automatically. With `--mc_auto_batch 1` we automatically divide the per-device batch by `(1 + N)` and stretch `num_iterations` so MC runs see the exact same training tokens as vanilla.
 - **Horizon & losses**
-  - Random variants + `--mc_max_counterfactuals` control how many WCs are sampled per sequence. Each variant trains directly against the next-token objective, so no separate horizon tuning is required.
+  - Random variants expand each training sequence into `(1 + N)` WCs that all share the same tokens; each variant trains directly against the next-token objective, so no separate horizon tuning is required.
   - `--mc_auto_batch` (default `1`) automatically scales `device_batch_size` and `num_iterations` based on the variant multiplier so MC runs keep a similar token budget to vanilla; set it to `0` if you want to manage batch math manually.
   - `--mc_lens_loss_weight` scales the LensNet supervision that rides on top of the core loss; `--mc_lens_temperature` controls the sharpness of the Bradley–Terry preference loss (lower = sharper, higher = smoother).
   - `--mc_lens_adv_norm_beta`, `--mc_lens_kl_weight`, `--mc_lens_budget_smooth_weight`, `--mc_lens_budget_smooth_beta` configure the stability helpers (advantage normalization EMA, policy KL regularizer, and budget smoothing EMA).

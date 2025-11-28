@@ -34,7 +34,6 @@ def test_lod0_cache_policy_disables_cache_on_init():
         max_seq_len=16,
         block_size=2,
         device="cpu",
-        max_counterfactuals=1,
         allocator_recent_tokens=0,
         num_heads=1,
     )
