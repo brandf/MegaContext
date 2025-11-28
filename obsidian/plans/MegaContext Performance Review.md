@@ -28,6 +28,7 @@ summary: Review of the current MegaContext run10 telemetry (steps 0–170) and r
 2. **Gists remain expensive.** `lod_loss_1` > `lod_loss_0` by ~1 nat and `lod_delta/1` trending upward shows we haven’t yet made LOD1 spans competitive with raw tokens.
 3. **LensNet scoring is healthy.** Policy scores separate (abs mean and std diverge), correlation stays positive, and the lens loss decreases steadily.
 4. **Variants provide strong supervision.** ΔNLL statistics (mean/p95/std) continue rising, so preference pairs remain informative at this learning rate.
+5. **Token-aligned telemetry is live.** The base trainer now logs `train/tokens_per_step`, `train/grad_accum_steps`, and `mc/grad_accum_steps`, so WANDB overlays immediately show that baseline and MC runs stayed in lock-step. All cadence triggers (eval/core/ckpt/log) are keyed off the same token counter, which eliminates the step-count mismatches called out in the previous review.
 
 ## Next Steps
 1. **Improve gist quality**
@@ -38,8 +39,8 @@ summary: Review of the current MegaContext run10 telemetry (steps 0–170) and r
 3. **Monitor controller overhead**
    - Keep `variant_pack_ms` telemetry and confirm it stays <10 ms after future changes. If it rises, re-evaluate packing strategies before touching batch size.
 4. **Document the new metrics**
-   - Update `lensnet_perf_investigation.md` with the `lod_delta` findings and the recommended GistNet improvements so future runs have a reference baseline.
-5. **Optional:** Add WANDB panels for `mc/other_ms`, `mc/variant_pack_ms`, and `mc/lod_delta/1` so regressions are visible without diving into logs.
+   - ✅ `lensnet_perf_investigation.md` now references the `lod_delta` telemetry; additionally, the README + alignment plan describe how to read the `train/tokens_per_step` and grad-accum logs when comparing runs.
+5. **Optional:** Add WANDB panels for `mc/other_ms`, `mc/variant_pack_ms`, `mc/lod_delta/1`, and the new token-per-step series so regressions are visible without diving into logs. Template draft lives in `obsidian/plans/mc_and_baseline_alignment.md`.
 
 _Update (Nov 28): the first two bullets are now wired up—`mc_gist_delta_weight` penalizes variants whose ΔNLL exceeds the baseline, and WANDB exposes `mc/pref_span_corr` so we can see span-level LensNet alignment without spelunking raw logs._
 

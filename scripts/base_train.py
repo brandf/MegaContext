@@ -34,11 +34,14 @@ try:
     from mc.config import MCConfig
     from mc.runtime import MCController, WorkingContextVariant
     from mc.telemetry import OpenTelemetryProvider, NoOpTelemetryProvider
+    from mc.auto_batch import compute_variant_multiplier, choose_micro_batch_divisor
 except ImportError:  # pragma: no cover - optional dependency during early development
     MCController = None
     MCConfig = None
     OpenTelemetryProvider = None
     NoOpTelemetryProvider = None
+    compute_variant_multiplier = None
+    choose_micro_batch_divisor = None
 print_banner()
 
 if NoOpTelemetryProvider is None:
@@ -185,38 +188,47 @@ mc_compile_gistnet = _parse_bool_flag(mc_compile_gistnet)
 mc_compile_lensnet = _parse_bool_flag(mc_compile_lensnet)
 disable_validation = bool(mc_disable_val)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
+# Preserve baseline batch/tokens so MC auto-batch can keep them aligned.
+original_device_batch_size = device_batch_size
+original_total_batch_size = total_batch_size
+original_num_iterations = num_iterations
 # -----------------------------------------------------------------------------
-
-# Auto-adjust batch size for MC variant amplification
-if mc_enabled and mc_auto_batch:
-    base_variant_multiplier = max(1, mc_num_random_variants + 1)
-    train_wc_target = mc_train_wc_length if mc_train_wc_length is not None else int(round(max_seq_len * 0.75))
-    train_wc_target = max(1, min(max_seq_len, int(train_wc_target)))
-    tokens_ratio = 1.0 + (mc_num_random_variants * train_wc_target) / max_seq_len
-    combined_multiplier = math.ceil(tokens_ratio * base_variant_multiplier)
-    variant_multiplier = max(base_variant_multiplier, combined_multiplier)
-    if variant_multiplier > 1:
-        original_device_batch_size = device_batch_size
-        original_total_batch_size = total_batch_size
-        original_num_iterations = num_iterations
-        device_batch_size = max(1, device_batch_size // variant_multiplier)
-        total_batch_size = device_batch_size * max_seq_len
-        target_tokens = original_total_batch_size * max(1, original_num_iterations)
-        if total_batch_size > 0:
-            num_iterations = max(1, math.ceil(target_tokens / total_batch_size))
-        eval_device_batch_size = original_device_batch_size
-        print0(
-            "[MegaContext] auto batch adjust: "
-            f"device_batch_size {original_device_batch_size} -> {device_batch_size}, "
-            f"total_batch_size {original_total_batch_size} -> {total_batch_size}, "
-            f"num_iterations {original_num_iterations} -> {num_iterations} "
-            f"(variance multiplier={variant_multiplier})"
-        )
 
 # Compute init
 device_type = autodetect_device_type() if device_type == "" else device_type
 ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
 master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
+per_rank_token_budget = None
+mc_grad_accum_override = None
+tokens_per_step = total_batch_size
+if total_batch_size % (max_seq_len * ddp_world_size) != 0:
+    raise ValueError(
+        f"total_batch_size ({total_batch_size}) must be divisible by max_seq_len ({max_seq_len}) * world_size ({ddp_world_size})"
+    )
+per_rank_token_budget = total_batch_size // (max_seq_len * ddp_world_size)
+# Auto-adjust batch size for MC variant amplification while keeping tokens_per_step constant.
+if mc_enabled and mc_auto_batch:
+    if compute_variant_multiplier is None or choose_micro_batch_divisor is None:
+        raise ImportError("mc package is required when --mc_enabled=1")
+    variant_multiplier = compute_variant_multiplier(max_seq_len, mc_num_random_variants, mc_train_wc_length)
+    if variant_multiplier > 1:
+        new_device_batch_size, grad_accum_estimate = choose_micro_batch_divisor(
+            per_rank_token_budget,
+            variant_multiplier,
+        )
+        if new_device_batch_size != device_batch_size:
+            prev_grad_accum = per_rank_token_budget // max(1, device_batch_size)
+            print0(
+                "[MegaContext] auto batch adjust: "
+                f"device_batch_size {device_batch_size} -> {new_device_batch_size}, "
+                f"grad_accum_steps {prev_grad_accum} -> {grad_accum_estimate}, "
+                f"tokens_per_step={tokens_per_step} "
+                f"(variant multiplier target={variant_multiplier})"
+            )
+            device_batch_size = new_device_batch_size
+            eval_device_batch_size = original_device_batch_size
+            mc_grad_accum_override = grad_accum_estimate
+
 def _training_autocast():
     if device_type == "cuda":
         return torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
@@ -251,6 +263,10 @@ tokens_per_fwdbwd = device_batch_size * max_seq_len # tokens per iteration for a
 world_tokens_per_fwdbwd = tokens_per_fwdbwd * ddp_world_size # total tokens per iteration for all ranks
 assert total_batch_size % world_tokens_per_fwdbwd == 0
 grad_accum_steps = total_batch_size // world_tokens_per_fwdbwd
+if mc_grad_accum_override is not None and grad_accum_steps != mc_grad_accum_override:
+    raise RuntimeError(
+        f"MegaContext auto-batch grad_accum mismatch: expected {mc_grad_accum_override}, got {grad_accum_steps}"
+    )
 print0(f"Tokens / micro-batch / rank: {device_batch_size} x {max_seq_len} = {tokens_per_fwdbwd:,}")
 print0(f"Tokens / micro-batch: {world_tokens_per_fwdbwd:,}")
 print0(f"Total batch size {total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
@@ -660,10 +676,23 @@ val_bpb = float("inf")  # default so checkpoint/final logs always have a value
 smooth_train_loss = 0 # EMA of training loss
 ema_beta = 0.9 # EMA decay factor
 total_training_time = 0 # total wall-clock time of training
+eval_interval_tokens = eval_every * tokens_per_step if eval_every > 0 else None
+next_eval_tokens = 0 if eval_interval_tokens is not None else None
+core_metric_interval_tokens = core_metric_every * tokens_per_step if core_metric_every > 0 else None
+next_core_metric_tokens = core_metric_interval_tokens if core_metric_interval_tokens is not None else None
+sample_interval_tokens = sample_every * tokens_per_step if sample_every > 0 else None
+next_sample_tokens = sample_interval_tokens if sample_interval_tokens is not None else None
+checkpoint_interval_steps = 1000
+checkpoint_interval_tokens = checkpoint_interval_steps * tokens_per_step
+next_checkpoint_tokens = checkpoint_interval_tokens
+log_interval_steps = 100
+log_interval_tokens = log_interval_steps * tokens_per_step
+next_log_tokens = 0
 # note that we run +1 steps only so that we can eval and save at the end
 for step in range(num_iterations + 1):
     last_step = step == num_iterations
     flops_so_far = num_flops_per_token * total_batch_size * step
+    tokens_so_far = step * tokens_per_step
     mc_lens_loss_val = None
     mc_lens_loss_samples = []
     mc_time_samples: list[float] = []
@@ -674,7 +703,13 @@ for step in range(num_iterations + 1):
     vanilla_loss_samples: list[float] = []
 
     # once in a while: evaluate the val bpb (all ranks participate)
-    if (not disable_validation) and (last_step or step % eval_every == 0):
+    should_evaluate = False
+    if not disable_validation:
+        if last_step:
+            should_evaluate = True
+        elif eval_interval_tokens is not None and next_eval_tokens is not None and tokens_so_far >= next_eval_tokens:
+            should_evaluate = True
+    if should_evaluate:
         model.eval()
         val_loader = build_val_loader()
         eval_steps = eval_tokens // (eval_device_batch_size * max_seq_len * ddp_world_size)
@@ -704,11 +739,19 @@ for step in range(num_iterations + 1):
             "val/bpb": val_bpb,
         })
         model.train()
+        if eval_interval_tokens is not None and next_eval_tokens is not None and not last_step:
+            next_eval_tokens += eval_interval_tokens
 
     # once in a while: estimate the CORE metric (all ranks participate)
     # use the original uncompiled model because the inputs keep changing shape
     results = {}
-    if core_metric_every > 0 and (last_step or (step > 0 and step % core_metric_every == 0)):
+    should_run_core_metric = False
+    if core_metric_interval_tokens is not None:
+        if last_step:
+            should_run_core_metric = True
+        elif step > 0 and next_core_metric_tokens is not None and tokens_so_far >= next_core_metric_tokens:
+            should_run_core_metric = True
+    if should_run_core_metric:
         model.eval()
         with _training_autocast():
             results = evaluate_model(orig_model, tokenizer, device, max_per_task=core_metric_max_per_task)
@@ -720,10 +763,18 @@ for step in range(num_iterations + 1):
             "centered_results": results["centered_results"],
         })
         model.train()
+        if core_metric_interval_tokens is not None and next_core_metric_tokens is not None and not last_step:
+            next_core_metric_tokens += core_metric_interval_tokens
 
     # once in a while: sample from the model (only on master process)
     # use the original uncompiled model because the inputs keep changing shape
-    if master_process and (last_step or (step > 0 and step % sample_every == 0)):
+    should_sample = False
+    if sample_interval_tokens is not None:
+        if last_step:
+            should_sample = True
+        elif step > 0 and next_sample_tokens is not None and tokens_so_far >= next_sample_tokens:
+            should_sample = True
+    if master_process and should_sample:
         model.eval()
         prompts = [
             "The capital of France is",
@@ -739,11 +790,14 @@ for step in range(num_iterations + 1):
             tokens = tokenizer(prompt, prepend="<|bos|>")
             with _training_autocast():
                 sample, _ = engine.generate_batch(tokens, num_samples=1, max_tokens=16, temperature=0)
-            print0(tokenizer.decode(sample[0]))
+                print0(tokenizer.decode(sample[0]))
         model.train()
+        if sample_interval_tokens is not None and next_sample_tokens is not None and not last_step:
+            next_sample_tokens += sample_interval_tokens
 
     # periodic checkpointing (only on master process)
-    should_checkpoint = last_step or (master_process and step > 0 and step % 1000 == 0)
+    periodic_checkpoint_due = checkpoint_interval_tokens is not None and step > 0 and tokens_so_far >= next_checkpoint_tokens
+    should_checkpoint = last_step or periodic_checkpoint_due
     if master_process and should_checkpoint:
         output_dirname = model_tag if model_tag else f"d{depth}"
         checkpoint_dir = os.path.join(base_dir, "base_checkpoints", output_dirname)
@@ -762,6 +816,8 @@ for step in range(num_iterations + 1):
                 "max_seq_len": max_seq_len,
             },
         )
+        if periodic_checkpoint_due and checkpoint_interval_tokens is not None and not last_step:
+            next_checkpoint_tokens += checkpoint_interval_tokens
 
     if last_step:
         break
@@ -972,8 +1028,7 @@ for step in range(num_iterations + 1):
         total_training_time += dt # only count the time after the first 10 steps
     print_grad_norm = f" grad norm: {grad_norm:.4f} |" if grad_clip_enabled else ""
     print0(f"step {step:05d}/{num_iterations:05d} ({pct_done:.2f}%) | loss: {debiased_smooth_loss:.6f} |{print_grad_norm} lrm: {lrm:.2f} | dt: {dt * 1000:.2f}ms | tok/sec: {tok_per_sec:,} | mfu: {mfu:.2f} | total time: {total_training_time/60:.2f}m")
-    log_interval = 5 if mc_controller is not None else 100
-    if step % log_interval == 0:
+    if tokens_so_far >= next_log_tokens:
         log_data = {
             "step": step,
             "total_training_flops": flops_so_far,
@@ -983,7 +1038,11 @@ for step in range(num_iterations + 1):
             "train/dt": dt,
             "train/tok_per_sec": tok_per_sec,
             "train/mfu": mfu,
+            "train/tokens_per_step": tokens_per_step,
+            "train/grad_accum_steps": grad_accum_steps,
         }
+        if mc_controller is not None:
+            log_data["mc/grad_accum_steps"] = grad_accum_steps
         if grad_clip_enabled:
             log_data["train/grad_norm"] = grad_norm
         if mc_time_samples:
@@ -1055,6 +1114,7 @@ for step in range(num_iterations + 1):
                 if key in log_data:
                     print0(f"{label}: {log_data[key]:.2f} ms")
         wandb_run.log(log_data)
+        next_log_tokens += log_interval_tokens
 
 # print a few more stats
 print0(f"Peak memory usage: {get_max_memory() / 1024 / 1024:.2f}MiB")

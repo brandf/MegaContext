@@ -37,6 +37,20 @@ The detailed operating guide (env prep, telemetry, troubleshooting) lives in [`o
 | $100 tier (8×H100) | `bash speedrun.sh` |
 | $1000 tier (8×H100) | `bash run1000.sh` |
 
+### Matched baseline vs. MegaContext runs
+
+Need apples-to-apples comparisons between vanilla nanochat and the `--mc` controller? Use the new profile switch so both modes see the exact same tokens per optimizer step:
+
+```bash
+# Baseline (no controller)
+bash run10.sh --profile baseline --gpu h100
+
+# MegaContext, same token budget and LR schedule
+bash run10.sh --profile mc --gpu h100
+```
+
+The auto-batcher now keeps `total_batch_size` fixed and adjusts only the per-device micro batch/grad accumulation, so both runs consume identical training tokens. WANDB logs expose `train/tokens_per_step`, `train/grad_accum_steps`, and `mc/grad_accum_steps` to prove the alignment, and every cadence gate (validation, sampling, checkpoints, logging) fires on token counts rather than raw step numbers. No extra spreadsheet math required—just overlay the runs and compare.
+
 These scripts run tokenizer → base → mid → chat SFT end-to-end, drop checkpoints in `~/.cache/nanochat`, and generate `report/report.md`. For chat/web demos after training, follow [[Base Runtime]](./obsidian/ops/Base%20Runtime.md). New box? Run `./mc_setup` once and follow the prompts— it installs `uv`, syncs deps, installs OTEL exporters, and writes `.mc_env` so `run10.sh` inherits your WANDB/HF/telemetry settings automatically.
 
 > 🆕 Set `--mc` (e.g. `bash run10.sh --gpu 5090 --mc`) to enable the MegaContext controller. The knobs below configure the tree/working-context components and their auxiliary losses:
