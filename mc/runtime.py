@@ -101,6 +101,7 @@ class MCBatchResult:
     policy_score_abs_mean: Optional[float] = None
     policy_score_std_mean: Optional[float] = None
     lod_delta_metrics: Dict[int, float] = field(default_factory=dict)
+    span_score_corr: Optional[float] = None
 
 
 class MCTelemetry:
@@ -206,6 +207,7 @@ class MCController:
         self._current_variant_fallbacks = 0
         self._debug_flags: Dict[str, bool] = {}
         self.last_batch_profile: Optional[Dict[str, int]] = None
+        self._last_span_score_corr: Optional[float] = None
         if config.embed_dim % config.num_heads != 0:
             raise ValueError("embed_dim must be divisible by num_heads for positional encodings")
         self.embed = self._resolve_embedding_layer(model)
@@ -621,6 +623,7 @@ class MCController:
         if getattr(self, "_last_policy_stats", None):
             result.policy_score_abs_mean = self._last_policy_stats.get("score_abs_mean")
             result.policy_score_std_mean = self._last_policy_stats.get("score_std_mean")
+        result.span_score_corr = getattr(self, "_last_span_score_corr", None)
         self.current_batch_states = []
         self._emit_batch_counters(step)
         self._refresh_train_report(batch_states)
@@ -1947,6 +1950,7 @@ class MCController:
                     "target_len": target_len,
                     "batch_idx": getattr(variant, "batch_index", 0),
                     "original_tokens": original_tokens,
+                    "sample_id": sample.session_id,
                 }
                 entries.append(entry)
         return entries
@@ -2051,7 +2055,26 @@ class MCController:
         else:
             loss2d = loss2d.view(batch_size, -1)
         valid = (token_batch.view(batch_size, -1) >= 0).to(loss2d.dtype)
-        sample_losses = (loss2d * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)
+        sample_losses_tensor = (loss2d * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)
+        sample_losses = [loss for loss in sample_losses_tensor]
+        penalty_weight = float(getattr(self.config, "gist_delta_weight", 0.0))
+        if penalty_weight > 0.0:
+            baseline_losses: Dict[str, torch.Tensor] = {}
+            for entry, loss in zip(entries, sample_losses):
+                if entry["variant"].is_baseline:
+                    sample_id = entry.get("sample_id")
+                    if sample_id is not None:
+                        baseline_losses[sample_id] = loss.detach()
+            for idx, (entry, loss) in enumerate(zip(entries, sample_losses)):
+                if entry["variant"].is_baseline:
+                    continue
+                sample_id = entry.get("sample_id")
+                if sample_id is None:
+                    continue
+                base_loss = baseline_losses.get(sample_id)
+                if base_loss is None:
+                    continue
+                sample_losses[idx] = loss + penalty_weight * torch.relu(loss - base_loss)
         outputs = []
         for entry, loss in zip(entries, sample_losses):
             entry["variant"].token_loss_value = loss.detach()
@@ -2120,6 +2143,8 @@ class MCController:
         agreement_total = 0
         score_abs_means: List[float] = []
         score_std_vals: List[float] = []
+        span_score_values: List[float] = []
+        span_target_values: List[float] = []
         self._last_preference_agreement = None
         self._last_policy_stats = {}
         all_variants: List[WorkingContextVariant] = []
@@ -2180,6 +2205,8 @@ class MCController:
                         "scale": pair_scale,
                     }
                 )
+                span_score_values.extend(masked_scores.detach().float().view(-1).cpu().tolist())
+                span_target_values.extend(masked_targets.detach().float().view(-1).cpu().tolist())
                 span_vals = span_tokens[mask].to(masked_scores.dtype)
                 history_key = id(worse.working_context)
                 self._policy_history[history_key] = scores_1d.detach().to("cpu")
@@ -2213,6 +2240,16 @@ class MCController:
                     continue
                 score_abs_means.append(float(stats_tensor.abs().mean().item()))
                 score_std_vals.append(float(stats_tensor.std(unbiased=False).item()))
+        span_corr = None
+        if len(span_score_values) >= 2 and len(span_score_values) == len(span_target_values):
+            xs = torch.tensor(span_score_values, dtype=torch.float32)
+            ys = torch.tensor(span_target_values, dtype=torch.float32)
+            xs = xs - xs.mean()
+            ys = ys - ys.mean()
+            denom = float(xs.norm().item() * ys.norm().item())
+            if denom > 0:
+                span_corr = float((xs * ys).sum().item() / denom)
+        self._last_span_score_corr = span_corr
         if not losses:
             self._last_preference_agreement = None
             return torch.zeros((), device=self.device, dtype=self._target_dtype)

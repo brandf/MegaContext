@@ -41,4 +41,6 @@ summary: Review of the current MegaContext run10 telemetry (steps 0–170) and r
    - Update `lensnet_perf_investigation.md` with the `lod_delta` findings and the recommended GistNet improvements so future runs have a reference baseline.
 5. **Optional:** Add WANDB panels for `mc/other_ms`, `mc/variant_pack_ms`, and `mc/lod_delta/1` so regressions are visible without diving into logs.
 
+_Update (Nov 28): the first two bullets are now wired up—`mc_gist_delta_weight` penalizes variants whose ΔNLL exceeds the baseline, and WANDB exposes `mc/pref_span_corr` so we can see span-level LensNet alignment without spelunking raw logs._
+
 With these follow-ups, we can focus on lowering the LOD1 penalty while maintaining the restored throughput.

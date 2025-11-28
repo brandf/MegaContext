@@ -101,6 +101,37 @@ class DummyModel(nn.Module):
         )
 
 
+class FixedLossModel(nn.Module):
+    def __init__(self, embed_dim: int, losses: List[float], vocab_size: int = 32) -> None:
+        super().__init__()
+        self.transformer = DummyTransformer(vocab_size, embed_dim)
+        self.losses = losses
+        self.dummy = nn.Parameter(torch.zeros(1))
+
+    def forward(
+        self,
+        idx,
+        targets=None,
+        kv_cache=None,
+        loss_reduction="none",
+        cos_sin_override=None,
+        alibi_override=None,
+        inputs_embeds=None,
+    ):
+        if inputs_embeds is not None:
+            x = inputs_embeds
+        else:
+            x = self.transformer.wte(idx)
+        batch_size, seq_len = x.shape[:2]
+        device = inputs_embeds.device
+        dtype = x.dtype
+        output = torch.zeros((batch_size, seq_len), device=device, dtype=dtype)
+        for i in range(batch_size):
+            value = self.losses[i] if i < len(self.losses) else self.losses[-1]
+            output[i].fill_(value)
+        return output
+
+
 def _build_mc_controller(
     monkeypatch,
     embed_dim: int = 8,
@@ -667,6 +698,66 @@ def test_baseline_is_pure_lod0(monkeypatch):
     tail_start = max(0, int(positions.max().item()) + 1 - controller.config.allocator_recent_tokens)
     tail_mask = positions >= tail_start
     assert torch.all(lods[tail_mask] == 0)
+
+
+def test_gist_delta_aux_penalty_inflates_variant_loss(monkeypatch):
+    embed_dim = 4
+    config = MCConfig(
+        embed_dim=embed_dim,
+        max_seq_len=16,
+        block_size=2,
+        device="cpu",
+        num_random_variants=1,
+        gist_delta_weight=1.0,
+    )
+    model = FixedLossModel(embed_dim, [0.1, 0.2])
+    controller = MCController(model, config, telemetry_provider=NoOpTelemetryProvider())
+    wc_config = WorkingContextConfig(embed_dim=embed_dim, max_length=4, device="cpu")
+    seq_len = 4
+    embeddings = torch.zeros(1, seq_len, embed_dim)
+    positions = torch.arange(seq_len).unsqueeze(0)
+    lod0 = torch.zeros(1, seq_len, dtype=torch.long)
+    baseline_wc = WorkingContext(embeddings, positions, wc_config, lod_tensor=lod0)
+    controller._configure_wc_positional(baseline_wc)
+    baseline_variant = WorkingContextVariant(
+        working_context=baseline_wc,
+        source="baseline",
+        lod_hint=0,
+        is_baseline=True,
+    )
+    lod1 = torch.ones_like(lod0)
+    variant_wc = WorkingContext(embeddings + 0.1, positions, wc_config, lod_tensor=lod1)
+    controller._configure_wc_positional(variant_wc)
+    variant = WorkingContextVariant(
+        working_context=variant_wc,
+        source="variant",
+        lod_hint=1,
+    )
+    for v in (baseline_variant, variant):
+        v.batch_index = 0
+    tokens = torch.zeros(1, seq_len, dtype=torch.long)
+    entries = []
+    for item in (baseline_variant, variant):
+        entries.append(
+            {
+                "variant": item,
+                "embeddings": item.working_context.to_tensor(),
+                "cos": None,
+                "sin": None,
+                "alibi": None,
+                "seq_len": item.working_context.length,
+                "target_len": item.working_context.length,
+                "batch_idx": 0,
+                "original_tokens": tokens,
+                "sample_id": "sample0",
+            }
+        )
+    losses = controller._run_variant_batch(entries)
+    baseline_loss = float(losses[0].detach().cpu())
+    variant_loss = float(losses[1].detach().cpu())
+    assert math.isclose(baseline_loss, 0.1, rel_tol=1e-4)
+    # penalty adds (variant - baseline) = 0.1
+    assert math.isclose(variant_loss, 0.3, rel_tol=1e-3)
 
 
 def test_lod_metrics_weighted_by_histogram(monkeypatch):

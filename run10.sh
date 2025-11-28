@@ -5,11 +5,26 @@
 
 set -euo pipefail
 
+# Capture pre-existing overrides so .mc_env doesn't clobber them
+USER_WANDB_RUN=${WANDB_RUN:-""}
+USER_MODEL_TAG=${MODEL_TAG:-""}
+
 # Load optional environment prepared by mc_setup
 if [ -f ".mc_env" ]; then
     # shellcheck source=/dev/null
     source .mc_env
 fi
+
+# Restore user-provided overrides after sourcing .mc_env
+if [ -n "$USER_WANDB_RUN" ]; then
+    WANDB_RUN="$USER_WANDB_RUN"
+fi
+if [ -n "$USER_MODEL_TAG" ]; then
+    MODEL_TAG="$USER_MODEL_TAG"
+fi
+
+WANDB_RUN=${WANDB_RUN:-"dummy"}
+MODEL_TAG=${MODEL_TAG:-""}
 
 usage() {
     cat <<'EOF'
@@ -23,6 +38,7 @@ EOF
 GPU_PROFILE="h100"
 MC_ENABLED=0
 BLOCK_SIZE=32
+DEVICE_BATCH_SIZE=""
 GISTNET_TYPE="transformer"
 GISTNET_LAYERS=2
 GISTNET_POOLING="mean"
@@ -57,6 +73,7 @@ MC_LENS_TEMPERATURE=1.0
 MC_TRAIN_WC_LENGTH=""
 MC_NUM_RANDOM_VARIANTS=2
 MC_RANDOM_VARIANT_ITERATIONS=2
+MC_GIST_DELTA_WEIGHT=0.1
 MC_MAX_LENS_PAIRS=8
 MC_LENS_KL_WEIGHT=0.0
 MC_LENS_ADV_NORM_BETA=0.9
@@ -96,6 +113,11 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --gistnet_head" >&2; exit 1; }
             GISTNET_HEAD="$1"
+            ;;
+        --device_batch_size)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --device_batch_size" >&2; exit 1; }
+            DEVICE_BATCH_SIZE="$1"
             ;;
         --lensnet)
             shift
@@ -237,6 +259,11 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_random_variant_iterations" >&2; exit 1; }
             MC_RANDOM_VARIANT_ITERATIONS="$1"
             ;;
+        --mc_gist_delta_weight)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_gist_delta_weight" >&2; exit 1; }
+            MC_GIST_DELTA_WEIGHT="$1"
+            ;;
         --mc_max_lens_pairs)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_max_lens_pairs" >&2; exit 1; }
@@ -277,6 +304,11 @@ while [[ $# -gt 0 ]]; do
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_compile_lensnet" >&2; exit 1; }
             MC_COMPILE_LENSNET="$1"
             ;;
+        --model_tag)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --model_tag" >&2; exit 1; }
+            MODEL_TAG="$1"
+            ;;
         --grad_clip)
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --grad_clip" >&2; exit 1; }
@@ -308,18 +340,20 @@ done
 DEPTH=12
 MAX_SEQ_LEN=2048
 
-case "$GPU_PROFILE" in
-    5090)
-        DEVICE_BATCH_SIZE=20
-        ;;
-    h100)
-        DEVICE_BATCH_SIZE=52
-        ;;
-    *)
-        echo "Unsupported GPU profile: $GPU_PROFILE (expected 5090 or h100)" >&2
-        exit 1
-        ;;
-esac
+if [ -z "$DEVICE_BATCH_SIZE" ]; then
+    case "$GPU_PROFILE" in
+        5090)
+            DEVICE_BATCH_SIZE=20
+            ;;
+        h100)
+            DEVICE_BATCH_SIZE=88
+            ;;
+        *)
+            echo "Unsupported GPU profile: $GPU_PROFILE (expected 5090 or h100)" >&2
+            exit 1
+            ;;
+    esac
+fi
 
 if [ -z "$ALLOCATOR_SOFT_MAX" ]; then
     ALLOCATOR_SOFT_MAX="$MAX_SEQ_LEN"
@@ -351,10 +385,6 @@ command -v uv &> /dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 [ -d ".venv" ] || uv venv
 uv sync --extra gpu
 source .venv/bin/activate
-
-if [ -z "${WANDB_RUN:-}" ]; then
-    WANDB_RUN="dummy"
-fi
 
 python -m nanochat.report reset
 
@@ -395,6 +425,7 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --total_batch_size="$TOTAL_BATCH_SIZE" \
     --num_iterations="$NUM_ITERATIONS" \
     --run="$WANDB_RUN" \
+    --model_tag="$MODEL_TAG" \
     --mc_enabled="$MC_ENABLED" \
     --gistnet_type="$GISTNET_TYPE" \
     --gistnet_layers="$GISTNET_LAYERS" \
@@ -428,6 +459,7 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_train_wc_length="$MC_TRAIN_WC_LENGTH" \
     --mc_num_random_variants="$MC_NUM_RANDOM_VARIANTS" \
     --mc_random_variant_iterations="$MC_RANDOM_VARIANT_ITERATIONS" \
+    --mc_gist_delta_weight="$MC_GIST_DELTA_WEIGHT" \
     --mc_max_lens_pairs="$MC_MAX_LENS_PAIRS" \
     --mc_lens_kl_weight="$MC_LENS_KL_WEIGHT" \
     --mc_lens_adv_norm_beta="$MC_LENS_ADV_NORM_BETA" \
@@ -440,21 +472,25 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --warmup_ratio="$WARMUP_RATIO"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_loss -- \
-    --device_batch_size="$DEVICE_BATCH_SIZE"
+    --device_batch_size="$DEVICE_BATCH_SIZE" \
+    --model_tag="$MODEL_TAG"
 
-torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_eval
+torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_eval -- \
+    --model_tag="$MODEL_TAG"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.mid_train -- \
     --device_batch_size="$DEVICE_BATCH_SIZE" \
     --max_seq_len="$MAX_SEQ_LEN" \
-    --run="$WANDB_RUN"
+    --run="$WANDB_RUN" \
+    --model_tag="$MODEL_TAG"
 
-torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.chat_eval -- -i mid
+torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.chat_eval -- -i mid --model_tag "$MODEL_TAG"
 
 torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.chat_sft -- \
-    --run="$WANDB_RUN"
+    --run="$WANDB_RUN" \
+    --model_tag="$MODEL_TAG"
 
-torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.chat_eval -- -i sft
+torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.chat_eval -- -i sft --model_tag "$MODEL_TAG"
 
 python -m nanochat.report generate
 

@@ -129,6 +129,7 @@ mc_lens_hard_negative_ratio = 1.0
 mc_train_wc_length = None
 mc_num_random_variants = 2
 mc_random_variant_iterations = 4
+mc_gist_delta_weight = 0.1
 mc_max_lens_pairs = 8
 mc_compile_gistnet = 1
 mc_compile_lensnet = 1
@@ -178,6 +179,7 @@ mc_lens_hard_negative_ratio = float(mc_lens_hard_negative_ratio)
 mc_train_wc_length = _parse_optional_int(mc_train_wc_length)
 mc_num_random_variants = int(mc_num_random_variants)
 mc_random_variant_iterations = int(mc_random_variant_iterations)
+mc_gist_delta_weight = float(mc_gist_delta_weight)
 mc_max_lens_pairs = int(mc_max_lens_pairs)
 mc_compile_gistnet = _parse_bool_flag(mc_compile_gistnet)
 mc_compile_lensnet = _parse_bool_flag(mc_compile_lensnet)
@@ -187,7 +189,12 @@ user_config = {k: globals()[k] for k in config_keys} # will be useful for loggin
 
 # Auto-adjust batch size for MC variant amplification
 if mc_enabled and mc_auto_batch:
-    variant_multiplier = max(1, mc_num_random_variants + 1)
+    base_variant_multiplier = max(1, mc_num_random_variants + 1)
+    train_wc_target = mc_train_wc_length if mc_train_wc_length is not None else int(round(max_seq_len * 0.75))
+    train_wc_target = max(1, min(max_seq_len, int(train_wc_target)))
+    tokens_ratio = 1.0 + (mc_num_random_variants * train_wc_target) / max_seq_len
+    combined_multiplier = math.ceil(tokens_ratio * base_variant_multiplier)
+    variant_multiplier = max(base_variant_multiplier, combined_multiplier)
     if variant_multiplier > 1:
         original_device_batch_size = device_batch_size
         original_total_batch_size = total_batch_size
@@ -202,7 +209,8 @@ if mc_enabled and mc_auto_batch:
             "[MegaContext] auto batch adjust: "
             f"device_batch_size {original_device_batch_size} -> {device_batch_size}, "
             f"total_batch_size {original_total_batch_size} -> {total_batch_size}, "
-            f"num_iterations {original_num_iterations} -> {num_iterations}"
+            f"num_iterations {original_num_iterations} -> {num_iterations} "
+            f"(variance multiplier={variant_multiplier})"
         )
 
 # Compute init
@@ -299,6 +307,7 @@ if mc_enabled:
         train_wc_length=mc_train_wc_length,
         num_random_variants=mc_num_random_variants,
         random_variant_iterations=mc_random_variant_iterations,
+        gist_delta_weight=mc_gist_delta_weight,
         max_lens_pairs=mc_max_lens_pairs,
         compile_gistnet=mc_compile_gistnet,
         compile_lensnet=mc_compile_lensnet,
@@ -1016,6 +1025,8 @@ for step in range(num_iterations + 1):
             log_data["mc/preference_corr_max_valid"] = 1.0 if mc_result.preference_corr_max_valid else 0.0
             log_data["mc/preference_corr_min_valid"] = 1.0 if mc_result.preference_corr_min_valid else 0.0
             log_data["mc/preference_pair_count"] = mc_result.preference_pair_count
+            if mc_result.span_score_corr is not None:
+                log_data["mc/pref_span_corr"] = mc_result.span_score_corr
         if mc_result is not None and mc_result.preference_agreement is not None:
             log_data["mc/preference_agreement"] = mc_result.preference_agreement
         if mc_result is not None and mc_result.lod_counts:

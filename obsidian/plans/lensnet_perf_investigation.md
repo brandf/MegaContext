@@ -37,6 +37,7 @@ summary: Why LensNet timings dwarf the base model and how to fix it.
 - `mc_smoke_train.py` covers the full MCController path with torch.compile (cudagraphs disabled for the aux nets) so we can reproduce regressions without a full `run10.sh`.
 - Per-variant metadata (positions/lods/spans) is cached on the CPU, so preference targets reuse those tensors instead of re-copying from GPU each time.
 - Bradley–Terry losses are now computed in a single batched kernel: per-pair masked scores get concatenated and reduced via scatter-add on the GPU, cutting another ~40 ms from `lens_loss_ms`.
+- Added a ΔNLL-aware GistNet penalty (`mc_gist_delta_weight`) so any variant whose loss exceeds the baseline gets an explicit gradient push toward parity; WANDB now exposes `mc/pref_span_corr`, the Pearson correlation between span-level LensNet scores and their target ΔNLL signs, so we can verify LensNet favors spans that hurt less.
 
 ### Next optimizations
 1. **Batch Bradley–Terry loss on GPU:** targets/masks are now dense tensors; push ΔNLL arrays + weights through a batched GPU loss kernel so the remaining ~160 ms shrinks toward the 10–20 ms band.

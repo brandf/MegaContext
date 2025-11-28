@@ -36,6 +36,7 @@ class MCConfig:
     gistnet_layers: int = 2
     gistnet_pooling: str = "mean"  # mean | query | cls
     gistnet_head: str = "mlp"  # mlp | linear
+    gist_delta_weight: float = 0.0
     lensnet_type: str = "transformer"
     lensnet_layers: int = 2
     lensnet_head: str = "mlp"  # mlp | linear
@@ -110,6 +111,7 @@ class MCConfig:
         )
         if self.soft_max_length is None:
             self.soft_max_length = self.wc_config.max_length
+        self.gist_delta_weight = max(0.0, float(self.gist_delta_weight))
         if self.eval_soft_max_length is None:
             self.eval_soft_max_length = self.wc_config.max_length
         self.infer_refocus_interval = max(1, int(self.infer_refocus_interval))
