@@ -5,8 +5,7 @@ from typing import Dict, Iterable, List, Optional
 
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.reactive import reactive
-from textual.widgets import Button, Label, Input, Select, Static
+from textual.widgets import Label, Input, Select, Static, TabbedContent, TabPane
 
 from ..config import ConfigBundle, ConfigManager, categorize_field, flatten_config
 
@@ -51,22 +50,24 @@ class ConfigView(Vertical):
         configs = self.manager.list_prefabs()
         options = [(bundle.name, bundle.name) for bundle in configs]
         selector = Select(options=options, id="config-select", prompt="Select config")
-        selector.styles.width = 30
+        selector.styles.width = 32
         save_as = Input(placeholder="Save as", id="config-save-as")
-        save_as.styles.width = 24
-        bar = Horizontal(selector, Button("Save", id="config-save"), Button("Save As", id="config-save-as-btn"), Button("Reload", id="config-reload"), save_as, id="config-top")
-        bar.styles.gap = 2
-        yield bar
-        # Category containers
-        columns = []
-        for cat in self.DEFAULT_CATEGORIES:
-            col = Vertical(Label(cat.title(), classes="config-cat-header"), id=f"config-cat-{cat}")
-            col.styles.width = 36
-            col.styles.gap = 0
-            columns.append(col)
-        categories = Horizontal(*columns, id="config-categories")
-        categories.styles.gap = 3
-        yield VerticalScroll(categories, id="config-scroll")
+        save_as.styles.width = 28
+        shortcuts = Static("Bindings: Ctrl+S Save • Ctrl+Shift+S Save As • Ctrl+L Reload", id="config-hints")
+        shortcuts.styles.padding_left = 1
+        header = Horizontal(selector, save_as, shortcuts, id="config-top")
+        header.styles.gap = 2
+        yield header
+
+        # Category sub-tabs with scroll containers
+        self.category_containers: Dict[str, Vertical] = {}
+        with TabbedContent(id="config-tabs"):
+            for cat in self.DEFAULT_CATEGORIES:
+                container = Vertical(id=f"config-cat-{cat}")
+                container.styles.gap = 1
+                self.category_containers[cat] = container
+                yield TabPane(cat.title(), VerticalScroll(container), id=f"config-tab-{cat}")
+
         self.status.id = "config-status"
         yield self.status
         self.initial_configs = configs
@@ -83,11 +84,10 @@ class ConfigView(Vertical):
         self.post_message(ConfigSelected(self.current))
 
     def _render_fields(self) -> None:
-        # Clear existing columns
+        # Clear existing containers
         for cat in self.DEFAULT_CATEGORIES:
             column = self.query_one(f"#config-cat-{cat}", Vertical)
             column.remove_children()
-            column.mount(Label(cat.title(), classes="config-cat-header"))
         self.fields.clear()
         flat = flatten_config(self.current.data if self.current else {})
         for path, value in flat.items():
@@ -96,7 +96,7 @@ class ConfigView(Vertical):
                 cat = "other"
             column = self.query_one(f"#config-cat-{cat}", Vertical)
             label = Label(path)
-            label.styles.width = 18
+            label.styles.width = 24
             safe_id = f"field-{path.replace('.', '-')}"
             input = Input(value=str(value), id=safe_id)
             input.styles.width = 24
@@ -170,39 +170,30 @@ class ConfigView(Vertical):
         bundle = self.manager.load(event.value)
         self._load_bundle(bundle)
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "config-save":
-            self._apply_inputs()
-            if self.current:
-                self.manager.save(self.current)
-                self.base_data = flatten_config(self.current.data)
-                self._update_dirty_labels()
-        elif event.button.id == "config-save-as-btn":
-            self._apply_inputs()
-            name = self.query_one("#config-save-as", Input).value.strip() or (self.current.name if self.current else "")
-            if self.current and name:
-                self.manager.save(self.current, as_name=name)
-                self.current.name = name
-                self.base_data = flatten_config(self.current.data)
-                self._update_dirty_labels()
-        elif event.button.id == "config-reload":
-            if self.is_dirty and not self.allow_discard:
-                self.status.update("Unsaved changes. Press reload again to discard.")
-                self.allow_discard = True
-                return
-            self.allow_discard = False
-            if self.current:
-                bundle = self.manager.load(self.current.name)
-                self._load_bundle(bundle)
-
     def save_current(self) -> None:
         self._apply_inputs()
         if self.current:
             self.manager.save(self.current)
             self.base_data = flatten_config(self.current.data)
             self._update_dirty_labels()
+        self.allow_discard = False
+
+    def save_as_current(self, name: Optional[str] = None) -> None:
+        self._apply_inputs()
+        target_name = name or self.query_one("#config-save-as", Input).value.strip() or (self.current.name if self.current else "")
+        if self.current and target_name:
+            self.manager.save(self.current, as_name=target_name)
+            self.current.name = target_name
+            self.base_data = flatten_config(self.current.data)
+            self._update_dirty_labels()
+        self.allow_discard = False
 
     def reload_current(self) -> None:
+        if self.is_dirty and not self.allow_discard:
+            self.status.update("Unsaved changes. Trigger reload again to discard.")
+            self.allow_discard = True
+            return
+        self.allow_discard = False
         if self.current:
             bundle = self.manager.load(self.current.name)
             self._load_bundle(bundle)

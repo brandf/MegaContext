@@ -83,6 +83,11 @@ class SetupView(Vertical):
                 cmds.append([self._python(), "-m", "pip", "install", "torch"])
             else:
                 cmds.append([self._python(), "-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/cpu"])
+        # Optional dataset deps
+        try:
+            import pyarrow  # noqa: F401
+        except ImportError:
+            cmds.append([self._python(), "-m", "pip", "install", "pyarrow"])
         for cmd in cmds:
             self.log_widget.update(self.log_widget.renderable + "\n" + " ".join(cmd) if self.log_widget.renderable else " ".join(cmd))
             proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
@@ -92,9 +97,12 @@ class SetupView(Vertical):
                 self.log_widget.update((self.log_widget.renderable or "") + "\n" + text)
             await proc.wait()
         self.check_status()
-        base_dir = Path(self.base_dir_input.value.strip() or Path.home() / ".cache" / "nanochat")
-        dataset_dir = Path(self.dataset_dir_input.value.strip() or base_dir / "dataset")
-        ckpt_dir = Path(self.checkpoints_dir_input.value.strip() or base_dir)
+        base_dir = Path(self.base_dir_input.value.strip() or Path.home() / ".cache" / "nanochat").expanduser()
+        dataset_dir = Path(self.dataset_dir_input.value.strip() or base_dir / "base_data").expanduser()
+        ckpt_dir = Path(self.checkpoints_dir_input.value.strip() or base_dir).expanduser()
+        base_dir.mkdir(parents=True, exist_ok=True)
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
         self.post_message(SetupPathsUpdated(base_dir, dataset_dir, ckpt_dir))
         self.post_message(SetupCompleted())
 

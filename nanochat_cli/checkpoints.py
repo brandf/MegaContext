@@ -52,12 +52,18 @@ class CheckpointRegistry:
         if self.base_dir:
             base_dir = self.base_dir
         for stage in ("base", "mid", "chat"):
-            stage_dir = base_dir / stage
-            if not stage_dir.exists():
-                continue
-            for path in stage_dir.rglob("*"):
-                if path.is_file() and path.suffix in {".pt", ".pth", ".bin", ".safetensors"}:
-                    results.append((path, stage))
+            candidate_dirs = [
+                base_dir / stage,
+                base_dir / f"{stage}_checkpoints",
+                base_dir / "checkpoints" / stage,
+                base_dir / "checkpoints",
+            ]
+            for stage_dir in candidate_dirs:
+                if not stage_dir.exists():
+                    continue
+                for path in stage_dir.rglob("*"):
+                    if path.is_file() and path.suffix in {".pt", ".pth", ".bin", ".safetensors"}:
+                        results.append((path, stage))
         return results
 
     def _load_metadata(self, path: Path) -> Dict[str, Any]:

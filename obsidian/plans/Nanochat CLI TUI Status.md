@@ -10,8 +10,8 @@ summary: Execution tracker for the Textual nanochat-cli TUI against PRD/TDD item
 - [x] Config: prefab load/save/override, diff skeleton.
 - [x] Checkpoints: scan + basic compatibility heuristics.
 - [x] Train/Eval orchestration: subprocess launch + log streaming.
-- [ ] Setup flow: dependency detection + guided install inside TUI (no reliance on mc_setup/run*.sh).
-- [ ] Dataset tab: dataset download/prep orchestration.
+- [ ] Setup flow: dependency detection + guided install inside TUI (no reliance on mc_setup/run*.sh). (basic uv/torch/pyarrow + path inputs wired; needs richer UX/validation)
+- [ ] Dataset tab: dataset download/prep orchestration. (now respects base_data paths, defers deps to Setup; needs progress + modal redirects)
 - [ ] Visualization panels: rich screens (loss, GPU, timers, MC LOD) with refresh cadences.
 - [ ] Command palette + keyboard UX for core actions.
 - [ ] Live screen editing + persistence.
@@ -23,13 +23,13 @@ summary: Execution tracker for the Textual nanochat-cli TUI against PRD/TDD item
 - [ ] Resilience: retries/backoff, crash recovery of UI state.
 - [ ] Packaging/bootstrap: minimal install path on fresh boxes.
 - [ ] Feedback round 1 (current):
-  - [ ] Config UX: dropdown selector, categorized inline editors (no raw JSON/YAML), dirty tracking, save/save-as with reload guard. (basic grouping; layout/buttons need polish; selector should be prominent)
+  - [ ] Config UX: dropdown selector, categorized sub-tabs/scroll, inline editors (no raw JSON/YAML), dirty tracking, save/save-as with reload guard. (dropdown + sub-tabs + binding hints + reload guard added; polish/layout still pending)
   - [x] Rename “prefabs” → “configs”; display values (not raw text); auto-apply edits, save writes files.
   - [x] Checkpoints: refresh via action; moved logic into checkpoints component.
   - [x] Train: contextual start; no config display leakage.
   - [x] Eval: renamed to Eval; continuation only.
 - [x] Dataset tab before Train; detect/download/prep dataset; train blocks when missing with modal redirect. (gating present; missing deps now push to Setup; modal still TODO)
-- [ ] Setup first tab; no mc_setup dependency; self-managed setup; “Run” action; re-check via action not button. (self-managed stub with auth inputs; needs fuller env logic + modal)
+  - [ ] Setup first tab; no mc_setup dependency; self-managed setup; “Run” action; re-check via action not button. (env inputs + pyarrow install + path propagation; needs better UX/modal)
   - [x] Tab order: Setup → Config → Dataset → Checkpoints → Train → Eval.
 
 ## Notes

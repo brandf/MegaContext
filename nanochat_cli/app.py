@@ -14,7 +14,7 @@ from .orchestrator import RunOrchestrator
 from .checkpoints import CheckpointRegistry
 from .views.config_view import ConfigView, ConfigChanged, ConfigSelected
 from .views.checkpoints_view import CheckpointsView
-from .views.dataset_view import DatasetView, DatasetStatus
+from .views.dataset_view import DatasetView, DatasetStatus, DatasetDependencyMissing
 from .views.eval_view import EvalView
 from .views.setup_view import SetupView
 from .views.train_view import TrainView
@@ -25,13 +25,14 @@ class NanochatApp(App):
 
     CSS = ""
     BINDINGS = [
-        Binding("ctrl+b", "check_setup", "Check setup"),
-        Binding("ctrl+u", "run_setup", "Run setup"),
-        Binding("ctrl+r", "refresh_checkpoints", "Refresh checkpoints"),
-        Binding("ctrl+s", "save_config", "Save config"),
-        Binding("ctrl+l", "reload_config", "Reload config"),
-        Binding("ctrl+d", "run_dataset", "Run dataset prep"),
-        Binding("ctrl+t", "start_train", "Start train"),
+        Binding("ctrl+b", "check_setup", "Check setup", show=False),
+        Binding("ctrl+u", "run_setup", "Run setup", show=False),
+        Binding("ctrl+r", "refresh_checkpoints", "Refresh checkpoints", show=False),
+        Binding("ctrl+s", "save_config", "Save config", show=False),
+        Binding("ctrl+shift+s", "save_as_config", "Save config as", show=False),
+        Binding("ctrl+l", "reload_config", "Reload config", show=False),
+        Binding("ctrl+d", "run_dataset", "Run dataset prep", show=False),
+        Binding("ctrl+t", "start_train", "Start train", show=False),
     ]
 
     def __init__(self, config_manager: Optional[ConfigManager] = None) -> None:
@@ -69,6 +70,7 @@ class NanochatApp(App):
         self.setup_view.check_status()
         self.dataset_view.check_status()
         self.checkpoints_view.update_records(self.current_config.data if self.current_config else {})
+        self._sync_binding_visibility()
 
     # Actions
     async def action_refresh_checkpoints(self) -> None:
@@ -86,6 +88,10 @@ class NanochatApp(App):
     async def action_save_config(self) -> None:
         if self.query_one(TabbedContent).active == "tab-config":
             self.config_view.save_current()
+
+    async def action_save_as_config(self) -> None:
+        if self.query_one(TabbedContent).active == "tab-config":
+            self.config_view.save_as_current()
 
     async def action_reload_config(self) -> None:
         if self.query_one(TabbedContent).active == "tab-config":
@@ -127,10 +133,12 @@ class NanochatApp(App):
         self.checkpoint_registry.set_base_dir(message.checkpoints_dir)
         self.train_view.set_base_dir(message.base_dir)
         self.eval_view.set_base_dir(message.base_dir)
+        self.checkpoints_view.update_records(self.current_config.data if self.current_config else {})
 
     async def on_train_dataset_missing(self, message) -> None:
         # Switch to dataset tab when train attempted without dataset
         self.query_one(TabbedContent).active = "tab-dataset"
+        self._sync_binding_visibility()
 
     # Helpers
     def _set_config(self, bundle: ConfigBundle) -> None:
@@ -157,3 +165,32 @@ class NanochatApp(App):
         self.checkpoint_registry.set_base_dir(self.base_dir)
         self.train_view.set_base_dir(self.base_dir)
         self.eval_view.set_base_dir(self.base_dir)
+        self.checkpoints_view.update_records(self.current_config.data if self.current_config else {})
+
+    async def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        self._sync_binding_visibility()
+
+    def _sync_binding_visibility(self) -> None:
+        """Show only bindings relevant to the active tab."""
+        active = self.query_one(TabbedContent).active
+        show_for_tab = {
+            "tab-setup": {"ctrl+b", "ctrl+u"},
+            "tab-config": {"ctrl+s", "ctrl+shift+s", "ctrl+l"},
+            "tab-dataset": {"ctrl+d"},
+            "tab-checkpoints": {"ctrl+r"},
+            "tab-train": {"ctrl+t"},
+        }
+        visible_keys = show_for_tab.get(active, set())
+        binding_defs = {
+            "ctrl+b": ("check_setup", "Check setup"),
+            "ctrl+u": ("run_setup", "Run setup"),
+            "ctrl+r": ("refresh_checkpoints", "Refresh checkpoints"),
+            "ctrl+s": ("save_config", "Save config"),
+            "ctrl+shift+s": ("save_as_config", "Save config as"),
+            "ctrl+l": ("reload_config", "Reload config"),
+            "ctrl+d": ("run_dataset", "Run dataset prep"),
+            "ctrl+t": ("start_train", "Start train"),
+        }
+        for key, (action, desc) in binding_defs.items():
+            # Rebind with updated visibility; bind() overwrites existing binding
+            self.bind(key, action, description=desc, show=key in visible_keys)

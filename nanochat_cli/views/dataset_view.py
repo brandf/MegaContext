@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
@@ -51,16 +51,18 @@ class DatasetView(Vertical):
 
     def check_status(self) -> bool:
         ready = self._is_ready()
-        msg = "Dataset ready" if ready else "Dataset missing (run download/prep)"
+        dataset_dir = self.dataset_dir_override or (self.base_dir / "base_data")
+        msg = f"Dataset ready at {dataset_dir}" if ready else f"Dataset missing at {dataset_dir} (run download/prep)"
         self.status.update(msg)
         self.post_message(DatasetStatus(ready))
         return ready
 
     def _is_ready(self) -> bool:
-        dataset_dir = self.dataset_dir_override or (self.base_dir / "dataset")
+        dataset_dir = self.dataset_dir_override or (self.base_dir / "base_data")
         marker = dataset_dir / "download_complete.txt"
+        parquet = next(dataset_dir.glob("*.parquet"), None) if dataset_dir.exists() else None
         bin_file = next(dataset_dir.glob("*.bin"), None) if dataset_dir.exists() else None
-        return dataset_dir.exists() or marker.exists() or bin_file is not None
+        return dataset_dir.exists() and (parquet or bin_file or marker.exists())
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "dataset-run":
@@ -75,7 +77,8 @@ class DatasetView(Vertical):
             return
         cmd = ["python", "-m", "nanochat.dataset"]
         self.log_widget.update((self.log_widget.renderable or "") + "\n" + " ".join(cmd))
-        env = {"NANOCHAT_BASE_DIR": str(self.base_dir)}
+        env_base = self.dataset_dir_override.parent if self.dataset_dir_override else self.base_dir
+        env = {"NANOCHAT_BASE_DIR": str(env_base)}
         queue, _ = await self.orchestrator.stream_process(cmd, env=env)
         while True:
             line = await queue.get()
