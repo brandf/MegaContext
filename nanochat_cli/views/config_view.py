@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Button, Label, Input, Select, Static
@@ -48,22 +48,25 @@ class ConfigView(Vertical):
         self.initial_configs: List[ConfigBundle] = []
 
     def compose(self):
-        # Top bar: selector + save controls
         configs = self.manager.list_prefabs()
         options = [(bundle.name, bundle.name) for bundle in configs]
         selector = Select(options=options, id="config-select", prompt="Select config")
+        selector.styles.width = 30
         save_as = Input(placeholder="Save as", id="config-save-as")
-        yield Horizontal(
-            selector,
-            Button("Save", id="config-save"),
-            Button("Save As", id="config-save-as-btn"),
-            Button("Reload", id="config-reload"),
-            save_as,
-            id="config-top",
-        )
+        save_as.styles.width = 24
+        bar = Horizontal(selector, Button("Save", id="config-save"), Button("Save As", id="config-save-as-btn"), Button("Reload", id="config-reload"), save_as, id="config-top")
+        bar.styles.gap = 2
+        yield bar
         # Category containers
-        columns = [Vertical(Label(cat.title()), id=f"config-cat-{cat}") for cat in self.DEFAULT_CATEGORIES]
-        yield Horizontal(*columns, id="config-categories")
+        columns = []
+        for cat in self.DEFAULT_CATEGORIES:
+            col = Vertical(Label(cat.title(), classes="config-cat-header"), id=f"config-cat-{cat}")
+            col.styles.width = 36
+            col.styles.gap = 0
+            columns.append(col)
+        categories = Horizontal(*columns, id="config-categories")
+        categories.styles.gap = 3
+        yield VerticalScroll(categories, id="config-scroll")
         self.status.id = "config-status"
         yield self.status
         self.initial_configs = configs
@@ -93,11 +96,14 @@ class ConfigView(Vertical):
                 cat = "other"
             column = self.query_one(f"#config-cat-{cat}", Vertical)
             label = Label(path)
+            label.styles.width = 18
             safe_id = f"field-{path.replace('.', '-')}"
             input = Input(value=str(value), id=safe_id)
+            input.styles.width = 24
             fw = FieldWidget(label=label, input=input, path=path, category=cat)
             self.fields[path] = fw
-            row = Horizontal(label, input)
+            row = Horizontal(label, input, classes="config-row")
+            row.styles.gap = 1
             column.mount(row)
         self._update_dirty_labels()
 
@@ -188,3 +194,15 @@ class ConfigView(Vertical):
             if self.current:
                 bundle = self.manager.load(self.current.name)
                 self._load_bundle(bundle)
+
+    def save_current(self) -> None:
+        self._apply_inputs()
+        if self.current:
+            self.manager.save(self.current)
+            self.base_data = flatten_config(self.current.data)
+            self._update_dirty_labels()
+
+    def reload_current(self) -> None:
+        if self.current:
+            bundle = self.manager.load(self.current.name)
+            self._load_bundle(bundle)

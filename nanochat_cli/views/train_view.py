@@ -16,6 +16,12 @@ class TrainStarted(Message):
     pass
 
 
+class TrainDatasetMissing(Message):
+    """Emitted when dataset is missing and train is attempted."""
+
+    pass
+
+
 class TrainView(Vertical):
     """Train orchestration view."""
 
@@ -54,6 +60,7 @@ class TrainView(Vertical):
             return
         if not self.dataset_ready:
             self.log_widget.write("Dataset missing. Go to Dataset tab to prepare it.")
+            self.post_message(TrainDatasetMissing())
             return
         if self.active_task and not self.active_task.done():
             self.log_widget.write("Training already running")

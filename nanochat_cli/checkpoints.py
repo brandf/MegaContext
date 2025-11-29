@@ -20,7 +20,10 @@ class CheckpointRegistry:
     """Scans nanochat checkpoints and scores compatibility with a config."""
 
     def __init__(self) -> None:
-        pass
+        self.base_dir: Optional[Path] = None
+
+    def set_base_dir(self, base_dir: Path) -> None:
+        self.base_dir = base_dir
 
     def list_checkpoints(self, config: Dict[str, Any]) -> List[CheckpointRecord]:
         paths = self._find_checkpoint_paths(config)
@@ -46,6 +49,8 @@ class CheckpointRegistry:
             or os.environ.get("NANOCHAT_BASE_DIR")
             or Path.home() / ".cache" / "nanochat"
         ).expanduser()
+        if self.base_dir:
+            base_dir = self.base_dir
         for stage in ("base", "mid", "chat"):
             stage_dir = base_dir / stage
             if not stage_dir.exists():

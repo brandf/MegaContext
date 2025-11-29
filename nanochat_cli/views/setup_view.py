@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Optional
 
 from textual.containers import Horizontal, Vertical
@@ -14,6 +15,14 @@ class SetupCompleted(Message):
     pass
 
 
+class SetupPathsUpdated(Message):
+    def __init__(self, base_dir: Path, dataset_dir: Path, checkpoints_dir: Path) -> None:
+        self.base_dir = base_dir
+        self.dataset_dir = dataset_dir
+        self.checkpoints_dir = checkpoints_dir
+        super().__init__()
+
+
 class SetupView(Vertical):
     """Self-managed environment setup (uv/torch/auth)."""
 
@@ -23,10 +32,13 @@ class SetupView(Vertical):
         self.log_widget = Static("", id="setup-log")
         self.wandb_input = Input(id="setup-wandb", placeholder="WANDB_API_KEY")
         self.hf_input = Input(id="setup-hf", placeholder="HF_TOKEN")
+        self.base_dir_input = Input(id="setup-base-dir", placeholder="Base dir (NANOCHAT_BASE_DIR)")
+        self.dataset_dir_input = Input(id="setup-dataset-dir", placeholder="Dataset dir (optional)")
+        self.checkpoints_dir_input = Input(id="setup-ckpt-dir", placeholder="Checkpoints dir (optional)")
 
     def compose(self):
         yield Label("Setup")
-        yield Horizontal(self.wandb_input, self.hf_input, Button("Run", id="setup-run"), id="setup-actions")
+        yield Horizontal(self.wandb_input, self.hf_input, self.base_dir_input, self.dataset_dir_input, self.checkpoints_dir_input, Button("Run", id="setup-run"), id="setup-actions")
         yield self.status
         yield self.log_widget
 
@@ -80,6 +92,10 @@ class SetupView(Vertical):
                 self.log_widget.update((self.log_widget.renderable or "") + "\n" + text)
             await proc.wait()
         self.check_status()
+        base_dir = Path(self.base_dir_input.value.strip() or Path.home() / ".cache" / "nanochat")
+        dataset_dir = Path(self.dataset_dir_input.value.strip() or base_dir / "dataset")
+        ckpt_dir = Path(self.checkpoints_dir_input.value.strip() or base_dir)
+        self.post_message(SetupPathsUpdated(base_dir, dataset_dir, ckpt_dir))
         self.post_message(SetupCompleted())
 
     def _python(self) -> str:
