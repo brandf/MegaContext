@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+import asyncio
+import shutil
+import subprocess
+from typing import Optional
+
+from textual.containers import Horizontal, Vertical
+from textual.message import Message
+from textual.widgets import Button, Label, Static
+
+
+class SetupCompleted(Message):
+    pass
+
+
+class SetupView(Vertical):
+    """Self-managed environment setup (uv/torch/auth)."""
+
+    def __init__(self, *children, **kwargs) -> None:
+        super().__init__(*children, **kwargs)
+        self.status = Static("")
+        self.log_widget = Static("", id="setup-log")
+
+    def compose(self):
+        yield Label("Setup")
+        yield Horizontal(Button("Run", id="setup-run"), id="setup-actions")
+        yield self.status
+        yield self.log_widget
+
+    def check_status(self) -> None:
+        checks = {
+            "python": True,
+            "uv": shutil.which("uv") is not None,
+            "torch": self._has_torch(),
+        }
+        lines = [f"{k}: {'ok' if v else 'missing'}" for k, v in checks.items()]
+        self.status.update("\n".join(lines))
+
+    def _has_torch(self) -> bool:
+        try:
+            import torch  # type: ignore
+
+            _ = torch.__version__
+            return True
+        except Exception:
+            return False
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "setup-run":
+            await self._run_setup()
+
+    async def _run_setup(self) -> None:
+        cmds = []
+        if shutil.which("uv") is None:
+            cmds.append([self._python(), "-m", "pip", "install", "uv"])
+        if not self._has_torch():
+            # Default to CPU wheel unless CUDA available
+            cmds.append([self._python(), "-m", "pip", "install", "torch"])
+        for cmd in cmds:
+            self.log_widget.update(self.log_widget.renderable + "\n" + " ".join(cmd) if self.log_widget.renderable else " ".join(cmd))
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            assert proc.stdout
+            async for raw in proc.stdout:
+                text = raw.decode("utf-8", errors="replace").rstrip()
+                self.log_widget.update((self.log_widget.renderable or "") + "\n" + text)
+            await proc.wait()
+        self.check_status()
+        self.post_message(SetupCompleted())
+
+    def _python(self) -> str:
+        import sys
+
+        return sys.executable

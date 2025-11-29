@@ -23,14 +23,14 @@ summary: Execution tracker for the Textual nanochat-cli TUI against PRD/TDD item
 - [ ] Resilience: retries/backoff, crash recovery of UI state.
 - [ ] Packaging/bootstrap: minimal install path on fresh boxes.
 - [ ] Feedback round 1 (current):
-  - [ ] Config UX: dropdown selector, categorized tabs with inline editors (no raw JSON/YAML), inline dirty tracking, bold unsaved fields, save/save-as flows with reload warning.
-  - [ ] Rename “prefabs” → “configs”; display values (not raw text); auto-apply edits, save writes files.
-  - [ ] Checkpoints: refresh as contextual action; move logic into checkpoints component (app.py slim).
-  - [ ] Train: contextual start, no config display leakage.
-  - [ ] Eval: rename to Eval; drop chat mode; simple continuation prompt.
-  - [ ] Dataset tab before Train; detect/download/prep dataset; train blocks when missing with modal redirect.
-  - [ ] Setup first tab; no mc_setup dependency; self-managed setup; “Run” action; re-check via action not button.
-  - [ ] Tab order: Setup → Config → Dataset → Checkpoints → Train → Eval.
+  - [x] Config UX: dropdown selector, categorized inline editors (no raw JSON/YAML), dirty tracking, save/save-as with reload guard.
+  - [x] Rename “prefabs” → “configs”; display values (not raw text); auto-apply edits, save writes files.
+  - [x] Checkpoints: refresh via action; moved logic into checkpoints component.
+  - [x] Train: contextual start; no config display leakage.
+  - [x] Eval: renamed to Eval; continuation only.
+  - [ ] Dataset tab before Train; detect/download/prep dataset; train blocks when missing with modal redirect. (basic tab + download/prep wired; gating/modal TBD)
+  - [ ] Setup first tab; no mc_setup dependency; self-managed setup; “Run” action; re-check via action not button. (self-managed stub; improve install/auth)
+  - [x] Tab order: Setup → Config → Dataset → Checkpoints → Train → Eval.
 
 ## Notes
 - Current build is a functional skeleton; prioritizing setup/dataset flows and panel/telemetry next.
