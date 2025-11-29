@@ -84,8 +84,7 @@ class NanochatApp(App):
         self.eval_view.set_checkpoint(None)
 
     async def on_dataset_status(self, message: DatasetStatus) -> None:
-        # used to gate train later if needed
-        pass
+        self.train_view.set_dataset_ready(message.ready)
 
     # Helpers
     def _set_config(self, bundle: ConfigBundle) -> None:

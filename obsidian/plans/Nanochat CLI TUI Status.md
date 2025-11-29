@@ -28,8 +28,8 @@ summary: Execution tracker for the Textual nanochat-cli TUI against PRD/TDD item
   - [x] Checkpoints: refresh via action; moved logic into checkpoints component.
   - [x] Train: contextual start; no config display leakage.
   - [x] Eval: renamed to Eval; continuation only.
-  - [ ] Dataset tab before Train; detect/download/prep dataset; train blocks when missing with modal redirect. (basic tab + download/prep wired; gating/modal TBD)
-  - [ ] Setup first tab; no mc_setup dependency; self-managed setup; “Run” action; re-check via action not button. (self-managed stub; improve install/auth)
+- [x] Dataset tab before Train; detect/download/prep dataset; train blocks when missing with modal redirect. (basic gating, no modal yet)
+- [ ] Setup first tab; no mc_setup dependency; self-managed setup; “Run” action; re-check via action not button. (self-managed stub with auth inputs; still needs fuller env logic + modal polish)
   - [x] Tab order: Setup → Config → Dataset → Checkpoints → Train → Eval.
 
 ## Notes

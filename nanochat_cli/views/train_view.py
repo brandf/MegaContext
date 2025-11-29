@@ -28,6 +28,7 @@ class TrainView(Vertical):
         self.active_proc: Optional[asyncio.subprocess.Process] = None
         self.config: Optional[ConfigBundle] = None
         self.base_dir = Path.home() / ".cache" / "nanochat"
+        self.dataset_ready = False
 
     def compose(self):
         yield Horizontal(self.run_name_input, Button("Start", id="train-start"), id="train-actions")
@@ -40,6 +41,9 @@ class TrainView(Vertical):
     def set_base_dir(self, base_dir: Path) -> None:
         self.base_dir = base_dir
 
+    def set_dataset_ready(self, ready: bool) -> None:
+        self.dataset_ready = ready
+
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "train-start":
             await self._start()
@@ -47,6 +51,9 @@ class TrainView(Vertical):
     async def _start(self) -> None:
         if not self.config:
             self.log_widget.write("No config loaded")
+            return
+        if not self.dataset_ready:
+            self.log_widget.write("Dataset missing. Go to Dataset tab to prepare it.")
             return
         if self.active_task and not self.active_task.done():
             self.log_widget.write("Training already running")

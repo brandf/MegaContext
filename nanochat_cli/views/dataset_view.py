@@ -46,7 +46,8 @@ class DatasetView(Vertical):
 
     def _is_ready(self) -> bool:
         dataset_dir = self.base_dir / "dataset"
-        return dataset_dir.exists()
+        marker = dataset_dir / "download_complete.txt"
+        return dataset_dir.exists() or marker.exists()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "dataset-run":
