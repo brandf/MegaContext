@@ -1,0 +1,24 @@
+name: single-10
+description: Single-GPU nanochat run for fast iteration (~$10 tier surrogate).
+scenario: single
+gpu_profile: 5090
+mc_enabled: false
+max_seq_len: 2048
+depth: 12
+block_size: 32
+device_batch_size: 8
+wandb_project: nanochat
+wandb_run_name: nanochat-10
+nanochat_base_dir: ~/.cache/nanochat
+dataset_shards: 200
+mc:
+  allocator_type: greedy
+  num_random_variants: 3
+train_vis:
+  screens:
+    - name: progress
+      refresh_ms: 1000
+      panels: [progress, loss, gpu, timers]
+    - name: mc
+      refresh_ms: 1500
+      panels: [lod_ascii, swap_rate, residency]

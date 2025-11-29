@@ -1,0 +1,26 @@
+name: run1000
+description: 8×H100 large tier (~$1000) with MC ready.
+scenario: run1000
+gpu_profile: h100x8
+mc_enabled: true
+max_seq_len: 2048
+depth: 32
+block_size: 32
+device_batch_size: 16
+wandb_project: nanochat
+wandb_run_name: nanochat-1000
+nanochat_base_dir: ~/.cache/nanochat
+dataset_shards: 400
+mc:
+  allocator_type: greedy
+  num_random_variants: 4
+  train_wc_length: 512
+  lens_temperature: 1.0
+train_vis:
+  screens:
+    - name: progress
+      refresh_ms: 2000
+      panels: [progress, loss, gpu, timers, lod_ascii]
+    - name: mc
+      refresh_ms: 2500
+      panels: [swap_rate, residency, allocator_actions]

@@ -1,0 +1,24 @@
+name: speedrun-100
+description: 8×H100 speedrun profile (~$100 tier).
+scenario: speedrun
+gpu_profile: h100x8
+mc_enabled: false
+max_seq_len: 2048
+depth: 20
+block_size: 32
+device_batch_size: 32
+wandb_project: nanochat
+wandb_run_name: nanochat-100
+nanochat_base_dir: ~/.cache/nanochat
+dataset_shards: 200
+mc:
+  allocator_type: greedy
+  num_random_variants: 3
+train_vis:
+  screens:
+    - name: progress
+      refresh_ms: 1500
+      panels: [progress, loss, gpu, timers]
+    - name: eval
+      refresh_ms: 5000
+      panels: [eval_sample, validation]
