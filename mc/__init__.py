@@ -18,6 +18,7 @@ from .telemetry import (
     NoOpTelemetryProvider,
     OpenTelemetryProvider,
 )
+from .sampling import replay_sequence_with_controller
 
 __all__ = [
     "MCConfig",
@@ -33,6 +34,7 @@ __all__ = [
     "build_focus_allocator",
     "build_mega_context",
     "MCController",
+    "replay_sequence_with_controller",
     "TelemetryEvent",
     "TelemetryProvider",
     "NoOpTelemetryProvider",

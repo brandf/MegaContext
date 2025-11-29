@@ -54,6 +54,7 @@ MC_TREE_TYPE="ram"
 SKIP_DATA_PREP=${SKIP_DATA_PREP:-0}
 MC_AUX_DTYPE="auto"
 MC_AUTO_BATCH=1
+MC_AUTO_BATCH_SAFETY=2.0
 MC_LOG_TIMERS=0
 MC_EVAL_SOFT_MAX_LENGTH=""
 MC_INFER_ALLOCATOR_MAX_REPLACEMENTS=""
@@ -72,7 +73,7 @@ MC_DISABLE_VAL=0
 MC_LENS_COLLAPSE_WEIGHT=1.0
 MC_LENS_TEMPERATURE=1.0
 MC_TRAIN_WC_LENGTH=""
-MC_NUM_RANDOM_VARIANTS=2
+MC_NUM_RANDOM_VARIANTS=1
 MC_RANDOM_VARIANT_ITERATIONS=2
 MC_GIST_DELTA_WEIGHT=0.1
 MC_MAX_LENS_PAIRS=8
@@ -159,6 +160,11 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --mc_auto_batch" >&2; exit 1; }
             MC_AUTO_BATCH="$1"
+            ;;
+        --mc_auto_batch_safety)
+            shift
+            [[ $# -gt 0 ]] || { echo "Missing value for --mc_auto_batch_safety" >&2; exit 1; }
+            MC_AUTO_BATCH_SAFETY="$1"
             ;;
         --mc_eval_soft_max_length)
             shift
@@ -443,6 +449,7 @@ torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" -m scripts.base_train -
     --mc_aux_dtype="$MC_AUX_DTYPE" \
     --allocator_soft_max="$ALLOCATOR_SOFT_MAX" \
     --mc_auto_batch="$MC_AUTO_BATCH" \
+    --mc_auto_batch_safety="$MC_AUTO_BATCH_SAFETY" \
     --mc_eval_soft_max_length="$MC_EVAL_SOFT_MAX_LENGTH" \
     --mc_infer_allocator_max_replacements="$MC_INFER_ALLOCATOR_MAX_REPLACEMENTS" \
     --mc_infer_allocator_iterations="$MC_INFER_ALLOCATOR_ITERATIONS" \

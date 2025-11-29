@@ -69,10 +69,10 @@ bash run10.sh --mc \
     --gpu h100 \
     --mc_train_report 1 \
     --mc_log_timers 1 \
-#    --mc_disable_val 1 \
     --mc_log_lod_ascii_train 1 \
     --mc_log_lens_debug 1 \
     --mc_compile_gistnet 1 \
     --mc_compile_lensnet 1
+#    --mc_disable_val 1 \
 #   --grad_clip 1.0 \
 #   --warmup_ratio 0.02

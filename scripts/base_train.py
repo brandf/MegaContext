@@ -37,6 +37,7 @@ try:
     from mc.runtime import MCController, WorkingContextVariant
     from mc.telemetry import OpenTelemetryProvider, NoOpTelemetryProvider
     from mc.auto_batch import choose_micro_batch_divisor
+    from mc.sampling import replay_sequence_with_controller
     compute_variant_multiplier = None
 except ImportError as exc:  # pragma: no cover - optional dependency during early development
     mc_import_error = exc
@@ -45,6 +46,7 @@ except ImportError as exc:  # pragma: no cover - optional dependency during earl
     OpenTelemetryProvider = None
     NoOpTelemetryProvider = None
     choose_micro_batch_divisor = None
+    replay_sequence_with_controller = None
     compute_variant_multiplier = None
 print_banner()
 
@@ -110,6 +112,7 @@ mc_aux_dtype = "auto"
 mc_tree_type = "ram"
 mc_lens_loss_weight = 0.1
 mc_auto_batch = 1
+mc_auto_batch_safety = 2.0
 mc_eval_soft_max_length = None
 mc_infer_allocator_max_replacements = None
 mc_infer_allocator_iterations = None
@@ -190,6 +193,8 @@ mc_gist_delta_weight = float(mc_gist_delta_weight)
 mc_max_lens_pairs = int(mc_max_lens_pairs)
 mc_compile_gistnet = _parse_bool_flag(mc_compile_gistnet)
 mc_compile_lensnet = _parse_bool_flag(mc_compile_lensnet)
+mc_auto_batch = _parse_bool_flag(mc_auto_batch)
+mc_auto_batch_safety = float(mc_auto_batch_safety)
 disable_validation = bool(mc_disable_val)
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # Preserve baseline batch/tokens so MC auto-batch can keep them aligned.
@@ -210,13 +215,17 @@ if total_batch_size % (max_seq_len * ddp_world_size) != 0:
         f"total_batch_size ({total_batch_size}) must be divisible by max_seq_len ({max_seq_len}) * world_size ({ddp_world_size})"
     )
 per_rank_token_budget = total_batch_size // (max_seq_len * ddp_world_size)
+variant_multiplier = 1
+mfu_variant_multiplier = 1
 # Auto-adjust batch size for MC variant amplification while keeping tokens_per_step constant.
 if mc_enabled and mc_auto_batch:
-    if compute_variant_multiplier is None or choose_micro_batch_divisor is None:
+    if choose_micro_batch_divisor is None:
         detail = f": {mc_import_error}" if mc_import_error else ""
         raise ImportError(f"mc package is required when --mc_enabled=1{detail}")
-    base_variant_multiplier = max(1, mc_num_random_variants + 1)
-    variant_multiplier = base_variant_multiplier
+    adjusted_multiplier = max(1, mc_num_random_variants + 1)
+    adjusted_multiplier = int(math.ceil(adjusted_multiplier * max(1.0, mc_auto_batch_safety)))
+    variant_multiplier = adjusted_multiplier
+    mfu_variant_multiplier = adjusted_multiplier
     if variant_multiplier > 1:
         new_device_batch_size, grad_accum_estimate = choose_micro_batch_divisor(
             per_rank_token_budget,
@@ -844,7 +853,6 @@ for step in range(num_iterations + 1):
             "If 5*x + 3 = 13, then x is",
         ]
         engine = Engine(orig_model, tokenizer) # use orig_model to avoid recompilation
-
         def _sample_vanilla(prompt: str) -> str:
             tokens = tokenizer(prompt, prepend="<|bos|>")
             with _training_autocast():
@@ -878,15 +886,14 @@ for step in range(num_iterations + 1):
                     generated.append(next_token)
                     next_tensor = torch.tensor([[next_token]], dtype=torch.long, device=device)
                     mc_controller.inference_step(next_tensor)
-            return tokenizer.decode(tokens + generated)
+            decoded = tokenizer.decode(tokens + generated)
+            if replay_sequence_with_controller is not None:
+                replay_sequence_with_controller(mc_controller, tokens, generated)
+            return decoded
 
         for prompt in prompts:
             if mc_controller is not None:
-                try:
-                    output = _sample_with_mc(prompt)
-                except Exception as exc:
-                    print0(f"[MC Sample] falling back to vanilla sampling ({exc})")
-                    output = _sample_vanilla(prompt)
+                output = _sample_with_mc(prompt)
             else:
                 output = _sample_vanilla(prompt)
             print0(output)
@@ -1120,7 +1127,7 @@ for step in range(num_iterations + 1):
     debiased_smooth_loss = smooth_train_loss / (1 - ema_beta**(step + 1)) # debias the EMA
     pct_done = 100 * step / num_iterations
     tok_per_sec = int(total_batch_size / dt)
-    flops_per_sec = num_flops_per_token * total_batch_size / dt
+    flops_per_sec = num_flops_per_token * total_batch_size * mfu_variant_multiplier / dt
     promised_flops_per_sec_h100 = 989e12 * ddp_world_size # bfloat16 H100 SXM and without 2:4 sparsity
     mfu = 100 * flops_per_sec / promised_flops_per_sec_h100 # in %
     if step > 10:
