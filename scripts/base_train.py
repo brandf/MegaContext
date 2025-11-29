@@ -16,6 +16,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import time
 import math
 from contextlib import nullcontext
+from typing import Dict
 
 import wandb
 import torch
@@ -30,18 +31,21 @@ from nanochat.loss_eval import evaluate_bpb
 from nanochat.engine import Engine
 from scripts.base_eval import evaluate_model
 
+mc_import_error = None
 try:
     from mc.config import MCConfig
     from mc.runtime import MCController, WorkingContextVariant
     from mc.telemetry import OpenTelemetryProvider, NoOpTelemetryProvider
-    from mc.auto_batch import compute_variant_multiplier, choose_micro_batch_divisor
-except ImportError:  # pragma: no cover - optional dependency during early development
+    from mc.auto_batch import choose_micro_batch_divisor
+    compute_variant_multiplier = None
+except ImportError as exc:  # pragma: no cover - optional dependency during early development
+    mc_import_error = exc
     MCController = None
     MCConfig = None
     OpenTelemetryProvider = None
     NoOpTelemetryProvider = None
-    compute_variant_multiplier = None
     choose_micro_batch_divisor = None
+    compute_variant_multiplier = None
 print_banner()
 
 if NoOpTelemetryProvider is None:
@@ -80,7 +84,7 @@ eval_every = 250 # every how many steps to evaluate the model for val bpb (overr
 eval_tokens = 20*524288 # number of tokens to evaluate val loss on
 core_metric_every = 2000 # every how many steps to evaluate the core metric (-1 = disable)
 core_metric_max_per_task = 500 # examples per task in estimating the core metric
-sample_every = 2000 # every how many steps to sample from the model
+sample_every = 100 # every how many steps to sample from the model
 # Output
 model_tag = "" # optionally override the model tag for the output checkpoint directory name
 # MegaContext (phase 1 integration)
@@ -209,8 +213,10 @@ per_rank_token_budget = total_batch_size // (max_seq_len * ddp_world_size)
 # Auto-adjust batch size for MC variant amplification while keeping tokens_per_step constant.
 if mc_enabled and mc_auto_batch:
     if compute_variant_multiplier is None or choose_micro_batch_divisor is None:
-        raise ImportError("mc package is required when --mc_enabled=1")
-    variant_multiplier = compute_variant_multiplier(max_seq_len, mc_num_random_variants, mc_train_wc_length)
+        detail = f": {mc_import_error}" if mc_import_error else ""
+        raise ImportError(f"mc package is required when --mc_enabled=1{detail}")
+    base_variant_multiplier = max(1, mc_num_random_variants + 1)
+    variant_multiplier = base_variant_multiplier
     if variant_multiplier > 1:
         new_device_batch_size, grad_accum_estimate = choose_micro_batch_divisor(
             per_rank_token_budget,
@@ -280,7 +286,8 @@ model.to_empty(device=device)
 model.init_weights()
 if mc_enabled:
     if MCController is None or MCConfig is None:
-        raise ImportError("mc package is required when --mc_enabled=1")
+        detail = f": {mc_import_error}" if mc_import_error else ""
+        raise ImportError(f"mc package is required when --mc_enabled=1{detail}")
     if OpenTelemetryProvider is None:
         raise ImportError("opentelemetry dependencies are required when --mc_enabled=1")
     mc_config = MCConfig(
@@ -669,6 +676,55 @@ def evaluate_bpb_with_mc(model, controller, batches, steps, token_bytes, device,
         return float("inf")
     return total_nats / (math.log(2) * total_bytes)
 
+
+@torch.no_grad()
+def run_mc_runtime_stream(controller, max_seq_len, device, batches, log_timers=False):
+    """
+    Drive the MC inference controller through a streaming validation session so we
+    can observe long-context behavior without altering the primary val/bpb metric.
+    """
+    if batches <= 0:
+        return {}
+    runtime_loader = tokenizing_distributed_data_loader(
+        1,
+        max_seq_len,
+        split="val",
+        device=device,
+    )
+    batch_iter = iter(runtime_loader)
+    tokens_streamed = 0
+    started = False
+    last_timings: Dict[str, float] = {}
+    for batch_idx in range(batches):
+        try:
+            x, _ = next(batch_iter)
+        except StopIteration:
+            break
+        x = x.to(device)
+        tokens_streamed += x.shape[1]
+        if not started:
+            controller.begin_inference_session(x, rebuild=True)
+            started = True
+        else:
+            controller.inference_step(x)
+        timings = getattr(controller, "last_timings", {}) or {}
+        if log_timers and timings:
+            last_timings = timings
+    report = controller.get_inference_report() or {}
+    metrics = {
+        "mc/runtime_tokens": tokens_streamed,
+        "mc/runtime_original_tokens": report.get("original_length"),
+        "mc/runtime_wc_tokens": report.get("coverage_tokens"),
+        "mc/runtime_refocus_updates": report.get("refocus_updates"),
+        "mc/runtime_prefill_replacements": report.get("prefill_replacements"),
+        "mc/runtime_refocus_replacements": report.get("refocus_replacements"),
+    }
+    if last_timings:
+        metrics["mc/runtime_total_ms"] = last_timings.get("total_ms")
+    controller.inference_state = None
+    controller.last_inference_report = None
+    return metrics
+
 # -----------------------------------------------------------------------------
 # Training loop
 min_val_bpb = float("inf")
@@ -685,7 +741,7 @@ next_sample_tokens = sample_interval_tokens if sample_interval_tokens is not Non
 checkpoint_interval_steps = 1000
 checkpoint_interval_tokens = checkpoint_interval_steps * tokens_per_step
 next_checkpoint_tokens = checkpoint_interval_tokens
-log_interval_steps = 100
+log_interval_steps = 10
 log_interval_tokens = log_interval_steps * tokens_per_step
 next_log_tokens = 0
 # note that we run +1 steps only so that we can eval and save at the end
@@ -713,22 +769,8 @@ for step in range(num_iterations + 1):
         model.eval()
         val_loader = build_val_loader()
         eval_steps = eval_tokens // (eval_device_batch_size * max_seq_len * ddp_world_size)
-        if mc_controller is not None:
-            print0("[MC Eval] starting validation batch assembly")
-            val_bpb = evaluate_bpb_with_mc(
-                eval_model,
-                mc_controller,
-                val_loader,
-                eval_steps,
-                token_bytes,
-                device,
-                report_enabled=mc_val_report,
-                log_timers=mc_log_timers,
-            )
-            print0("[MC Eval] finished validation")
-        else:
-            with _training_autocast():
-                val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
+        with _training_autocast():
+            val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
         print0(f"Step {step:05d} | Validation bpb: {val_bpb:.4f}")
         if val_bpb < min_val_bpb:
             min_val_bpb = val_bpb
@@ -739,6 +781,22 @@ for step in range(num_iterations + 1):
             "val/bpb": val_bpb,
         })
         model.train()
+        if mc_controller is not None and master_process:
+            runtime_batches = max(1, eval_steps // 4) if eval_steps > 0 else 1
+            runtime_metrics = run_mc_runtime_stream(
+                mc_controller,
+                max_seq_len,
+                device,
+                runtime_batches,
+                log_timers=mc_log_timers,
+            )
+            if runtime_metrics:
+                runtime_metrics.update({
+                    "step": step,
+                    "total_training_flops": flops_so_far,
+                    "total_training_time": total_training_time,
+                })
+                wandb_run.log(runtime_metrics)
         if eval_interval_tokens is not None and next_eval_tokens is not None and not last_step:
             next_eval_tokens += eval_interval_tokens
 
@@ -786,11 +844,52 @@ for step in range(num_iterations + 1):
             "If 5*x + 3 = 13, then x is",
         ]
         engine = Engine(orig_model, tokenizer) # use orig_model to avoid recompilation
-        for prompt in prompts:
+
+        def _sample_vanilla(prompt: str) -> str:
             tokens = tokenizer(prompt, prepend="<|bos|>")
             with _training_autocast():
                 sample, _ = engine.generate_batch(tokens, num_samples=1, max_tokens=16, temperature=0)
-                print0(tokenizer.decode(sample[0]))
+            return tokenizer.decode(sample[0])
+
+        def _sample_with_mc(prompt: str) -> str:
+            if mc_controller is None:
+                return _sample_vanilla(prompt)
+            tokens = tokenizer(prompt, prepend="<|bos|>")
+            input_tensor = torch.tensor(tokens, dtype=torch.long, device=device).unsqueeze(0)
+            mc_controller.begin_inference_session(input_tensor, rebuild=True)
+            generated: list[int] = []
+            with _training_autocast():
+                for _ in range(16):
+                    wc = mc_controller.get_inference_working_context()
+                    if wc is None:
+                        break
+                    wc_tensor = wc.to_tensor()
+                    cos_sin = mc_controller._build_wc_positional(wc)
+                    alibi_override = cos_sin[2]
+                    cos_sin_override = cos_sin[:2]
+                    logits = orig_model(
+                        None,
+                        cos_sin_override=cos_sin_override,
+                        alibi_override=alibi_override,
+                        inputs_embeds=wc_tensor,
+                    )
+                    logits = logits[:, -1, :]
+                    next_token = int(torch.argmax(logits, dim=-1).item())
+                    generated.append(next_token)
+                    next_tensor = torch.tensor([[next_token]], dtype=torch.long, device=device)
+                    mc_controller.inference_step(next_tensor)
+            return tokenizer.decode(tokens + generated)
+
+        for prompt in prompts:
+            if mc_controller is not None:
+                try:
+                    output = _sample_with_mc(prompt)
+                except Exception as exc:
+                    print0(f"[MC Sample] falling back to vanilla sampling ({exc})")
+                    output = _sample_vanilla(prompt)
+            else:
+                output = _sample_vanilla(prompt)
+            print0(output)
         model.train()
         if sample_interval_tokens is not None and next_sample_tokens is not None and not last_step:
             next_sample_tokens += sample_interval_tokens

@@ -25,10 +25,11 @@ fi
 
 WANDB_RUN=${WANDB_RUN:-"dummy"}
 MODEL_TAG=${MODEL_TAG:-""}
+export PYTHONPATH="$(pwd):${PYTHONPATH:-}"
 
 usage() {
     cat <<'EOF'
-Usage: bash run10.sh [--gpu 5090|h100] [--mc] [--profile baseline|mc]
+Usage: bash run10.sh [--gpu 5090|h100] [--mc]
 
 Defaults to --gpu h100. Both profiles run on a single GPU but dial batch size
 and iteration count to match the available VRAM / throughput.
@@ -36,7 +37,6 @@ EOF
 }
 
 GPU_PROFILE="h100"
-PROFILE=""
 MC_ENABLED=0
 BLOCK_SIZE=32
 DEVICE_BATCH_SIZE=""
@@ -91,23 +91,6 @@ while [[ $# -gt 0 ]]; do
             shift
             [[ $# -gt 0 ]] || { echo "Missing value for --gpu" >&2; exit 1; }
             GPU_PROFILE="$1"
-            ;;
-        --profile)
-            shift
-            [[ $# -gt 0 ]] || { echo "Missing value for --profile" >&2; exit 1; }
-            PROFILE="$1"
-            case "$PROFILE" in
-                baseline)
-                    MC_ENABLED=0
-                    ;;
-                mc)
-                    MC_ENABLED=1
-                    ;;
-                *)
-                    echo "Unsupported profile: $PROFILE (expected baseline or mc)" >&2
-                    exit 1
-                    ;;
-            esac
             ;;
         --mc)
             MC_ENABLED=1
@@ -358,21 +341,13 @@ done
 DEPTH=12
 MAX_SEQ_LEN=2048
 
-if [ -z "$PROFILE" ]; then
-    if [ "$MC_ENABLED" -eq 1 ]; then
-        PROFILE="mc"
-    else
-        PROFILE="baseline"
-    fi
-fi
-
 if [ -z "$DEVICE_BATCH_SIZE" ]; then
     case "$GPU_PROFILE" in
         5090)
             DEVICE_BATCH_SIZE=20
             ;;
         h100)
-            DEVICE_BATCH_SIZE=88
+            DEVICE_BATCH_SIZE=65
             ;;
         *)
             echo "Unsupported GPU profile: $GPU_PROFILE (expected 5090 or h100)" >&2
@@ -395,7 +370,6 @@ NUM_ITERATIONS=$(( (TRAIN_TOKENS_TARGET + TOTAL_BATCH_SIZE - 1) / TOTAL_BATCH_SI
 ACTUAL_TRAIN_TOKENS=$((NUM_ITERATIONS * TOTAL_BATCH_SIZE))
 
 echo "Run10 profile: $GPU_PROFILE"
-echo "Mode: $PROFILE"
 echo "Depth: $DEPTH  |  Seq len: $MAX_SEQ_LEN"
 echo "Device batch: $DEVICE_BATCH_SIZE  |  Total batch: $TOTAL_BATCH_SIZE tokens"
 echo "Iterations: $NUM_ITERATIONS (target tokens: $TRAIN_TOKENS_TARGET actual: $ACTUAL_TRAIN_TOKENS)"
@@ -412,6 +386,8 @@ command -v uv &> /dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 [ -d ".venv" ] || uv venv
 uv sync --extra gpu
 source .venv/bin/activate
+# Ensure local packages (including mc) are importable
+uv pip install -e .
 
 python -m nanochat.report reset
 
