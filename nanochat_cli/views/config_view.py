@@ -4,10 +4,12 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import Label, Input, Select, Static, TabbedContent, TabPane
 
 from ..config import ConfigBundle, ConfigManager, categorize_field, flatten_config
+from ..plugin import PluginRegistry
 
 
 class ConfigSelected(Message):
@@ -34,11 +36,20 @@ class FieldWidget:
 class ConfigView(Vertical):
     """Categorized config editor with inline dirty tracking."""
 
+    can_focus = True
+
+    BINDINGS = [
+        Binding("ctrl+s", "save_config", "Save config"),
+        Binding("ctrl+shift+s", "save_as_config", "Save config as"),
+        Binding("ctrl+l", "reload_config", "Reload config"),
+    ]
+
     DEFAULT_CATEGORIES = ["setup", "core", "megacontext", "data", "telemetry", "auth", "visualization", "other"]
 
-    def __init__(self, manager: ConfigManager, *children, **kwargs) -> None:
+    def __init__(self, manager: ConfigManager, plugin_registry: Optional[PluginRegistry] = None, *children, **kwargs) -> None:
         super().__init__(*children, **kwargs)
         self.manager = manager
+        self.plugin_registry = plugin_registry
         self.current: Optional[ConfigBundle] = None
         self.base_data: Dict[str, object] = {}
         self.fields: Dict[str, FieldWidget] = {}
@@ -53,9 +64,7 @@ class ConfigView(Vertical):
         selector.styles.width = 32
         save_as = Input(placeholder="Save as", id="config-save-as")
         save_as.styles.width = 28
-        shortcuts = Static("Bindings: Ctrl+S Save • Ctrl+Shift+S Save As • Ctrl+L Reload", id="config-hints")
-        shortcuts.styles.padding_left = 1
-        header = Horizontal(selector, save_as, shortcuts, id="config-top")
+        header = Horizontal(selector, save_as, id="config-top")
         header.styles.gap = 2
         yield header
 
@@ -177,6 +186,8 @@ class ConfigView(Vertical):
             self.base_data = flatten_config(self.current.data)
             self._update_dirty_labels()
         self.allow_discard = False
+    def action_save_config(self) -> None:
+        self.save_current()
 
     def save_as_current(self, name: Optional[str] = None) -> None:
         self._apply_inputs()
@@ -187,6 +198,8 @@ class ConfigView(Vertical):
             self.base_data = flatten_config(self.current.data)
             self._update_dirty_labels()
         self.allow_discard = False
+    def action_save_as_config(self) -> None:
+        self.save_as_current()
 
     def reload_current(self) -> None:
         if self.is_dirty and not self.allow_discard:
@@ -197,3 +210,5 @@ class ConfigView(Vertical):
         if self.current:
             bundle = self.manager.load(self.current.name)
             self._load_bundle(bundle)
+    def action_reload_config(self) -> None:
+        self.reload_current()

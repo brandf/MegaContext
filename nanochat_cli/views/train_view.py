@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Dict, Optional
 
 from textual.containers import Horizontal, Vertical
+from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import Button, Input, Log, Static
 
 from ..orchestrator import RunOrchestrator
+from ..plugin import PluginRegistry
 from ..config import ConfigBundle
+from .config_view import ConfigSelected, ConfigChanged
+from .dataset_view import DatasetStatus
+from .setup_view import SetupPathsUpdated
+from ..messages import TabSwitchRequest
 
 
 class TrainStarted(Message):
@@ -25,9 +32,16 @@ class TrainDatasetMissing(Message):
 class TrainView(Vertical):
     """Train orchestration view."""
 
-    def __init__(self, orchestrator: RunOrchestrator, *children, **kwargs) -> None:
+    can_focus = True
+
+    BINDINGS = [
+        Binding("ctrl+t", "start_train", "Start train"),
+    ]
+
+    def __init__(self, plugin_registry: PluginRegistry, *children, **kwargs) -> None:
         super().__init__(*children, **kwargs)
-        self.orchestrator = orchestrator
+        self.plugin_registry = plugin_registry
+        self.orchestrator: Optional[RunOrchestrator] = None
         self.log_widget = Log(id="train-log")
         self.run_name_input = Input(id="train-run-name", placeholder="Run name")
         self.active_task: Optional[asyncio.Task] = None
@@ -43,6 +57,7 @@ class TrainView(Vertical):
 
     def set_config(self, bundle: ConfigBundle) -> None:
         self.config = bundle
+        self.orchestrator = RunOrchestrator(self.plugin_registry.resolve(bundle.data))
 
     def set_base_dir(self, base_dir: Path) -> None:
         self.base_dir = base_dir
@@ -54,13 +69,20 @@ class TrainView(Vertical):
         if event.button.id == "train-start":
             await self._start()
 
+    async def action_start_train(self) -> None:
+        await self._start()
+
     async def _start(self) -> None:
         if not self.config:
             self.log_widget.write("No config loaded")
             return
+        if self.orchestrator is None:
+            self.log_widget.write("No orchestrator available; ensure config is selected.")
+            return
         if not self.dataset_ready:
             self.log_widget.write("Dataset missing. Go to Dataset tab to prepare it.")
             self.post_message(TrainDatasetMissing())
+            self.post_message(TabSwitchRequest("tab-dataset"))
             return
         if self.active_task and not self.active_task.done():
             self.log_widget.write("Training already running")
@@ -82,3 +104,19 @@ class TrainView(Vertical):
 
         self.active_task = asyncio.create_task(_run())
         self.post_message(TrainStarted())
+
+    # Cross-view messages
+    def handle_app_message(self, message: Message):
+        if isinstance(message, (ConfigSelected, ConfigChanged)):
+            self.set_config(message.bundle)
+            base = Path(
+                message.bundle.data.get("nanochat_base_dir")
+                or os.environ.get("NANOCHAT_BASE_DIR")
+                or Path.home() / ".cache" / "nanochat"
+            ).expanduser()
+            self.set_base_dir(base)
+        elif isinstance(message, DatasetStatus):
+            self.set_dataset_ready(message.ready)
+        elif isinstance(message, SetupPathsUpdated):
+            self.set_base_dir(message.base_dir)
+            # dataset readiness will be recomputed when dataset tab checks

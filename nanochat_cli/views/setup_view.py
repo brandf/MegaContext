@@ -9,6 +9,7 @@ from typing import Optional
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Button, Input, Label, Static
+from textual.binding import Binding
 
 
 class SetupCompleted(Message):
@@ -25,6 +26,13 @@ class SetupPathsUpdated(Message):
 
 class SetupView(Vertical):
     """Self-managed environment setup (uv/torch/auth)."""
+
+    can_focus = True
+
+    BINDINGS = [
+        Binding("ctrl+b", "check_setup", "Check setup"),
+        Binding("ctrl+u", "run_setup", "Run setup"),
+    ]
 
     def __init__(self, *children, **kwargs) -> None:
         super().__init__(*children, **kwargs)
@@ -63,6 +71,12 @@ class SetupView(Vertical):
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "setup-run":
             await self._run_setup()
+
+    def action_check_setup(self) -> None:
+        self.check_status()
+
+    async def action_run_setup(self) -> None:
+        await self._run_setup()
 
     async def _run_setup(self) -> None:
         cmds = []

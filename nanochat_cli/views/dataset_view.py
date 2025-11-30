@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import os
 from typing import Dict, Optional
 
 from textual.containers import Horizontal, Vertical
+from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import Button, Label, Static
 
 from ..orchestrator import RunOrchestrator
+from ..plugin import PluginRegistry
+from .config_view import ConfigSelected, ConfigChanged
+from .setup_view import SetupPathsUpdated
+from ..messages import TabSwitchRequest
 
 
 class DatasetStatus(Message):
@@ -27,9 +33,17 @@ class DatasetDependencyMissing(Message):
 class DatasetView(Vertical):
     """Detect/download/prep dataset."""
 
-    def __init__(self, orchestrator: RunOrchestrator, *children, **kwargs) -> None:
+    can_focus = True
+
+    BINDINGS = [
+        Binding("ctrl+d", "run_dataset", "Run dataset prep"),
+    ]
+
+    def __init__(self, plugin_registry: PluginRegistry, checkpoint_registry=None, *children, **kwargs) -> None:
         super().__init__(*children, **kwargs)
-        self.orchestrator = orchestrator
+        self.plugin_registry = plugin_registry
+        self.orchestrator: Optional[RunOrchestrator] = None
+        self.config_data: Dict[str, object] = {}
         self.status = Static("")
         self.log_widget = Static("", id="dataset-log")
         self.base_dir = Path.home() / ".cache" / "nanochat"
@@ -68,12 +82,19 @@ class DatasetView(Vertical):
         if event.button.id == "dataset-run":
             await self._run_dataset()
 
+    async def action_run_dataset(self) -> None:
+        await self._run_dataset()
+
     async def _run_dataset(self) -> None:
+        # Lazily create orchestrator with current config context
+        if self.orchestrator is None:
+            self.orchestrator = RunOrchestrator(self.plugin_registry.resolve(self.config_data))
         # Ensure pyarrow is present for dataset prep
         try:
             import pyarrow  # noqa: F401
         except ImportError:
             self.post_message(DatasetDependencyMissing("pyarrow"))
+            self.post_message(TabSwitchRequest("tab-setup"))
             return
         cmd = ["python", "-m", "nanochat.dataset"]
         self.log_widget.update((self.log_widget.renderable or "") + "\n" + " ".join(cmd))
@@ -87,7 +108,18 @@ class DatasetView(Vertical):
                 break
         self.check_status()
 
-    def _python(self) -> str:
-        import sys
-
-        return sys.executable
+    # Cross-view messages
+    def handle_app_message(self, message: Message):
+        if isinstance(message, (ConfigSelected, ConfigChanged)):
+            self.config_data = message.bundle.data
+            base = Path(
+                message.bundle.data.get("nanochat_base_dir")
+                or os.environ.get("NANOCHAT_BASE_DIR")
+                or Path.home() / ".cache" / "nanochat"
+            ).expanduser()
+            self.update_base_dir(base)
+            # reset orchestrator so next run recreates with updated config/plugins
+            self.orchestrator = RunOrchestrator(self.plugin_registry.resolve(self.config_data))
+        elif isinstance(message, SetupPathsUpdated):
+            self.update_base_dir(message.base_dir)
+            self.update_dataset_dir(message.dataset_dir)
