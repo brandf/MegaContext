@@ -5,9 +5,12 @@ import asyncio
 from pathlib import Path
 from typing import Optional, Iterable, Callable, Awaitable
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, Header, TabPane, TabbedContent
+from textual.widgets import Footer, TabPane, TabbedContent, Button, Label
+from textual.containers import Horizontal, Container
+from datetime import datetime
 
 from .config import ConfigBundle, ConfigManager
 from .plugin import PluginRegistry
@@ -19,12 +22,53 @@ from .views.eval_view import EvalView
 from .views.setup_view import SetupView
 from .views.train_view import TrainView
 from .messages import TabSwitchRequest
+from .quit_screen import QuitConfirmScreen
+
+
+class TopBar(Container):
+    """Custom top bar with quit button, title, and clock."""
+
+    def __init__(self) -> None:
+        super().__init__(id="app-header")
+        self.title_label = Label("", id="title-label")
+        self.clock_label = Label("", id="clock-label")
+        self.quit_btn = Button("◎", id="quit-btn", tooltip="Quit nanochat-cli")
+        self.spacer_left = Label("", classes="header-spacer")
+        self.spacer_right = Label("", classes="header-spacer")
+
+    def compose(self) -> ComposeResult:
+        yield Container(
+            self.quit_btn,
+            self.spacer_left,
+            self.title_label,
+            self.spacer_right,
+            self.clock_label,
+            id="app-header-row",
+        )
+
+    async def on_mount(self) -> None:
+        self.title_label.update(self.app.title or "nanochat-cli")
+        self.set_interval(1.0, self._tick_clock)
+
+    def _tick_clock(self) -> None:
+        self.clock_label.update(datetime.now().strftime("%H:%M:%S"))
+
+    def update_title(self, title: str) -> None:
+        self.title_label.update(title)
+
+    async def on_mouse_enter(self, event: events.MouseEnter) -> None:
+        if event.sender is self.quit_btn:
+            self.quit_btn.label = "ⓧ"
+
+    async def on_mouse_leave(self, event: events.MouseLeave) -> None:
+        if event.sender is self.quit_btn:
+            self.quit_btn.label = "◎"
 
 
 class NanochatApp(App):
     """Textual TUI for nanochat workflows."""
 
-    CSS = ""
+    CSS_PATH = "styles/app.tcss"
 
     def __init__(self, config_manager: Optional[ConfigManager] = None) -> None:
         super().__init__()
@@ -50,7 +94,9 @@ class NanochatApp(App):
         }
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        # Custom header with a quit affordance
+        self.top_bar = TopBar()
+        yield self.top_bar
         with TabbedContent():
             yield TabPane("Setup", self.setup_view, id="tab-setup")
             yield TabPane("Config", self.config_view, id="tab-config")
@@ -69,6 +115,8 @@ class NanochatApp(App):
         self.dataset_view.check_status()
         self.checkpoints_view.update_records(self.current_config.data if self.current_config else {})
         self.set_focus(self.setup_view)
+        # ensure title label reflects current title
+        self.top_bar.update_title(self.title)
 
     async def on_message(self, message) -> None:
         await super().on_message(message)
@@ -87,6 +135,7 @@ class NanochatApp(App):
         elif isinstance(message, ConfigChanged):
             self.current_config = message.bundle
             self.title = f"nanochat-cli — {message.bundle.name}"
+            self.top_bar.update_title(self.title)
         elif isinstance(message, TabSwitchRequest):
             try:
                 self.query_one(TabbedContent).active = message.tab_id
@@ -107,6 +156,14 @@ class NanochatApp(App):
         target = self._tab_map.get(target_id)
         if target:
             self.set_focus(target)
+
+    async def on_button_pressed(self, event) -> None:
+        if getattr(event.button, "id", "") == "quit-btn":
+            await self.push_screen(QuitConfirmScreen(), callback=self._handle_quit_result)
+
+    async def _handle_quit_result(self, result: bool | None) -> None:
+        if result:
+            await self.action_quit()
 
     # Helpers
     def _set_config(self, bundle: ConfigBundle) -> None:

@@ -19,6 +19,7 @@ class EvalView(Vertical):
     """Simple continuation eval."""
 
     can_focus = True
+    CSS_PATH = "styles/eval.tcss"
 
     BINDINGS = [
         Binding("ctrl+e", "run_eval", "Run eval"),

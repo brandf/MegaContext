@@ -37,6 +37,7 @@ class ConfigView(Vertical):
     """Categorized config editor with inline dirty tracking."""
 
     can_focus = True
+    CSS_PATH = "styles/config.tcss"
 
     BINDINGS = [
         Binding("ctrl+s", "save_config", "Save config"),
@@ -44,7 +45,7 @@ class ConfigView(Vertical):
         Binding("ctrl+l", "reload_config", "Reload config"),
     ]
 
-    DEFAULT_CATEGORIES = ["setup", "core", "megacontext", "data", "telemetry", "auth", "visualization", "other"]
+    DEFAULT_CATEGORIES = ["core", "megacontext", "data", "telemetry", "auth", "visualization", "other"]
 
     def __init__(self, manager: ConfigManager, plugin_registry: Optional[PluginRegistry] = None, *children, **kwargs) -> None:
         super().__init__(*children, **kwargs)

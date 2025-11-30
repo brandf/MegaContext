@@ -1,0 +1,10 @@
+# Dataset view styling
+
+#dataset-actions {
+    padding-bottom: 1;
+}
+
+#dataset-log {
+    height: 20;
+    overflow: auto;
+}

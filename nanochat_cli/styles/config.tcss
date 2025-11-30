@@ -1,0 +1,23 @@
+# Config view styling
+
+#config-top {
+    padding: 0 1 1 1;
+    width: 100%;
+}
+
+#config-scroll {
+    height: 1fr;
+}
+
+.config-row {
+}
+
+#config-top Select,
+#config-top Input {
+    height: 3;
+    width: 32;
+}
+
+#config-status {
+    padding-top: 1;
+}

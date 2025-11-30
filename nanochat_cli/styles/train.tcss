@@ -1,0 +1,11 @@
+# Train view styling
+
+#train-actions {
+    column-gap: 1;
+    padding-bottom: 1;
+}
+
+#train-log {
+    height: 20;
+    overflow: auto;
+}

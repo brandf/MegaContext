@@ -1,0 +1,10 @@
+# Eval view styling
+
+#eval-prompt {
+    height: 8;
+}
+
+#eval-output {
+    height: 20;
+    overflow: auto;
+}

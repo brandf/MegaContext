@@ -24,6 +24,7 @@ class CheckpointsView(Vertical):
     """Checkpoint listing with compatibility info."""
 
     can_focus = True
+    CSS_PATH = "styles/checkpoints.tcss"
 
     BINDINGS = [
         Binding("ctrl+r", "refresh_checkpoints", "Refresh checkpoints"),

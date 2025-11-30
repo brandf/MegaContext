@@ -1,0 +1,9 @@
+# Setup view styling (keep minimal; view owns its layout)
+
+#setup-actions {
+}
+
+#setup-log {
+    height: 20;
+    overflow: auto;
+}

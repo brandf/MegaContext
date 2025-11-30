@@ -34,6 +34,7 @@ class DatasetView(Vertical):
     """Detect/download/prep dataset."""
 
     can_focus = True
+    CSS_PATH = "styles/dataset.tcss"
 
     BINDINGS = [
         Binding("ctrl+d", "run_dataset", "Run dataset prep"),

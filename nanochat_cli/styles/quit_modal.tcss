@@ -1,0 +1,21 @@
+# Quit confirmation modal styling
+
+#quit-modal {
+    padding: 2;
+    background: $surface;
+    border: solid $accent;
+    width: 40;
+    align: center middle;
+}
+
+#quit-actions {
+    width: 100%;
+    align: center middle;
+    padding-top: 1;
+    content-align: center middle;
+}
+
+#quit-label {
+    padding-bottom: 1;
+    text-align: center;
+}

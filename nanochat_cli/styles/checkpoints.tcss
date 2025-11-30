@@ -1,0 +1,13 @@
+# Checkpoints view styling
+
+#checkpoint-table {
+    height: 1fr;
+}
+
+#checkpoint-table .datatable--header {
+    text-style: bold;
+}
+
+#checkpoint-table .datatable--even-row {
+    background: $boost;
+}

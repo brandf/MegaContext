@@ -28,6 +28,7 @@ class SetupView(Vertical):
     """Self-managed environment setup (uv/torch/auth)."""
 
     can_focus = True
+    CSS_PATH = "styles/setup.tcss"
 
     BINDINGS = [
         Binding("ctrl+b", "check_setup", "Check setup"),

@@ -1,0 +1,53 @@
+# Root app chrome
+# Header with quit button and clock
+# Footer remains Textual default; no per-view styling here
+
+# Header bar
+#app-header {
+    height: 3;
+    background: $surface;
+}
+
+#app-header-row {
+    height: 3;
+    width: 100%;
+    padding: 0 1;
+    layout: horizontal;
+    content-align: center middle;
+    background: $surface;
+}
+
+#quit-btn {
+    width: 5;
+    min-width: 5;
+    content-align: center middle;
+    background: $surface;
+    color: $text;
+    border: none;
+    text-align: center;
+    padding: 0;
+}
+
+#quit-btn:hover {
+    background: $error;
+    color: $text;
+}
+
+#quit-btn:focus {
+    outline: none;
+}
+
+#title-label {
+    text-align: center;
+    width: 1fr;
+    content-align: center middle;
+}
+
+#clock-label {
+    text-align: right;
+    min-width: 10;
+}
+
+.header-spacer {
+    width: 1fr;
+}

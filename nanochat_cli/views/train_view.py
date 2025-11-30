@@ -33,6 +33,7 @@ class TrainView(Vertical):
     """Train orchestration view."""
 
     can_focus = True
+    CSS_PATH = "styles/train.tcss"
 
     BINDINGS = [
         Binding("ctrl+t", "start_train", "Start train"),
