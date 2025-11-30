@@ -36,18 +36,16 @@ try:
     from mc.config import MCConfig
     from mc.runtime import MCController, WorkingContextVariant
     from mc.telemetry import OpenTelemetryProvider, NoOpTelemetryProvider
-    from mc.auto_batch import choose_micro_batch_divisor
+    from mc.auto_batch import estimate_mc_device_batch
     from mc.sampling import replay_sequence_with_controller
-    compute_variant_multiplier = None
 except ImportError as exc:  # pragma: no cover - optional dependency during early development
     mc_import_error = exc
     MCController = None
     MCConfig = None
     OpenTelemetryProvider = None
     NoOpTelemetryProvider = None
-    choose_micro_batch_divisor = None
     replay_sequence_with_controller = None
-    compute_variant_multiplier = None
+    estimate_mc_device_batch = None
 print_banner()
 
 if NoOpTelemetryProvider is None:
@@ -112,7 +110,7 @@ mc_aux_dtype = "auto"
 mc_tree_type = "ram"
 mc_lens_loss_weight = 0.1
 mc_auto_batch = 1
-mc_auto_batch_safety = 2.0
+mc_auto_batch_safety = 1.25
 mc_eval_soft_max_length = None
 mc_infer_allocator_max_replacements = None
 mc_infer_allocator_iterations = None
@@ -201,6 +199,9 @@ user_config = {k: globals()[k] for k in config_keys} # will be useful for loggin
 original_device_batch_size = device_batch_size
 original_total_batch_size = total_batch_size
 original_num_iterations = num_iterations
+original_tokens_target = None
+if original_num_iterations > 0:
+    original_tokens_target = original_total_batch_size * original_num_iterations
 # -----------------------------------------------------------------------------
 
 # Compute init
@@ -217,32 +218,50 @@ if total_batch_size % (max_seq_len * ddp_world_size) != 0:
 per_rank_token_budget = total_batch_size // (max_seq_len * ddp_world_size)
 variant_multiplier = 1
 mfu_variant_multiplier = 1
-# Auto-adjust batch size for MC variant amplification while keeping tokens_per_step constant.
+# Auto-adjust batch size for MC based on explicit VRAM budget.
 if mc_enabled and mc_auto_batch:
-    if choose_micro_batch_divisor is None:
+    if estimate_mc_device_batch is None:
         detail = f": {mc_import_error}" if mc_import_error else ""
         raise ImportError(f"mc package is required when --mc_enabled=1{detail}")
-    adjusted_multiplier = max(1, mc_num_random_variants + 1)
-    adjusted_multiplier = int(math.ceil(adjusted_multiplier * max(1.0, mc_auto_batch_safety)))
-    variant_multiplier = adjusted_multiplier
-    mfu_variant_multiplier = adjusted_multiplier
-    if variant_multiplier > 1:
-        new_device_batch_size, grad_accum_estimate = choose_micro_batch_divisor(
-            per_rank_token_budget,
-            variant_multiplier,
-        )
-        if new_device_batch_size != device_batch_size:
-            prev_grad_accum = per_rank_token_budget // max(1, device_batch_size)
-            print0(
-                "[MegaContext] auto batch adjust: "
-                f"device_batch_size {device_batch_size} -> {new_device_batch_size}, "
-                f"grad_accum_steps {prev_grad_accum} -> {grad_accum_estimate}, "
-                f"tokens_per_step={tokens_per_step} "
-                f"(variant multiplier target={variant_multiplier})"
-            )
-            device_batch_size = new_device_batch_size
-            eval_device_batch_size = original_device_batch_size
-            mc_grad_accum_override = grad_accum_estimate
+    if device_type == "cuda":
+        total_mem_bytes = torch.cuda.get_device_properties(device).total_memory
+    else:
+        total_mem_bytes = 16 * 1024**3  # rough fallback for CPU/MPS
+    # Apply safety by shrinking the target fraction.
+    vram_target_fraction = min(0.95, 0.9 / max(1.0, mc_auto_batch_safety))
+    target_device_batch, target_bytes, per_sample_bytes = estimate_mc_device_batch(
+        total_mem_bytes=total_mem_bytes,
+        baseline_device_batch=original_device_batch_size,
+        max_seq_len=max_seq_len,
+        mc_num_random_variants=mc_num_random_variants,
+        mc_random_variant_iterations=mc_random_variant_iterations,
+        mc_train_wc_length=mc_train_wc_length,
+        vram_target_fraction=vram_target_fraction,
+    )
+    target_device_batch = max(1, target_device_batch)
+    grad_accum_estimate = max(
+        1,
+        int(round(original_total_batch_size / (target_device_batch * max_seq_len * ddp_world_size))),
+    )
+    new_total_batch_size = target_device_batch * max_seq_len * ddp_world_size * grad_accum_estimate
+    if original_tokens_target is not None and new_total_batch_size > 0:
+        num_iterations = math.ceil(original_tokens_target / new_total_batch_size)
+    device_batch_size = target_device_batch
+    eval_device_batch_size = original_device_batch_size
+    mc_grad_accum_override = grad_accum_estimate
+    total_batch_size = new_total_batch_size
+    tokens_per_step = total_batch_size
+    per_rank_token_budget = total_batch_size // (max_seq_len * ddp_world_size)
+    variant_multiplier = (mc_num_random_variants + 1) * max(1, mc_random_variant_iterations + 1)
+    mfu_variant_multiplier = max(1.0, variant_multiplier)
+    print0(
+        "[MegaContext] auto batch adjust: "
+        f"device_batch_size {original_device_batch_size} -> {device_batch_size}, "
+        f"grad_accum_steps -> {mc_grad_accum_override}, "
+        f"total_batch_size {original_total_batch_size} -> {total_batch_size}, "
+        f"num_iterations {original_num_iterations} -> {num_iterations}, "
+        f"target_bytes={target_bytes/1e9:.2f}GB, per_sample_bytes≈{per_sample_bytes/1e9:.3f}GB"
+    )
 
 def _training_autocast():
     if device_type == "cuda":
